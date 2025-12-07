@@ -133,7 +133,7 @@ const App: React.FC = () => {
   
   const renderPerformanceGraph = () => (
       <div className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
-          <h3 className="text-gray-400 text-xs font-bold uppercase mb-4 ml-2">Training Performance (Reward per Episode)</h3>
+          <h3 className="text-gray-400 text-xs font-bold uppercase mb-4 ml-2">Training Performance</h3>
           <div className="flex-1 min-h-0">
             <ResponsiveContainer width="100%" height="100%">
             <LineChart data={metrics}>
@@ -290,12 +290,12 @@ const App: React.FC = () => {
             <Layers className="text-green-500" />
             {(MODULE_CONTENT as any)[activeModule]?.title}
           </h2>
-          {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP) && (
+          {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP || activeModule === ModuleId.EXPLORE_EXPLOIT) && (
             <div className="flex gap-6 text-sm">
                 <div className="flex flex-col items-end">
                     <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Avg Reward</span>
-                    <span className={`font-mono font-bold text-lg ${metrics.length > 0 && metrics[metrics.length-1].reward > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {metrics.length > 0 ? metrics[metrics.length-1].reward.toFixed(1) : "0.0"}
+                    <span className={`font-mono font-bold text-lg ${metrics.length > 0 && metrics[metrics.length-1].reward > 0.5 ? 'text-green-400' : 'text-gray-400'}`}>
+                        {metrics.length > 0 ? metrics[metrics.length-1].reward.toFixed(2) : "0.00"}
                     </span>
                 </div>
             </div>
@@ -315,12 +315,12 @@ const App: React.FC = () => {
                     {activeModule === ModuleId.MODEL_VS_FREE && <ModelVsFreeLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
                     {activeModule === ModuleId.DET_STOCHASTIC && <DetStochLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
                     {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-                    {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab />}
+                    {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
                     {activeModule === ModuleId.SINGLE_MULTI && <MultiAgentLab />}
                  </div>
 
                  {/* Middle Row: Graph and AI Tutor (Only for interactive modules) */}
-                 {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP) && (
+                 {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP || activeModule === ModuleId.EXPLORE_EXPLOIT) && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80 flex-shrink-0">
                         {renderPerformanceGraph()}
                         {renderAITutor()}

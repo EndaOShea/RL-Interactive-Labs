@@ -116,6 +116,32 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         recommendation: 'Use "Experience Replay" buffers to keep reminding the agent of past lessons during training.',
     }
   ],
+  [ModuleId.EXPLORE_EXPLOIT]: [
+      {
+          category: 'METHODOLOGY',
+          title: 'Regret Minimization',
+          description: 'The goal of bandits is to minimize "Regret"—the difference between the total reward you actually got and the reward you WOULD have gotten if you knew the best arm from the start.',
+          recommendation: 'UCB (Upper Confidence Bound) algorithms mathematically guarantee logarithmic regret bounds.',
+      },
+      {
+          category: 'VERIFICATION',
+          title: 'Confidence Intervals',
+          description: 'In UCB, the agent builds a "Confidence Interval" for each arm. You must verify that your assumptions about the reward distribution (e.g., is it Gaussian?) match reality.',
+          recommendation: 'Plot the estimated mean vs the true mean to ensure the algorithm converges.',
+      },
+      {
+          category: 'ETHICS',
+          title: 'Exploration Costs (Medical Trials)',
+          description: 'In clinical trials (a type of Bandit problem), "Exploring" means giving a patient a potentially inferior drug. Pure random exploration is unethical here.',
+          recommendation: 'Use Thompson Sampling or UCB, which rapidly stop exploring bad options, unlike Epsilon-Greedy which keeps trying them randomly.',
+      },
+      {
+          category: 'DEPLOYMENT',
+          title: 'Bandits vs A/B Testing',
+          description: 'A/B testing is pure exploration (50/50 split) followed by pure exploitation. Multi-Armed Bandits dynamically shift traffic to the winning variation during the test, saving money/conversions.',
+          recommendation: 'Replace static A/B tests with Contextual Bandits for website optimization.',
+      }
+  ],
   // Generic fallback for others
   generic: [
     {
@@ -214,17 +240,21 @@ export const MODULE_CONTENT = {
         ]
     },
     [ModuleId.EXPLORE_EXPLOIT]: {
-        title: "4. Exploration vs. Exploitation",
+        title: "4. Exploration vs. Exploitation (Multi-Armed Bandits)",
         sections: [
             {
-                heading: "Exploration",
-                body: "Choosing actions to gather new information about the environment. Essential to avoid local optima.",
-                details: [{ label: "Examples", text: "Curiosity-driven RL, RND" }]
+                heading: "The Dilemma",
+                body: "You have 5 slot machines. One pays out more than the others, but you don't know which one. Do you keep playing the machine that gave you a win (Exploit), or try a new one that might be even better (Explore)?",
+                details: [{ label: "Exploration", text: "Gathering info. Short-term sacrifice for long-term gain." }, { label: "Exploitation", text: "Using known info. Maximizing immediate reward." }]
             },
             {
-                heading: "Exploitation",
-                body: "Choosing actions that maximize known rewards.",
-                details: [{ label: "Examples", text: "Greedy policies" }]
+                heading: "Strategies",
+                body: "Different algorithms solve this balance in different ways.",
+                details: [
+                    { label: "Epsilon-Greedy", text: "Flip a coin. If heads, explore randomly. If tails, exploit best known. Simple but inefficient." },
+                    { label: "Optimistic Init", text: "Assume everything is amazing (High Q). You will be disappointed until you find the true best. Naturally explores." },
+                    { label: "UCB (Upper Confidence Bound)", text: "Be optimistic in the face of uncertainty. 'This arm has low average, but I haven't tried it much, so maybe it's great!'" }
+                ]
             }
         ]
     },

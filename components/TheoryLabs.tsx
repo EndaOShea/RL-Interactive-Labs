@@ -4,7 +4,7 @@ import {
   Map, Navigation, Target, Activity, Zap, 
   BarChart2, Users, Layers, Shield, AlertTriangle,
   Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer, Brain, Database, Network
+  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle
 } from 'lucide-react';
 import { SimulationUpdate, TrainingMetrics } from '../types';
 
@@ -1253,14 +1253,310 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     );
 };
 
-// --- PLACEHOLDER LABS ---
-const PlaceholderLab = ({ title }: { title: string }) => (
+// --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
+export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+    // 5 Arms
+    const N_ARMS = 5;
+    // Fixed "True" probabilities for the arms (unknown to agent)
+    // Arm 3 is best (0.8)
+    const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
+    
+    const [strategy, setStrategy] = useState<'greedy' | 'epsilon' | 'optimistic' | 'ucb'>('epsilon');
+    
+    // Agent Knowledge
+    // { count: number, sum: number, q: number }
+    const [arms, setArms] = useState<{ count: number; sum: number; q: number }[]>(
+        Array(N_ARMS).fill({ count: 0, sum: 0, q: 0 })
+    );
+    
+    // UCB Parameter (c)
+    const [ucbC, setUcbC] = useState(2.0);
+    // Epsilon
+    const [epsilon, setEpsilon] = useState(0.1);
+    // Initial Q (Optimistic)
+    const [initQ, setInitQ] = useState(0.0);
+    
+    // Sim State
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [totalSteps, setTotalSteps] = useState(0);
+    const [totalReward, setTotalReward] = useState(0);
+    const [speed, setSpeed] = useState(200);
+    
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const batchRewardRef = useRef(0);
+
+    const resetSim = (newInitQ = initQ) => {
+        setIsPlaying(false);
+        setTotalSteps(0);
+        setTotalReward(0);
+        batchRewardRef.current = 0;
+        setArms(Array(N_ARMS).fill({ count: 0, sum: 0, q: newInitQ }));
+        if (onClearMetrics) onClearMetrics();
+    };
+
+    const step = useCallback(() => {
+        let action = 0;
+        let logDesc = "";
+        let logFormula = "";
+        
+        // 1. CHOOSE ACTION
+        if (strategy === 'greedy') {
+            // Argmax Q
+            let maxQ = -Infinity;
+            let candidates = [];
+            for (let i=0; i<N_ARMS; i++) {
+                if (arms[i].q > maxQ) { maxQ = arms[i].q; candidates = [i]; }
+                else if (arms[i].q === maxQ) candidates.push(i);
+            }
+            action = candidates[Math.floor(Math.random() * candidates.length)];
+            logDesc = "Greedy: Choosing arm with highest Q-value";
+            logFormula = "a = argmax Q(a)";
+        } 
+        else if (strategy === 'epsilon') {
+            if (Math.random() < epsilon) {
+                action = Math.floor(Math.random() * N_ARMS);
+                logDesc = "Epsilon: Exploring random arm";
+                logFormula = "Random (ε)";
+            } else {
+                let maxQ = -Infinity;
+                let candidates = [];
+                for (let i=0; i<N_ARMS; i++) {
+                    if (arms[i].q > maxQ) { maxQ = arms[i].q; candidates = [i]; }
+                    else if (arms[i].q === maxQ) candidates.push(i);
+                }
+                action = candidates[Math.floor(Math.random() * candidates.length)];
+                logDesc = "Epsilon: Exploiting best arm";
+                logFormula = "Greedy (1-ε)";
+            }
+        }
+        else if (strategy === 'optimistic') {
+            // Same as greedy, but Q starts high
+            let maxQ = -Infinity;
+            let candidates = [];
+            for (let i=0; i<N_ARMS; i++) {
+                if (arms[i].q > maxQ) { maxQ = arms[i].q; candidates = [i]; }
+                else if (arms[i].q === maxQ) candidates.push(i);
+            }
+            action = candidates[Math.floor(Math.random() * candidates.length)];
+            logDesc = "Optimistic: Choosing highest Q (initially high)";
+            logFormula = "a = argmax Q(a)";
+        }
+        else if (strategy === 'ucb') {
+            // argmax [ Q + c * sqrt(ln(t) / N) ]
+            let maxScore = -Infinity;
+            let candidates = [];
+            const t = totalSteps + 1; // avoid log(0)
+            
+            for (let i=0; i<N_ARMS; i++) {
+                if (arms[i].count === 0) {
+                    // Force pick unvisited arms
+                    candidates = [i];
+                    maxScore = Infinity;
+                    break;
+                }
+                const uncertainty = ucbC * Math.sqrt(Math.log(t) / arms[i].count);
+                const score = arms[i].q + uncertainty;
+                if (score > maxScore) { maxScore = score; candidates = [i]; }
+                else if (score === maxScore) candidates.push(i);
+            }
+            action = candidates[Math.floor(Math.random() * candidates.length)];
+            logDesc = "UCB: Balancing Reward + Uncertainty";
+            logFormula = "a = argmax [Q + c√ln(t)/N]";
+        }
+
+        // 2. GET REWARD
+        // Bernoulli trial
+        const reward = Math.random() < TRUE_MEANS[action] ? 1 : 0;
+        
+        // 3. UPDATE
+        const newArms = [...arms];
+        const arm = newArms[action];
+        const newCount = arm.count + 1;
+        const newSum = arm.sum + reward;
+        // Incremental mean update: Q_k+1 = Q_k + 1/k(R - Q_k)
+        // Or just sum/count
+        const newQ = newSum / newCount;
+        
+        newArms[action] = { count: newCount, sum: newSum, q: newQ };
+        setArms(newArms);
+        
+        setTotalSteps(s => s + 1);
+        setTotalReward(r => r + reward);
+        batchRewardRef.current += reward;
+
+        // Logging
+        if (onLogUpdate) {
+            onLogUpdate({
+                algorithm: `Bandit (${strategy})`,
+                stepDescription: logDesc,
+                formula: logFormula,
+                variables: {
+                    'Selected Arm': action + 1,
+                    'Reward': reward,
+                    'Current Q(a)': arm.q.toFixed(3),
+                    'New Q(a)': newQ.toFixed(3)
+                },
+                result: reward === 1 ? 'WIN' : 'LOSS'
+            });
+        }
+        
+        // Update Graph every 10 steps
+        if ((totalSteps + 1) % 10 === 0) {
+            const avgReward = batchRewardRef.current / 10;
+            if (onUpdateMetrics) {
+                onUpdateMetrics({
+                    episode: Math.floor((totalSteps + 1) / 10),
+                    reward: avgReward, // This is technically rate, not total. 0 to 1 scale.
+                    epsilon: strategy === 'epsilon' ? epsilon : 0,
+                    steps: totalSteps
+                });
+            }
+            batchRewardRef.current = 0;
+        }
+
+    }, [arms, strategy, epsilon, ucbC, totalSteps, onLogUpdate, onUpdateMetrics]);
+
+    useEffect(() => {
+        if (isPlaying) {
+            intervalRef.current = setInterval(step, speed);
+        } else {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        }
+        return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    }, [isPlaying, speed, step]);
+
+    const getInsightText = () => {
+        if (strategy === 'greedy') return "Greedy: Quickly locks onto one arm. If it picks a sub-optimal arm early and gets lucky (or the best arm gets unlucky), it gets stuck there forever.";
+        if (strategy === 'epsilon') return "Epsilon-Greedy: Continues to explore randomly (ε). This guarantees finding the best arm eventually, but wastes pulls on bad arms forever.";
+        if (strategy === 'optimistic') return "Optimistic: By starting with Q=5.0, the agent is 'disappointed' by every arm initially. It is forced to try every arm multiple times until their values drop to realistic levels. It naturally explores early and exploits late.";
+        if (strategy === 'ucb') return "UCB: It calculates a 'Confidence Interval'. Arms played less have high uncertainty (wide interval), boosting their score. As an arm is played, uncertainty shrinks. It mathematically balances exploration and exploitation efficiently.";
+        return "";
+    };
+
+    return (
+        <div className="flex flex-col gap-4 w-full">
+            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-col gap-2">
+                         <div className="flex bg-gray-800 rounded p-1 self-start">
+                            <button onClick={() => { setStrategy('greedy'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'greedy' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Greedy</button>
+                            <button onClick={() => { setStrategy('epsilon'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'epsilon' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Epsilon-Greedy</button>
+                            <button onClick={() => { setStrategy('optimistic'); setInitQ(5.0); resetSim(5.0); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'optimistic' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Optimistic Init</button>
+                            <button onClick={() => { setStrategy('ucb'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'ucb' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>UCB</button>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                        </button>
+                        <button onClick={() => resetSim()} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-9 flex flex-col gap-4">
+                     <div className="bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-inner flex flex-col justify-center items-center relative min-h-[400px]">
+                        
+                        {/* BANDIT ARMS VISUALIZATION */}
+                        <div className="flex items-end justify-center gap-4 h-[250px] w-full max-w-2xl px-4">
+                            {arms.map((arm, i) => {
+                                const heightPct = Math.min(arm.q * 100, 100);
+                                const trueHeightPct = TRUE_MEANS[i] * 100;
+                                const isBest = i === 3; // Hardcoded best
+                                
+                                return (
+                                    <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end relative group">
+                                        {/* Count Badge */}
+                                        <div className="bg-gray-700 text-xs px-2 py-0.5 rounded-full font-mono text-gray-300 mb-1">{arm.count} plays</div>
+                                        
+                                        {/* Bar Container */}
+                                        <div className="w-full bg-gray-900 rounded-t-lg relative border-b border-gray-600 h-full overflow-hidden">
+                                            {/* True Mean (Ghost) - only show on hover or cheat mode? Let's show as faint line */}
+                                            <div className="absolute bottom-0 w-full bg-green-500/10 border-t-2 border-dashed border-green-500/30 transition-all duration-500" style={{ height: `${trueHeightPct}%` }}>
+                                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-green-500/50 opacity-0 group-hover:opacity-100 whitespace-nowrap">True: {TRUE_MEANS[i]}</span>
+                                            </div>
+
+                                            {/* Estimated Mean (Solid) */}
+                                            <div 
+                                                className={`absolute bottom-0 w-full transition-all duration-300 ${isBest && arm.q > 0.7 ? 'bg-blue-500' : 'bg-blue-600/60'}`} 
+                                                style={{ height: `${heightPct}%` }}
+                                            ></div>
+                                            
+                                            {/* Value Label */}
+                                            <div className="absolute bottom-2 w-full text-center text-xs font-bold text-white drop-shadow-md z-10">
+                                                {arm.q.toFixed(2)}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="text-gray-400 font-bold text-sm mt-1">Arm {i+1}</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                     </div>
+                     <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                         <div>
+                             <h4 className="text-sm font-bold text-blue-300 mb-1">Strategy Insight</h4>
+                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                                {getInsightText()}
+                             </p>
+                         </div>
+                     </div>
+                </div>
+                
+                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
+                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Bandit Controls</div>
+                     <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
+                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="1000" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                         
+                         <div className="pt-2 border-t border-gray-700"></div>
+
+                         {strategy === 'epsilon' && (
+                            <div className="space-y-1">
+                                <div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(2)})</span><Map size={12} /></div>
+                                <input type="range" min="0" max="0.5" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
+                            </div>
+                         )}
+
+                         {strategy === 'ucb' && (
+                            <div className="space-y-1">
+                                <div className="flex justify-between text-xs text-gray-400"><span>Confidence (c={ucbC})</span><HelpCircle size={12} /></div>
+                                <input type="range" min="0.5" max="5.0" step="0.5" value={ucbC} onChange={(e) => setUcbC(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
+                                <p className="text-[10px] text-gray-500">Higher = More exploration</p>
+                            </div>
+                         )}
+                         
+                         {strategy === 'optimistic' && (
+                            <div className="space-y-1">
+                                <p className="text-xs text-green-400">Initial Q: {initQ.toFixed(1)}</p>
+                                <p className="text-[10px] text-gray-500">High initial value forces agent to try all arms to verify if they are actually that good.</p>
+                            </div>
+                         )}
+
+                         <div className="mt-4 bg-gray-800 p-2 rounded">
+                            <div className="flex justify-between text-xs mb-1">
+                                <span className="text-gray-400">Total Steps:</span>
+                                <span className="text-white font-mono">{totalSteps}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                                <span className="text-gray-400">Total Reward:</span>
+                                <span className="text-green-400 font-mono">{totalReward}</span>
+                            </div>
+                         </div>
+                     </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const MultiAgentLab = () => (
     <div className="bg-gray-800 p-8 rounded-xl border border-gray-700 text-center flex flex-col items-center justify-center min-h-[300px]">
-        <Activity className="text-gray-600 mb-4" size={48} />
-        <h3 className="text-xl font-bold text-gray-300 mb-2">{title}</h3>
-        <p className="text-gray-500 max-w-md">Interactive simulation for this module is currently under development. Please check back later.</p>
+        <Users className="text-gray-600 mb-4" size={48} />
+        <h3 className="text-xl font-bold text-gray-300 mb-2">Multi-Agent RL</h3>
+        <p className="text-gray-500 max-w-md">This interactive simulation is currently under development.</p>
     </div>
 );
-
-export const ExploreExploitLab = () => <PlaceholderLab title="Exploration vs Exploitation" />;
-export const MultiAgentLab = () => <PlaceholderLab title="Multi-Agent RL" />;
