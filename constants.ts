@@ -84,6 +84,38 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         recommendation: 'Monitor "Prediction Error" (difference between expected and actual state) to trigger retraining or fallback safe modes.',
     }
   ],
+  [ModuleId.TABULAR_DEEP]: [
+    {
+        category: 'METHODOLOGY',
+        title: 'Generalization vs. Precision',
+        description: 'Tabular methods are precise but do not generalize (learning state A tells you nothing about state B). Deep RL generalizes (learning A updates B), which speeds up learning but can introduce errors.',
+        recommendation: 'Use Tabular for small, critical logic. Use Deep RL for high-dimensional sensory inputs (vision, audio).',
+    },
+    {
+        category: 'METHODOLOGY',
+        title: 'Function Approximation',
+        description: 'In Deep RL, we don\'t store a table. We store weights of a Neural Network that *estimates* the table. This allows us to handle infinite state spaces.',
+        recommendation: 'Visualize the "Feature Activations" to understand what the network is actually seeing.',
+    },
+    {
+        category: 'VERIFICATION',
+        title: 'The Black Box Problem',
+        description: 'Tabular policies are readable (you can inspect Q[s]). Deep policies are opaque matrices of weights. It is extremely difficult to formally verify a Neural Network.',
+        recommendation: 'Use "Explainable AI" (XAI) tools like Saliency Maps to verify which parts of the input the agent is focusing on.',
+    },
+    {
+        category: 'ETHICS',
+        title: 'Bias Propagation',
+        description: 'Because Deep RL generalizes, biases in the training environment can propagate to unseen situations. An agent trained only on sunny days might fail dangerously in rain.',
+        recommendation: 'Curate diverse training datasets (or environments) to prevent overfitting to specific conditions.',
+    },
+    {
+        category: 'DEPLOYMENT',
+        title: 'Catastrophic Forgetting',
+        description: 'When a Neural Network learns new tasks, it often overwrites the weights used for old tasks. A robot might learn to run but forget how to walk.',
+        recommendation: 'Use "Experience Replay" buffers to keep reminding the agent of past lessons during training.',
+    }
+  ],
   // Generic fallback for others
   generic: [
     {
@@ -166,14 +198,18 @@ export const MODULE_CONTENT = {
         title: "3. Tabular vs. Deep RL",
         sections: [
             {
-                heading: "Tabular RL",
-                body: "Uses lookup tables (arrays) for state/action values. Exact convergence but limited to small, discrete state spaces.",
-                details: [{ label: "Example", text: "Classic Q-learning, GridWorld" }]
+                heading: "Tabular RL (The 'Excel Sheet' Approach)",
+                body: "Tabular methods store a value for every single state in a massive lookup table. It is mathematically precise and guaranteed to converge, but it fails when the world gets too big.",
+                details: [{ label: "Pros", text: "Exact, Convergent, Easy to Debug" }, { label: "Cons", text: "Memory Explodes (Curse of Dimensionality), No Generalization" }]
             },
             {
-                heading: "Deep RL",
-                body: "Uses neural networks to approximate value functions or policies. Handles high-dimensional inputs (images, sensor data) but approximate.",
-                details: [{ label: "Examples", text: "DQN, PPO, SAC" }]
+                heading: "Deep RL (Function Approximation)",
+                body: "Deep RL replaces the table with a Neural Network. It doesn't memorize; it *approximates*. This allows it to handle video games, robotics, and complex inputs by 'generalizing' similar states.",
+                details: [{ label: "Pros", text: "Handles Images/Sensors, Generalizes to new states" }, { label: "Cons", text: "Unstable, Data Hungry, Black Box" }]
+            },
+            {
+                heading: "The Concept of Generalization",
+                body: "In Tabular RL, learning about State A tells you nothing about State B. In Deep RL, if State A and B look similar, the network updates both. This speeds up learning but can cause 'Catastrophic Forgetting' where new lessons overwrite old ones.",
             }
         ]
     },

@@ -4,7 +4,7 @@ import {
   Map, Navigation, Target, Activity, Zap, 
   BarChart2, Users, Layers, Shield, AlertTriangle,
   Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer
+  Wind, Thermometer, Brain, Database, Network
 } from 'lucide-react';
 import { SimulationUpdate, TrainingMetrics } from '../types';
 
@@ -960,6 +960,299 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
     );
 };
 
+// --- 3. Tabular vs Deep RL Lab ---
+export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+    // Basic Environment
+    const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
+    const [startPos] = useState(START_DEFAULT);
+    const [goalPos] = useState(GOAL_DEFAULT);
+    const [agentPos, setAgentPos] = useState(START_DEFAULT);
+
+    // Sim State
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [mode, setMode] = useState<'tabular' | 'deep'>('tabular');
+    const [episode, setEpisode] = useState(0);
+    const [steps, setSteps] = useState(0);
+    const [qTable, setQTable] = useState<Record<number, number[]>>({});
+
+    // Params
+    const [speed, setSpeed] = useState(50);
+    const [alpha, setAlpha] = useState(0.1);
+    const [gamma, setGamma] = useState(0.9);
+    const [epsilon, setEpsilon] = useState(1.0); // Start high for decay to matter
+    const [epsilonDecay, setEpsilonDecay] = useState(0.995);
+    // Generalization Radius (simulates Neural Network 'bleed')
+    const [genRadius, setGenRadius] = useState(1.5); 
+
+    const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const episodeRewardRef = useRef(0);
+
+    const getQ = (s: number) => qTable[s] || [0,0,0,0];
+    const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
+    const dist = (idx1: number, idx2: number) => {
+        const c1 = toCoord(idx1);
+        const c2 = toCoord(idx2);
+        return Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
+    };
+
+    const randomizeEnvironment = () => {
+        setIsPlaying(false);
+        // ... (standard random map logic as above) ...
+        let attempts = 0;
+        let validMap = false;
+        let newObstacles: number[] = [];
+        while (!validMap && attempts < 100) {
+            newObstacles = [];
+            const count = 5 + Math.floor(Math.random() * 10);
+            for (let i = 0; i < count; i++) {
+                const pos = Math.floor(Math.random() * N_STATES);
+                if (pos !== startPos && pos !== goalPos && !newObstacles.includes(pos)) {
+                    newObstacles.push(pos);
+                }
+            }
+            if (isReachable(startPos, goalPos, newObstacles, GRID_W, GRID_H)) {
+                validMap = true;
+            }
+            attempts++;
+        }
+        setObstacles(newObstacles);
+        resetSim(true);
+    };
+
+    const resetSim = (clearMemory = true) => {
+        setIsPlaying(false);
+        setAgentPos(startPos);
+        setEpisode(0);
+        setSteps(0);
+        episodeRewardRef.current = 0;
+        if (clearMemory) {
+            setQTable({});
+            setEpsilon(1.0); // Reset exploration
+            if (onClearMetrics) onClearMetrics();
+        }
+    };
+
+    const step = useCallback(() => {
+        const currPos = agentPos;
+        const currentQVals = getQ(currPos);
+        
+        // Action Selection (Epsilon Greedy)
+        let action = 0;
+        if (Math.random() < epsilon) {
+            action = Math.floor(Math.random() * 4);
+        } else {
+            const maxVal = Math.max(...currentQVals);
+            const maxIndices = currentQVals.map((v, i) => v === maxVal ? i : -1).filter(i => i !== -1);
+            action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
+        }
+
+        // Execute
+        const { x, y } = toCoord(currPos);
+        let nx = x, ny = y;
+        if (action === 0) ny = Math.max(0, ny - 1); // U
+        if (action === 1) nx = Math.min(GRID_W - 1, nx + 1); // R
+        if (action === 2) ny = Math.min(GRID_H - 1, ny + 1); // D
+        if (action === 3) nx = Math.max(0, nx - 1); // L
+
+        const nextIdx = ny * GRID_W + nx;
+        let nextPos = currPos;
+        let reward = -0.1;
+        let done = false;
+
+        if (obstacles.includes(nextIdx)) {
+            nextPos = currPos;
+            reward = -1;
+        } else if (nextIdx === goalPos) {
+            nextPos = goalPos;
+            reward = 100;
+            done = true;
+        } else {
+            nextPos = nextIdx;
+        }
+        episodeRewardRef.current += reward;
+
+        // LEARNING UPDATE
+        // Standard TD Error
+        const nextQVals = getQ(nextPos);
+        const maxNextQ = done ? 0 : Math.max(...nextQVals);
+        const currentQ = getQ(currPos)[action];
+        const tdError = reward + gamma * maxNextQ - currentQ;
+
+        const newQTable = { ...qTable };
+
+        if (mode === 'tabular') {
+            // Precise Update: Only affects current state
+            if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
+            newQTable[currPos][action] += alpha * tdError;
+        } else {
+            // Deep (Simulated): Function Approximation / Generalization
+            // Update neighbors based on radial distance
+            for (let s = 0; s < N_STATES; s++) {
+                if (obstacles.includes(s) || s === goalPos) continue;
+                
+                const d = dist(currPos, s);
+                // Gaussian Kernel for similarity
+                const similarity = Math.exp(-Math.pow(d, 2) / (2 * Math.pow(genRadius, 2)));
+                
+                if (similarity > 0.01) {
+                    if (!newQTable[s]) newQTable[s] = [0,0,0,0];
+                    // Deep RL update: weights allow generalization
+                    newQTable[s][action] += alpha * tdError * similarity;
+                }
+            }
+        }
+        setQTable(newQTable);
+
+        // Logging
+        if (onLogUpdate && Math.random() < 0.2) {
+            onLogUpdate({
+                algorithm: mode === 'tabular' ? 'Tabular Q-Learning' : 'Deep RL (Approx)',
+                stepDescription: mode === 'tabular' ? 'Updating single state exactly.' : `Generalizing update to neighbors (Radius=${genRadius})`,
+                formula: mode === 'tabular' ? 'Q(s,a) ← Q + α δ' : 'Q(s\',a) ← Q + α δ * Similarity(s, s\')',
+                variables: {
+                    'TD Error': tdError.toFixed(3),
+                    'Alpha': alpha,
+                    'Similarity': mode === 'tabular' ? '1.0 (Self)' : 'e^(-d²/2σ²)'
+                },
+                result: 'Weights Updated'
+            });
+        }
+
+        setAgentPos(done ? startPos : nextPos);
+        if (done) {
+            setEpisode(e => e + 1);
+            setSteps(0);
+            
+            // Decay Epsilon
+            setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
+
+            if (onUpdateMetrics) {
+                onUpdateMetrics({
+                    episode: episode + 1,
+                    reward: episodeRewardRef.current,
+                    epsilon,
+                    steps
+                });
+            }
+            episodeRewardRef.current = 0;
+        } else {
+            setSteps(s => s + 1);
+        }
+
+    }, [agentPos, qTable, obstacles, startPos, goalPos, mode, alpha, gamma, epsilon, epsilonDecay, genRadius, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics]);
+
+    useEffect(() => {
+        if (isPlaying) {
+            intervalRef.current = setInterval(step, speed);
+        } else {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        }
+        return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    }, [isPlaying, speed, step]);
+
+    // Render logic is similar
+     const getRenderData = (idx: number) => {
+        const qs = getQ(idx);
+        const maxQ = Math.max(...qs);
+        // Normalize
+        const intensity = Math.min(Math.abs(maxQ) / 20, 1);
+        let bgColor = 'rgba(31, 41, 55, 0.5)';
+        if (maxQ > 0) bgColor = `rgba(16, 185, 129, ${0.1 + intensity * 0.9})`; 
+        else if (maxQ < 0) bgColor = `rgba(239, 68, 68, ${0.1 + intensity * 0.5})`;
+        return bgColor;
+    };
+
+    return (
+        <div className="flex flex-col gap-4 w-full">
+            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-col gap-2">
+                        <div className="flex bg-gray-800 rounded p-1 self-start">
+                            <button onClick={() => { setMode('tabular'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'tabular' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
+                                <div className="flex items-center gap-2"><Database size={14}/> Tabular (Exact)</div>
+                            </button>
+                            <button onClick={() => { setMode('deep'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'deep' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
+                                <div className="flex items-center gap-2"><Network size={14}/> Deep RL (Approx)</div>
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
+                            <Shuffle size={14} /> New Map
+                        </button>
+                        <div className="h-6 w-px bg-gray-700 mx-2"></div>
+                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                        </button>
+                        <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-9 flex flex-col gap-4">
+                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
+                             {Array.from({ length: N_STATES }).map((_, idx) => {
+                                const isAgent = agentPos === idx;
+                                const isGoal = idx === goalPos;
+                                const isObstacle = obstacles.includes(idx);
+                                const bgColor = !isObstacle && !isGoal ? getRenderData(idx) : undefined;
+                                
+                                return (
+                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200 ${isObstacle ? 'bg-gray-900' : ''} ${isGoal ? 'bg-yellow-900/30 ring-1 ring-yellow-500' : ''}`} style={{ backgroundColor: bgColor }}>
+                                        {isObstacle && <div className="w-full h-full bg-gray-800 flex items-center justify-center"><div className="w-1/2 h-1/2 bg-gray-600 rounded-sm"/></div>}
+                                        {isGoal && <Target size={18} className="text-yellow-400" />}
+                                        {isAgent && <div className={`absolute inset-0 flex items-center justify-center z-20`}><div className={`w-4 h-4 md:w-6 md:h-6 rounded-full shadow-lg border-2 border-white animate-pulse ${mode === 'tabular' ? 'bg-blue-500' : 'bg-indigo-500'}`} /></div>}
+                                    </div>
+                                );
+                             })}
+                        </div>
+                        {/* Legend */}
+                        <div className="absolute top-2 right-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-[10px] space-y-1 z-30">
+                            <div className="font-bold text-gray-400 mb-1">LEARNING SPREAD</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-full"></div><span>Current State</span></div>
+                            {mode === 'deep' && <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500/30 rounded-full blur-[2px]"></div><span>Generalization</span></div>}
+                        </div>
+                    </div>
+                    <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                         <div>
+                             <h4 className="text-sm font-bold text-blue-300 mb-1">Concept Insight</h4>
+                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                                {mode === 'tabular' 
+                                  ? "Tabular RL: The agent maintains an exact table of values. Learning about one square tells it NOTHING about its neighbors. It must visit every single square to learn the map. This is slow but precise."
+                                  : "Deep RL (Approximated): The agent uses a Function Approximator (simulated here). Learning about one square 'bleeds' into nearby squares because the network generalizes features. It learns the map much faster, but risks blurring fine details."}
+                             </p>
+                         </div>
+                     </div>
+                </div>
+
+                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
+                    <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Neural Network Config</div>
+                    <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        
+                        {mode === 'deep' && (
+                            <div className="space-y-1 bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
+                                <div className="flex justify-between text-xs text-indigo-300"><span>Generalization Radius ({genRadius})</span><Network size={12} /></div>
+                                <input type="range" min="0.5" max="3.0" step="0.1" value={genRadius} onChange={(e) => setGenRadius(Number(e.target.value))} className="w-full h-1 bg-indigo-500 rounded-lg cursor-pointer" />
+                                <p className="text-[9px] text-gray-400 mt-1">How far learning spreads to neighbors. Higher = Faster but blurrier.</p>
+                            </div>
+                        )}
+                        <div className="pt-2 border-t border-gray-700"></div>
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Learning Rate ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // --- PLACEHOLDER LABS ---
 const PlaceholderLab = ({ title }: { title: string }) => (
     <div className="bg-gray-800 p-8 rounded-xl border border-gray-700 text-center flex flex-col items-center justify-center min-h-[300px]">
@@ -969,6 +1262,5 @@ const PlaceholderLab = ({ title }: { title: string }) => (
     </div>
 );
 
-export const TabularDeepLab = () => <PlaceholderLab title="Tabular vs Deep RL" />;
 export const ExploreExploitLab = () => <PlaceholderLab title="Exploration vs Exploitation" />;
 export const MultiAgentLab = () => <PlaceholderLab title="Multi-Agent RL" />;

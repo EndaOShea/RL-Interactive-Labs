@@ -290,7 +290,7 @@ const App: React.FC = () => {
             <Layers className="text-green-500" />
             {(MODULE_CONTENT as any)[activeModule]?.title}
           </h2>
-          {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC) && (
+          {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP) && (
             <div className="flex gap-6 text-sm">
                 <div className="flex flex-col items-end">
                     <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Avg Reward</span>
@@ -314,13 +314,13 @@ const App: React.FC = () => {
                     {/* Pass live update setter AND metrics handler to labs */}
                     {activeModule === ModuleId.MODEL_VS_FREE && <ModelVsFreeLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
                     {activeModule === ModuleId.DET_STOCHASTIC && <DetStochLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-                    {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab />}
+                    {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
                     {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab />}
                     {activeModule === ModuleId.SINGLE_MULTI && <MultiAgentLab />}
                  </div>
 
                  {/* Middle Row: Graph and AI Tutor (Only for interactive modules) */}
-                 {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC) && (
+                 {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP) && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80 flex-shrink-0">
                         {renderPerformanceGraph()}
                         {renderAITutor()}
