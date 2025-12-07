@@ -290,74 +290,78 @@ const App: React.FC = () => {
             <Layers className="text-green-500" />
             {(MODULE_CONTENT as any)[activeModule]?.title}
           </h2>
-          {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP || activeModule === ModuleId.EXPLORE_EXPLOIT) && (
+          {/* Header Metrics */}
+          {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP || activeModule === ModuleId.EXPLORE_EXPLOIT || activeModule === ModuleId.SINGLE_MULTI) && (
             <div className="flex gap-6 text-sm">
                 <div className="flex flex-col items-end">
                     <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Avg Reward</span>
                     <span className={`font-mono font-bold text-lg ${metrics.length > 0 && metrics[metrics.length-1].reward > 0.5 ? 'text-green-400' : 'text-gray-400'}`}>
-                        {metrics.length > 0 ? metrics[metrics.length-1].reward.toFixed(2) : "0.00"}
+                        {metrics.length > 0 ? metrics[metrics.length-1].reward.toFixed(2) : '--'}
+                    </span>
+                </div>
+                <div className="flex flex-col items-end">
+                    <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Epsilon</span>
+                    <span className="font-mono font-bold text-lg text-blue-400">
+                        {metrics.length > 0 ? metrics[metrics.length-1].epsilon.toFixed(3) : '--'}
+                    </span>
+                </div>
+                <div className="flex flex-col items-end">
+                    <span className="text-gray-500 text-[10px] uppercase font-bold tracking-wider">Steps</span>
+                    <span className="font-mono font-bold text-lg text-purple-400">
+                        {metrics.length > 0 ? metrics[metrics.length-1].steps : '--'}
                     </span>
                 </div>
             </div>
           )}
         </header>
 
-        {/* Scrollable Workspace */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-6 scroll-smooth">
-             {/* --- THEORY MODULE LAYOUT (STACKED) --- */}
-             <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-20">
-                 {/* Top: Interactive Lab (Full Width) */}
-                 <div className="bg-gray-800/50 rounded-xl border border-gray-700 p-6 shadow-xl relative overflow-hidden flex-shrink-0">
-                    <div className="flex items-center gap-2 mb-6 text-sm font-bold text-blue-400 uppercase tracking-wider border-b border-gray-700/50 pb-2">
-                        <Brain size={14} /> Interactive Simulation
-                    </div>
-                    {/* Pass live update setter AND metrics handler to labs */}
-                    {activeModule === ModuleId.MODEL_VS_FREE && <ModelVsFreeLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-                    {activeModule === ModuleId.DET_STOCHASTIC && <DetStochLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-                    {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-                    {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-                    {activeModule === ModuleId.SINGLE_MULTI && <MultiAgentLab />}
-                 </div>
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto p-6 pb-20 custom-scrollbar relative">
+          <div className="max-w-7xl mx-auto space-y-6">
+            
+            {/* 1. Interactive Simulation Layer */}
+            <div className="animate-in fade-in zoom-in-95 duration-500">
+               {activeModule === ModuleId.MODEL_VS_FREE && <ModelVsFreeLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
+               {activeModule === ModuleId.DET_STOCHASTIC && <DetStochLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
+               {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
+               {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
+               {activeModule === ModuleId.SINGLE_MULTI && <MultiAgentLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
+            </div>
 
-                 {/* Middle Row: Graph and AI Tutor (Only for interactive modules) */}
-                 {(activeModule === ModuleId.MODEL_VS_FREE || activeModule === ModuleId.DET_STOCHASTIC || activeModule === ModuleId.TABULAR_DEEP || activeModule === ModuleId.EXPLORE_EXPLOIT) && (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80 flex-shrink-0">
-                        {renderPerformanceGraph()}
-                        {renderAITutor()}
-                    </div>
-                 )}
+            {/* 2. Analysis & Tools Layer (Graph + Tutor) */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80">
+                {renderPerformanceGraph()}
+                {renderAITutor()}
+            </div>
 
-                 {/* Bottom: Lifecycle Panel with Embedded Content (Full Width) */}
-                 <div>
-                    <LifecyclePanel 
-                        moduleTitle={(MODULE_CONTENT as any)[activeModule]?.title}
-                        insights={LIFECYCLE_CONTEXTS[activeModule] || LIFECYCLE_CONTEXTS.generic}
-                        currentTab={lifecycleTab}
-                        setCurrentTab={setLifecycleTab}
-                        liveUpdate={liveUpdate} // Pass the live data for visualization
-                    >
-                        {/* INJECTED EDUCATIONAL CONTENT */}
-                        <div className="space-y-6">
-                            {(MODULE_CONTENT as any)[activeModule]?.sections.map((section: any, idx: number) => (
-                                <div key={idx} className="border-b border-gray-700 pb-6 last:border-0 last:pb-0">
-                                <h3 className="text-lg font-bold text-white mb-2">{section.heading}</h3>
-                                <p className="text-gray-300 mb-4 text-sm leading-relaxed">{section.body}</p>
-                                {section.details && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                        {section.details.map((detail: any, dIdx: number) => (
-                                            <div key={dIdx} className="bg-gray-800/80 p-3 rounded-lg border border-gray-600/50">
-                                                <span className="text-xs font-bold text-blue-400 block mb-1">{detail.label}</span>
-                                                <span className="text-xs text-gray-400">{detail.text}</span>
-                                            </div>
-                                        ))}
+            {/* 3. Lifecycle Architect Layer */}
+            <LifecyclePanel 
+                moduleTitle={(MODULE_CONTENT as any)[activeModule]?.title}
+                insights={LIFECYCLE_CONTEXTS[activeModule] || LIFECYCLE_CONTEXTS.generic}
+                currentTab={lifecycleTab}
+                setCurrentTab={setLifecycleTab}
+                liveUpdate={liveUpdate}
+            >
+                {/* Render the module-specific textual content as children */}
+                {(MODULE_CONTENT as any)[activeModule]?.sections.map((section: any, idx: number) => (
+                    <div key={idx} className="mb-6">
+                        <h3 className="text-lg font-bold text-blue-400 mb-2">{section.heading}</h3>
+                        <p className="text-sm text-gray-300 mb-3">{section.body}</p>
+                        {section.details && (
+                            <div className="grid grid-cols-1 gap-2">
+                                {section.details.map((detail: any, dIdx: number) => (
+                                    <div key={dIdx} className="bg-gray-800/50 p-3 rounded border border-gray-700/50">
+                                        <span className="text-xs font-bold text-white block mb-1">{detail.label}</span>
+                                        <span className="text-xs text-gray-400">{detail.text}</span>
                                     </div>
-                                )}
-                                </div>
-                            ))}
-                        </div>
-                    </LifecyclePanel>
-                 </div>
-             </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                ))}
+            </LifecyclePanel>
+
+          </div>
         </div>
       </main>
     </div>

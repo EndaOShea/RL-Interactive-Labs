@@ -142,6 +142,32 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
           recommendation: 'Replace static A/B tests with Contextual Bandits for website optimization.',
       }
   ],
+  [ModuleId.SINGLE_MULTI]: [
+      {
+          category: 'METHODOLOGY',
+          title: 'Non-Stationarity',
+          description: 'In Multi-Agent RL, the "environment" includes other agents who are also learning. This means the rules of the world change over time, violating standard RL assumptions.',
+          recommendation: 'Use "Centralized Training, Decentralized Execution" (CTDE) algorithms like MADDPG to stabilize learning.',
+      },
+      {
+          category: 'METHODOLOGY',
+          title: 'Credit Assignment',
+          description: 'In Cooperative settings, if the team wins, which agent deserves the credit? Was it Agent A\'s pass or Agent B\'s shot?',
+          recommendation: 'Use "Difference Rewards" or architecture like QMIX to factor the global reward back to individual contributions.',
+      },
+      {
+          category: 'VERIFICATION',
+          title: 'Emergent Behavior',
+          description: 'Multi-Agent systems often develop unexpected strategies (e.g., blocking paths, sacrificing units). Simple unit tests are insufficient.',
+          recommendation: 'Simulate against diverse opponent policies (random, aggressive, optimal) to verify robustness.',
+      },
+      {
+          category: 'ETHICS',
+          title: 'Tragedy of the Commons',
+          description: 'Independent agents maximizing their own reward often destroy shared resources (e.g., traffic congestion).',
+          recommendation: 'Design the Reward Function to align individual incentives with social welfare (Nash Equilibrium).',
+      }
+  ],
   // Generic fallback for others
   generic: [
     {
@@ -259,17 +285,17 @@ export const MODULE_CONTENT = {
         ]
     },
     [ModuleId.SINGLE_MULTI]: {
-        title: "5. Single vs. Multi-Agent",
+        title: "5. Single vs. Multi-Agent RL",
         sections: [
             {
-                heading: "Single-Agent RL",
-                body: "One agent interacting with a stationary environment.",
-                details: [{ label: "Example", text: "DQN in Atari" }]
+                heading: "The Multi-Agent Problem",
+                body: "When multiple agents act in the same world, the environment becomes 'Non-Stationary'. From Agent A's perspective, Agent B is a moving object whose behavior changes over time. Standard RL (like Q-Learning) often fails here because it assumes the world rules are fixed.",
+                details: [{ label: "Cooperative", text: "Agents work together (e.g., moving a heavy table)." }, { label: "Competitive", text: "Zero-sum games (e.g., Chess, Tag). One wins, one loses." }]
             },
             {
-                heading: "Multi-Agent RL",
-                body: "Multiple agents learning simultaneously. Environment becomes non-stationary from the perspective of one agent.",
-                details: [{ label: "Examples", text: "MADDPG, QMIX" }]
+                heading: "Joint State Space",
+                body: "To solve this, Agent A cannot just look at the map. It must look at Agent B. The state space grows exponentially: State = (Pos_A, Pos_B).",
+                details: [{ label: "Complexity", text: "For a 10x10 grid: Single Agent = 100 states. Two Agents = 100x100 = 10,000 states." }]
             }
         ]
     }
