@@ -4,7 +4,7 @@ import {
   Map, Navigation, Target, Activity, Zap, 
   BarChart2, Users, Layers, Shield, AlertTriangle,
   Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, Eye, EyeOff
+  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle
 } from 'lucide-react';
 import { SimulationUpdate, TrainingMetrics } from '../types';
 
@@ -611,386 +611,936 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
 // --- 2. Deterministic vs Stochastic Lab ---
 export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // A simplified Q-Learning grid with slip probability
-    const [qTable, setQTable] = useState<Record<number, number[]>>({});
+    // Environment
+    const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
+    const [startPos] = useState(START_DEFAULT);
+    const [goalPos] = useState(GOAL_DEFAULT);
     const [agentPos, setAgentPos] = useState(START_DEFAULT);
+
+    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
-    const [envNoise, setEnvNoise] = useState(0); // 0 or 0.2
+    
+    // Core Q-Learning State
+    const [qTable, setQTable] = useState<Record<number, number[]>>({}); 
+    
+    // Lab Specific State
+    const [policyType, setPolicyType] = useState<'deterministic' | 'stochastic'>('deterministic');
+    const [slipChance, setSlipChance] = useState(0.0); // 0.0 to 0.5
+    const [temperature, setTemperature] = useState(1.0); // Softmax Temp (0.1 to 5.0)
+
+    // Params
+    const [speed, setSpeed] = useState(50);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
-    const [lastSlip, setLastSlip] = useState(false); // Visual feedback
-    
+
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const episodeRewardRef = useRef(0);
 
     const getQ = (s: number) => qTable[s] || [0, 0, 0, 0];
     const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
 
+    const randomizeEnvironment = () => {
+        setIsPlaying(false);
+        let attempts = 0;
+        let validMap = false;
+        let newObstacles: number[] = [];
+        while (!validMap && attempts < 100) {
+            newObstacles = [];
+            const count = 5 + Math.floor(Math.random() * 10);
+            for (let i = 0; i < count; i++) {
+                const pos = Math.floor(Math.random() * N_STATES);
+                if (pos !== startPos && pos !== goalPos && !newObstacles.includes(pos)) {
+                    newObstacles.push(pos);
+                }
+            }
+            if (isReachable(startPos, goalPos, newObstacles, GRID_W, GRID_H)) {
+                validMap = true;
+            }
+            attempts++;
+        }
+        setObstacles(newObstacles);
+        resetSim(true);
+    };
+
+    const resetSim = (clearMemory = true) => {
+        setIsPlaying(false);
+        setAgentPos(startPos);
+        setEpisode(0);
+        setSteps(0);
+        episodeRewardRef.current = 0;
+        
+        if (clearMemory) {
+            setQTable({});
+            if (onClearMetrics) onClearMetrics();
+        }
+    };
+
     const step = useCallback(() => {
         let currPos = agentPos;
-        const qVals = getQ(currPos);
-        
-        // Always Greedy for this demo to show fragility, unless epsilon exploration (fixed low)
+        const currentQVals = getQ(currPos);
         let action = 0;
-        if (Math.random() < 0.1) {
-            action = Math.floor(Math.random() * 4);
+        let logDescription = "";
+
+        // 1. ACTION SELECTION (Policy)
+        if (policyType === 'deterministic') {
+            // Argmax (Greedy)
+            const maxVal = Math.max(...currentQVals);
+            const maxIndices = currentQVals.map((v, i) => v === maxVal ? i : -1).filter(i => i !== -1);
+            action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
+            logDescription = "Deterministic: Selecting Max Q action";
         } else {
-            const max = Math.max(...qVals);
-            const opts = qVals.map((v, i) => v === max ? i : -1).filter(i => i !== -1);
-            action = opts[Math.floor(Math.random() * opts.length)];
+            // Stochastic (Softmax)
+            // P(a) = exp(Q(s,a)/tau) / sum(...)
+            const exps = currentQVals.map(q => Math.exp(q / temperature));
+            const sumExps = exps.reduce((a, b) => a + b, 0);
+            const probs = exps.map(e => e / sumExps);
+            
+            const rand = Math.random();
+            let cumulative = 0;
+            for (let i = 0; i < 4; i++) {
+                cumulative += probs[i];
+                if (rand < cumulative) {
+                    action = i;
+                    break;
+                }
+            }
+            logDescription = `Stochastic: Sampling from Softmax (τ=${temperature})`;
         }
 
-        // Environment Stochasticity (Slip)
+        // 2. ENVIRONMENT TRANSITION (Stochasticity/Slip)
         let actualAction = action;
         let slipped = false;
-        if (envNoise > 0 && Math.random() < envNoise) {
-            // Slip to random orthogonal
-            const slipOpts = [0,1,2,3].filter(a => a !== action);
-            actualAction = slipOpts[Math.floor(Math.random() * slipOpts.length)];
+        if (Math.random() < slipChance) {
+            // Slip! Choose random direction NOT equal to intended
+            const otherActions = [0,1,2,3].filter(a => a !== action);
+            actualAction = otherActions[Math.floor(Math.random() * otherActions.length)];
             slipped = true;
         }
-        setLastSlip(slipped);
 
-        // Move
+        // Execute Actual Action
         const { x, y } = toCoord(currPos);
         let nx = x, ny = y;
-        if (actualAction === 0) ny = Math.max(0, ny - 1);
-        if (actualAction === 1) nx = Math.min(GRID_W - 1, nx + 1);
-        if (actualAction === 2) ny = Math.min(GRID_H - 1, ny + 1);
-        if (actualAction === 3) nx = Math.max(0, nx - 1);
-        
+        if (actualAction === 0) ny = Math.max(0, ny - 1); // U
+        if (actualAction === 1) nx = Math.min(GRID_W - 1, nx + 1); // R
+        if (actualAction === 2) ny = Math.min(GRID_H - 1, ny + 1); // D
+        if (actualAction === 3) nx = Math.max(0, nx - 1); // L
+
         const nextIdx = ny * GRID_W + nx;
-        let nextPos = nextIdx;
+        let nextPos = currPos;
         let reward = -0.1;
         let done = false;
 
-        // Obstacles are pits here
-        if (DEFAULT_OBSTACLES.includes(nextIdx)) {
-            reward = -10;
+        if (obstacles.includes(nextIdx)) {
+            nextPos = currPos;
+            reward = -1;
+        } else if (nextIdx === goalPos) {
+            nextPos = goalPos;
+            reward = 100;
             done = true;
-        } else if (nextIdx === GOAL_DEFAULT) {
-            reward = 10;
-            done = true;
+        } else {
+            nextPos = nextIdx;
         }
-
         episodeRewardRef.current += reward;
 
-        // Q-Update
-        const nextQ = getQ(nextPos);
-        const maxNextQ = done ? 0 : Math.max(...nextQ);
-        const currentQ = qVals[action]; // We learn about the INTENDED action
+        // 3. UPDATE (Q-Learning)
+        const nextQVals = getQ(nextPos);
+        const maxNextQ = done ? 0 : Math.max(...nextQVals);
+        const currentQ = currentQVals[action]; // Update intended action's value
         const newQ = currentQ + alpha * (reward + gamma * maxNextQ - currentQ);
-        
-        const newTable = { ...qTable };
-        if (!newTable[currPos]) newTable[currPos] = [0,0,0,0];
-        newTable[currPos][action] = newQ;
-        setQTable(newTable);
 
-        // Logging
+        const newQTable = { ...qTable };
+        if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
+        newQTable[currPos][action] = newQ;
+        setQTable(newQTable);
+
+        // LOGGING
         if (onLogUpdate && Math.random() < 0.3) {
+            let formula = policyType === 'deterministic' 
+                ? 'π(s) = argmax Q(s,a)' 
+                : 'π(a|s) = exp(Q/τ) / Σ exp(Q/τ)';
+            
+            if (slipped) {
+                logDescription += " -> SLIPPED! Env altered action.";
+            }
+
             onLogUpdate({
-                algorithm: envNoise > 0 ? 'Stochastic Env' : 'Deterministic Env',
-                stepDescription: slipped ? 'SLIP! Intent != Actual' : 'Normal transition',
-                formula: 'Q(s,a) ← Q + α[R + γ max Q(s\') - Q]',
-                variables: { 'Noise': envNoise, 'Alpha': alpha, 'Slip': slipped ? 'YES' : 'NO' },
-                result: `New Q: ${newQ.toFixed(2)}`
+                algorithm: `Q-Learning (${policyType})`,
+                stepDescription: logDescription,
+                formula: formula,
+                variables: {
+                    'Temp (τ)': temperature,
+                    'Slip Chance': slipChance,
+                    'Intended': ['U','R','D','L'][action],
+                    'Actual': ['U','R','D','L'][actualAction],
+                    'Reward': reward
+                },
+                result: slipped ? 'Transition Noisy' : 'Transition Clean'
             });
         }
+
+        setAgentPos(done ? startPos : nextPos);
 
         if (done) {
             setEpisode(e => e + 1);
             setSteps(0);
-            if (onUpdateMetrics) onUpdateMetrics({ episode: episode + 1, reward: episodeRewardRef.current, epsilon: 0.1, steps });
+            if (onUpdateMetrics) {
+                onUpdateMetrics({
+                    episode: episode + 1,
+                    reward: episodeRewardRef.current,
+                    epsilon: 0, // Not used here directly
+                    steps: steps
+                });
+            }
             episodeRewardRef.current = 0;
-            setAgentPos(START_DEFAULT);
         } else {
-            setAgentPos(nextPos);
             setSteps(s => s + 1);
         }
-    }, [agentPos, qTable, envNoise, alpha, gamma, episode, steps]);
+
+    }, [agentPos, qTable, obstacles, startPos, goalPos, policyType, slipChance, temperature, alpha, gamma, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics]);
 
     useEffect(() => {
-        if (isPlaying) intervalRef.current = setInterval(step, 50);
+        if (isPlaying) {
+            intervalRef.current = setInterval(step, speed);
+        } else {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        }
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-    }, [isPlaying, step]);
+    }, [isPlaying, speed, step]);
+
+    // Render Helpers
+    // For Stochastic visualization, we calculate arrow opacities based on Softmax(Q)
+    const getRenderData = (idx: number) => {
+        const qs = getQ(idx);
+        let bgColor = 'rgba(31, 41, 55, 0.5)';
+        let arrows: { rot: number, op: number }[] = [];
+        
+        // Color based on Max Q (Value)
+        const maxQ = Math.max(...qs);
+        const intensity = Math.min(Math.abs(maxQ) / 20, 1);
+        if (maxQ > 0) bgColor = `rgba(16, 185, 129, ${0.1 + intensity * 0.9})`; 
+        else if (maxQ < 0) bgColor = `rgba(239, 68, 68, ${0.1 + intensity * 0.5})`;
+
+        if (policyType === 'deterministic') {
+            // Show single arrow for best action
+            const bestIdx = qs.indexOf(maxQ);
+            if (maxQ !== 0) { // Don't show if all 0
+                const rots = [0, 90, 180, 270];
+                arrows.push({ rot: rots[bestIdx], op: 1.0 });
+            }
+        } else {
+            // Show all arrows based on Softmax probs
+            const exps = qs.map(q => Math.exp(q / temperature));
+            const sum = exps.reduce((a,b) => a+b, 0);
+            const probs = exps.map(e => e/sum);
+            const rots = [0, 90, 180, 270];
+            probs.forEach((p, i) => {
+                if (p > 0.1) arrows.push({ rot: rots[i], op: p });
+            });
+        }
+        return { bgColor, arrows };
+    };
+
+    const getInsightText = () => {
+        let text = "";
+        if (policyType === 'deterministic') {
+            text += "Deterministic: The agent chooses the single best action. ";
+            if (slipChance > 0.1) {
+                text += "WARNING: High slip chance detected. A rigid deterministic policy may fail if the 'optimal' path is narrow or near obstacles. ";
+            }
+        } else {
+            text += `Stochastic: Agent samples actions (Temp=${temperature}). `;
+            if (temperature > 2.0) text += "High temperature causes frequent random actions (Exploration). ";
+            else if (temperature < 0.5) text += "Low temperature behaves almost deterministically (Exploitation). ";
+        }
+        
+        if (alpha > 0.5) text += "\n\nAlpha High (>0.5): Agent learns very fast but is unstable in noisy environments. It might 'forget' a safe path after one unlucky slip.";
+        else if (alpha < 0.15) text += "\n\nAlpha Low (<0.15): Agent learns slowly, averaging out noise. This provides stability when slip chance is high.";
+        
+        return text;
+    };
 
     return (
-        <div className="flex flex-col gap-4">
-             <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 flex justify-between items-center">
-                 <div className="flex gap-2">
-                     <button onClick={() => setEnvNoise(0)} className={`px-4 py-2 rounded text-xs font-bold ${envNoise === 0 ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Deterministic (No Slip)</button>
-                     <button onClick={() => setEnvNoise(0.3)} className={`px-4 py-2 rounded text-xs font-bold ${envNoise > 0 ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Stochastic (30% Slip)</button>
-                 </div>
-                 <button onClick={() => setIsPlaying(!isPlaying)} className={`p-2 rounded-full ${isPlaying ? 'bg-yellow-600' : 'bg-green-600'}`}>{isPlaying ? <Pause size={16} /> : <Play size={16} />}</button>
-             </div>
-             <div className="bg-gray-800 p-6 rounded-xl flex justify-center min-h-[300px]">
-                 <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
-                     {Array.from({ length: N_STATES }).map((_, idx) => {
-                         const isAgent = agentPos === idx;
-                         const isGoal = idx === GOAL_DEFAULT;
-                         const isPit = DEFAULT_OBSTACLES.includes(idx);
-                         const qs = getQ(idx);
-                         const maxQ = Math.max(...qs);
-                         const intensity = Math.min(Math.abs(maxQ) / 10, 1);
-                         const bg = isPit ? 'bg-red-900/50' : isGoal ? 'bg-yellow-900/50' : maxQ > 0 ? `rgba(16, 185, 129, ${intensity})` : 'rgba(31, 41, 55, 0.5)';
+        <div className="flex flex-col gap-4 w-full">
+            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-col gap-2">
+                         <div className="flex bg-gray-800 rounded p-1 self-start">
+                            <button onClick={() => { setPolicyType('deterministic'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${policyType === 'deterministic' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Deterministic Policy</button>
+                            <button onClick={() => { setPolicyType('stochastic'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${policyType === 'stochastic' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Stochastic Policy</button>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
+                            <Shuffle size={14} /> New Map
+                        </button>
+                        <div className="h-6 w-px bg-gray-700 mx-2"></div>
+                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                        </button>
+                        <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-9 flex flex-col gap-4">
+                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
+                             {Array.from({ length: N_STATES }).map((_, idx) => {
+                                const isAgent = agentPos === idx;
+                                const isGoal = idx === goalPos;
+                                const isObstacle = obstacles.includes(idx);
+                                const { bgColor, arrows } = getRenderData(idx);
+
+                                return (
+                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200 ${isObstacle ? 'bg-gray-900' : ''} ${isGoal ? 'bg-yellow-900/30 ring-1 ring-yellow-500' : ''}`} style={{ backgroundColor: !isObstacle && !isGoal ? bgColor : undefined }}>
+                                        {isObstacle && <div className="w-full h-full bg-gray-800 flex items-center justify-center"><div className="w-1/2 h-1/2 bg-gray-600 rounded-sm"/></div>}
+                                        {isGoal && <Target size={18} className="text-yellow-400" />}
+                                        {isAgent && <div className={`absolute inset-0 flex items-center justify-center z-20`}><div className={`w-4 h-4 md:w-6 md:h-6 rounded-full shadow-lg border-2 border-white animate-pulse bg-blue-500`} /></div>}
+                                        {!isObstacle && !isGoal && arrows.map((arrow, i) => (
+                                            <Navigation key={i} size={12} className="text-white absolute z-10" style={{ transform: `rotate(${arrow.rot}deg)`, opacity: arrow.op }} />
+                                        ))}
+                                    </div>
+                                );
+                             })}
+                        </div>
+                        <div className="absolute top-2 right-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-[10px] space-y-1 z-30">
+                            <div className="font-bold text-gray-400 mb-1">LEGEND</div>
+                            <div className="flex items-center gap-2"><Navigation size={10} className="text-white opacity-100" /><span>Deterministic</span></div>
+                            <div className="flex items-center gap-2"><Navigation size={10} className="text-white opacity-40" /><span>Probabilistic</span></div>
+                        </div>
+                     </div>
+                     <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                         <div>
+                             <h4 className="text-sm font-bold text-blue-300 mb-1">Lab Insight</h4>
+                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                                {getInsightText()}
+                             </p>
+                         </div>
+                     </div>
+                </div>
+                
+                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
+                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Environment & Policy</div>
+                     <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
+                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
                          
-                         return (
-                             <div key={idx} className={`w-10 h-10 border border-gray-700 flex items-center justify-center relative ${bg}`}>
-                                 {isAgent && <div className="w-6 h-6 bg-blue-500 rounded-full shadow-lg border-2 border-white relative">
-                                     {lastSlip && <Wind size={12} className="absolute -top-3 -right-3 text-white animate-bounce" />}
-                                 </div>}
-                                 {isGoal && <Target className="text-yellow-500" size={16} />}
-                                 {isPit && <AlertTriangle className="text-red-500" size={16} />}
-                             </div>
-                         );
-                     })}
-                 </div>
-             </div>
+                         <div className="pt-2 border-t border-gray-700"></div>
+                         <div className="space-y-1">
+                             <div className="flex justify-between text-xs text-gray-400"><span>Env Slip Chance ({(slipChance * 100).toFixed(0)}%)</span><Wind size={12} /></div>
+                             <input type="range" min="0" max="0.5" step="0.05" value={slipChance} onChange={(e) => setSlipChance(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
+                             <p className="text-[10px] text-gray-500">Prob. of moving in random direction</p>
+                         </div>
+
+                         {policyType === 'stochastic' && (
+                            <div className="space-y-1">
+                                <div className="flex justify-between text-xs text-gray-400"><span>Policy Temp ({temperature})</span><Thermometer size={12} /></div>
+                                <input type="range" min="0.1" max="5.0" step="0.1" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
+                                <p className="text-[10px] text-gray-500">Higher = More random (Softmax)</p>
+                            </div>
+                         )}
+
+                         <div className="pt-2 border-t border-gray-700"></div>
+                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                     </div>
+                </div>
+            </div>
         </div>
     );
 };
 
-// --- 3. Tabular vs Deep Lab ---
+// --- 3. Tabular vs Deep RL Lab ---
 export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // Simulating Deep RL by smoothing Q-updates across neighbors
-    const [mode, setMode] = useState<'tabular' | 'deep'>('tabular');
-    const [qTable, setQTable] = useState<Record<number, number[]>>({});
+    // Basic Environment
+    const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
+    const [startPos] = useState(START_DEFAULT);
+    const [goalPos] = useState(GOAL_DEFAULT);
     const [agentPos, setAgentPos] = useState(START_DEFAULT);
+
+    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
+    const [mode, setMode] = useState<'tabular' | 'deep'>('tabular');
     const [episode, setEpisode] = useState(0);
+    const [steps, setSteps] = useState(0);
+    const [qTable, setQTable] = useState<Record<number, number[]>>({});
+
+    // Params
+    const [speed, setSpeed] = useState(50);
     const [alpha, setAlpha] = useState(0.1);
-    const [flashed, setFlashed] = useState<number[]>([]);
+    const [gamma, setGamma] = useState(0.9);
+    const [epsilon, setEpsilon] = useState(1.0); // Start high for decay to matter
     const [epsilonDecay, setEpsilonDecay] = useState(0.995);
-    const [epsilon, setEpsilon] = useState(1.0);
+    // Generalization Radius (simulates Neural Network 'bleed')
+    const [genRadius, setGenRadius] = useState(1.5); 
 
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const episodeRewardRef = useRef(0);
 
-    const getQ = (s: number) => qTable[s] || [0, 0, 0, 0];
+    const getQ = (s: number) => qTable[s] || [0,0,0,0];
     const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
+    const dist = (idx1: number, idx2: number) => {
+        const c1 = toCoord(idx1);
+        const c2 = toCoord(idx2);
+        return Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
+    };
+
+    const randomizeEnvironment = () => {
+        setIsPlaying(false);
+        // ... (standard random map logic as above) ...
+        let attempts = 0;
+        let validMap = false;
+        let newObstacles: number[] = [];
+        while (!validMap && attempts < 100) {
+            newObstacles = [];
+            const count = 5 + Math.floor(Math.random() * 10);
+            for (let i = 0; i < count; i++) {
+                const pos = Math.floor(Math.random() * N_STATES);
+                if (pos !== startPos && pos !== goalPos && !newObstacles.includes(pos)) {
+                    newObstacles.push(pos);
+                }
+            }
+            if (isReachable(startPos, goalPos, newObstacles, GRID_W, GRID_H)) {
+                validMap = true;
+            }
+            attempts++;
+        }
+        setObstacles(newObstacles);
+        resetSim(true);
+    };
+
+    const resetSim = (clearMemory = true) => {
+        setIsPlaying(false);
+        setAgentPos(startPos);
+        setEpisode(0);
+        setSteps(0);
+        episodeRewardRef.current = 0;
+        if (clearMemory) {
+            setQTable({});
+            setEpsilon(1.0); // Reset exploration
+            if (onClearMetrics) onClearMetrics();
+        }
+    };
 
     const step = useCallback(() => {
-        let currPos = agentPos;
-        const qVals = getQ(currPos);
+        const currPos = agentPos;
+        const currentQVals = getQ(currPos);
+        
+        // Action Selection (Epsilon Greedy)
         let action = 0;
-        if (Math.random() < epsilon) action = Math.floor(Math.random() * 4);
-        else {
-             const max = Math.max(...qVals);
-             const opts = qVals.map((v, i) => v === max ? i : -1).filter(i => i !== -1);
-             action = opts[Math.floor(Math.random() * opts.length)];
+        if (Math.random() < epsilon) {
+            action = Math.floor(Math.random() * 4);
+        } else {
+            const maxVal = Math.max(...currentQVals);
+            const maxIndices = currentQVals.map((v, i) => v === maxVal ? i : -1).filter(i => i !== -1);
+            action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
         }
 
+        // Execute
         const { x, y } = toCoord(currPos);
         let nx = x, ny = y;
-        if (action === 0) ny = Math.max(0, ny - 1);
-        if (action === 1) nx = Math.min(GRID_W - 1, nx + 1);
-        if (action === 2) ny = Math.min(GRID_H - 1, ny + 1);
-        if (action === 3) nx = Math.max(0, nx - 1);
-        
+        if (action === 0) ny = Math.max(0, ny - 1); // U
+        if (action === 1) nx = Math.min(GRID_W - 1, nx + 1); // R
+        if (action === 2) ny = Math.min(GRID_H - 1, ny + 1); // D
+        if (action === 3) nx = Math.max(0, nx - 1); // L
+
         const nextIdx = ny * GRID_W + nx;
+        let nextPos = currPos;
         let reward = -0.1;
         let done = false;
-        if (nextIdx === GOAL_DEFAULT) { reward = 10; done = true; }
-        else if (DEFAULT_OBSTACLES.includes(nextIdx)) { reward = -5; done = true; }
+
+        if (obstacles.includes(nextIdx)) {
+            nextPos = currPos;
+            reward = -1;
+        } else if (nextIdx === goalPos) {
+            nextPos = goalPos;
+            reward = 100;
+            done = true;
+        } else {
+            nextPos = nextIdx;
+        }
         episodeRewardRef.current += reward;
 
-        const maxNextQ = done ? 0 : Math.max(...getQ(nextIdx));
-        const currentQ = qVals[action];
-        const target = reward + 0.9 * maxNextQ;
-        const delta = target - currentQ;
-        
-        const newTable = { ...qTable };
-        const affected: number[] = [];
+        // LEARNING UPDATE
+        // Standard TD Error
+        const nextQVals = getQ(nextPos);
+        const maxNextQ = done ? 0 : Math.max(...nextQVals);
+        const currentQ = getQ(currPos)[action];
+        const tdError = reward + gamma * maxNextQ - currentQ;
 
-        // Update Logic
-        if (!newTable[currPos]) newTable[currPos] = [0,0,0,0];
-        newTable[currPos][action] += alpha * delta;
-        affected.push(currPos);
+        const newQTable = { ...qTable };
 
-        // Generalization (Deep Mode)
-        if (mode === 'deep') {
-            // Update neighbors slightly
-            const neighbors = [currPos-1, currPos+1, currPos-GRID_W, currPos+GRID_W];
-            neighbors.forEach(n => {
-                if (n >= 0 && n < N_STATES) {
-                    if (!newTable[n]) newTable[n] = [0,0,0,0];
-                    newTable[n][action] += alpha * delta * 0.5; // Generalization factor
-                    affected.push(n);
+        if (mode === 'tabular') {
+            // Precise Update: Only affects current state
+            if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
+            newQTable[currPos][action] += alpha * tdError;
+        } else {
+            // Deep (Simulated): Function Approximation / Generalization
+            // Update neighbors based on radial distance
+            for (let s = 0; s < N_STATES; s++) {
+                if (obstacles.includes(s) || s === goalPos) continue;
+                
+                const d = dist(currPos, s);
+                // Gaussian Kernel for similarity
+                const similarity = Math.exp(-Math.pow(d, 2) / (2 * Math.pow(genRadius, 2)));
+                
+                if (similarity > 0.01) {
+                    if (!newQTable[s]) newQTable[s] = [0,0,0,0];
+                    // Deep RL update: weights allow generalization
+                    newQTable[s][action] += alpha * tdError * similarity;
                 }
-            });
+            }
         }
-        
-        setQTable(newTable);
-        setFlashed(affected);
-        
-        if (onLogUpdate && Math.random() < 0.3) {
+        setQTable(newQTable);
+
+        // Logging
+        if (onLogUpdate && Math.random() < 0.2) {
             onLogUpdate({
-                algorithm: mode === 'deep' ? 'Deep RL (Approx)' : 'Tabular RL',
-                stepDescription: mode === 'deep' ? 'Updating State + Neighbors' : 'Updating Single State',
-                formula: 'Q(s) ← Q(s) + α... ( & neighbors)',
-                variables: { 'Affected Cells': affected.length },
-                result: 'Weights Adjusted'
+                algorithm: mode === 'tabular' ? 'Tabular Q-Learning' : 'Deep RL (Approx)',
+                stepDescription: mode === 'tabular' ? 'Updating single state exactly.' : `Generalizing update to neighbors (Radius=${genRadius})`,
+                formula: mode === 'tabular' ? 'Q(s,a) ← Q + α δ' : 'Q(s\',a) ← Q + α δ * Similarity(s, s\')',
+                variables: {
+                    'TD Error': tdError.toFixed(3),
+                    'Alpha': alpha,
+                    'Similarity': mode === 'tabular' ? '1.0 (Self)' : 'e^(-d²/2σ²)'
+                },
+                result: 'Weights Updated'
             });
         }
 
+        setAgentPos(done ? startPos : nextPos);
         if (done) {
             setEpisode(e => e + 1);
+            setSteps(0);
+            
+            // Decay Epsilon
             setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
-            if (onUpdateMetrics) onUpdateMetrics({ episode: episode + 1, reward: episodeRewardRef.current, epsilon, steps: 0 });
+
+            if (onUpdateMetrics) {
+                onUpdateMetrics({
+                    episode: episode + 1,
+                    reward: episodeRewardRef.current,
+                    epsilon,
+                    steps
+                });
+            }
             episodeRewardRef.current = 0;
-            setAgentPos(START_DEFAULT);
         } else {
-            setAgentPos(nextIdx);
+            setSteps(s => s + 1);
         }
-    }, [agentPos, qTable, mode, alpha, episode, epsilon, epsilonDecay]);
+
+    }, [agentPos, qTable, obstacles, startPos, goalPos, mode, alpha, gamma, epsilon, epsilonDecay, genRadius, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics]);
 
     useEffect(() => {
-        if (isPlaying) intervalRef.current = setInterval(step, 50);
+        if (isPlaying) {
+            intervalRef.current = setInterval(step, speed);
+        } else {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        }
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-    }, [isPlaying, step]);
+    }, [isPlaying, speed, step]);
 
-    const resetSim = () => {
-        setIsPlaying(false);
-        setAgentPos(START_DEFAULT);
-        setQTable({});
-        setEpisode(0);
-        setEpsilon(1.0);
-        episodeRewardRef.current = 0;
-        if(onClearMetrics) onClearMetrics();
+    // Render logic is similar
+     const getRenderData = (idx: number) => {
+        const qs = getQ(idx);
+        const maxQ = Math.max(...qs);
+        // Normalize
+        const intensity = Math.min(Math.abs(maxQ) / 20, 1);
+        let bgColor = 'rgba(31, 41, 55, 0.5)';
+        if (maxQ > 0) bgColor = `rgba(16, 185, 129, ${0.1 + intensity * 0.9})`; 
+        else if (maxQ < 0) bgColor = `rgba(239, 68, 68, ${0.1 + intensity * 0.5})`;
+        return bgColor;
     };
 
     return (
-        <div className="flex flex-col gap-4">
-             <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 flex justify-between items-center">
-                 <div className="flex gap-2">
-                     <button onClick={() => { setMode('tabular'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold ${mode === 'tabular' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Tabular (Exact)</button>
-                     <button onClick={() => { setMode('deep'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold ${mode === 'deep' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Deep (Generalization)</button>
-                 </div>
-                 <div className="flex items-center gap-2">
-                    <span className="text-xs text-gray-400">Decay: {epsilonDecay}</span>
-                    <input type="range" min="0.90" max="0.999" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-20 h-1 bg-gray-600 rounded-lg cursor-pointer" />
-                 </div>
-                 <button onClick={() => setIsPlaying(!isPlaying)} className={`p-2 rounded-full ${isPlaying ? 'bg-yellow-600' : 'bg-green-600'}`}>{isPlaying ? <Pause size={16} /> : <Play size={16} />}</button>
-             </div>
-             <div className="bg-gray-800 p-6 rounded-xl flex justify-center min-h-[300px]">
-                 <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
-                     {Array.from({ length: N_STATES }).map((_, idx) => {
-                         const isAgent = agentPos === idx;
-                         const isGoal = idx === GOAL_DEFAULT;
-                         const isFlash = flashed.includes(idx);
-                         const qs = getQ(idx);
-                         const maxQ = Math.max(...qs);
-                         const intensity = Math.min(Math.abs(maxQ) / 10, 1);
-                         const bg = maxQ > 0 ? `rgba(16, 185, 129, ${intensity})` : 'rgba(31, 41, 55, 0.5)';
-                         
-                         return (
-                             <div key={idx} className={`w-10 h-10 border border-gray-700 flex items-center justify-center relative ${bg} ${isFlash ? 'ring-2 ring-purple-500 z-10' : ''}`}>
-                                 {isAgent && <div className="w-6 h-6 bg-blue-500 rounded-full shadow-lg border-2 border-white"/>}
-                                 {isGoal && <Target className="text-yellow-500" size={16} />}
-                             </div>
-                         );
-                     })}
-                 </div>
-             </div>
+        <div className="flex flex-col gap-4 w-full">
+            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-col gap-2">
+                        <div className="flex bg-gray-800 rounded p-1 self-start">
+                            <button onClick={() => { setMode('tabular'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'tabular' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
+                                <div className="flex items-center gap-2"><Database size={14}/> Tabular (Exact)</div>
+                            </button>
+                            <button onClick={() => { setMode('deep'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'deep' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
+                                <div className="flex items-center gap-2"><Network size={14}/> Deep RL (Approx)</div>
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
+                            <Shuffle size={14} /> New Map
+                        </button>
+                        <div className="h-6 w-px bg-gray-700 mx-2"></div>
+                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                        </button>
+                        <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-9 flex flex-col gap-4">
+                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
+                             {Array.from({ length: N_STATES }).map((_, idx) => {
+                                const isAgent = agentPos === idx;
+                                const isGoal = idx === goalPos;
+                                const isObstacle = obstacles.includes(idx);
+                                const bgColor = !isObstacle && !isGoal ? getRenderData(idx) : undefined;
+                                
+                                return (
+                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200 ${isObstacle ? 'bg-gray-900' : ''} ${isGoal ? 'bg-yellow-900/30 ring-1 ring-yellow-500' : ''}`} style={{ backgroundColor: bgColor }}>
+                                        {isObstacle && <div className="w-full h-full bg-gray-800 flex items-center justify-center"><div className="w-1/2 h-1/2 bg-gray-600 rounded-sm"/></div>}
+                                        {isGoal && <Target size={18} className="text-yellow-400" />}
+                                        {isAgent && <div className={`absolute inset-0 flex items-center justify-center z-20`}><div className={`w-4 h-4 md:w-6 md:h-6 rounded-full shadow-lg border-2 border-white animate-pulse ${mode === 'tabular' ? 'bg-blue-500' : 'bg-indigo-500'}`} /></div>}
+                                    </div>
+                                );
+                             })}
+                        </div>
+                        {/* Legend */}
+                        <div className="absolute top-2 right-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-[10px] space-y-1 z-30">
+                            <div className="font-bold text-gray-400 mb-1">LEARNING SPREAD</div>
+                            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-full"></div><span>Current State</span></div>
+                            {mode === 'deep' && <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500/30 rounded-full blur-[2px]"></div><span>Generalization</span></div>}
+                        </div>
+                    </div>
+                    <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                         <div>
+                             <h4 className="text-sm font-bold text-blue-300 mb-1">Concept Insight</h4>
+                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                                {mode === 'tabular' 
+                                  ? "Tabular RL: The agent maintains an exact table of values. Learning about one square tells it NOTHING about its neighbors. It must visit every single square to learn the map. This is slow but precise."
+                                  : "Deep RL (Approximated): The agent uses a Function Approximator (simulated here). Learning about one square 'bleeds' into nearby squares because the network generalizes features. It learns the map much faster, but risks blurring fine details."}
+                             </p>
+                         </div>
+                     </div>
+                </div>
+
+                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
+                    <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Neural Network Config</div>
+                    <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        
+                        {mode === 'deep' && (
+                            <div className="space-y-1 bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
+                                <div className="flex justify-between text-xs text-indigo-300"><span>Generalization Radius ({genRadius})</span><Network size={12} /></div>
+                                <input type="range" min="0.5" max="3.0" step="0.1" value={genRadius} onChange={(e) => setGenRadius(Number(e.target.value))} className="w-full h-1 bg-indigo-500 rounded-lg cursor-pointer" />
+                                <p className="text-[9px] text-gray-400 mt-1">How far learning spreads to neighbors. Higher = Faster but blurrier.</p>
+                            </div>
+                        )}
+                        <div className="pt-2 border-t border-gray-700"></div>
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Learning Rate ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+
+                    </div>
+                </div>
+            </div>
         </div>
     );
 };
 
-// --- 4. Explore vs Exploit Lab (Bandits) ---
+// --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
 export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // Multi-Armed Bandits
-    const [arms, setArms] = useState([0.2, 0.5, 0.8, 0.3, 0.6]); // True Win Rates
-    const [estimates, setEstimates] = useState(arms.map(() => ({ val: 0, count: 0 })));
-    const [algo, setAlgo] = useState<'epsilon' | 'ucb'>('epsilon');
+    // 5 Arms
+    const N_ARMS = 5;
+    // Fixed "True" probabilities for the arms (unknown to agent)
+    // Arm 3 is best (0.8)
+    const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
+    
+    const [strategy, setStrategy] = useState<'greedy' | 'epsilon' | 'optimistic' | 'ucb'>('epsilon');
+    
+    // Agent Knowledge
+    // { count: number, sum: number, q: number }
+    const [arms, setArms] = useState<{ count: number; sum: number; q: number }[]>(
+        Array(N_ARMS).fill({ count: 0, sum: 0, q: 0 })
+    );
+    
+    // UCB Parameter (c)
+    const [ucbC, setUcbC] = useState(2.0);
+    // Epsilon
+    const [epsilon, setEpsilon] = useState(0.1);
+    // Initial Q (Optimistic)
+    const [initQ, setInitQ] = useState(0.0);
+    
+    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
-    const [stepCount, setStepCount] = useState(0);
+    const [totalSteps, setTotalSteps] = useState(0);
+    const [totalReward, setTotalReward] = useState(0);
+    const [speed, setSpeed] = useState(200);
     
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const batchRewardRef = useRef(0);
 
-    const step = useCallback(() => {
-        // 1. Select Arm
-        let choice = 0;
-        if (algo === 'epsilon') {
-            if (Math.random() < 0.1) choice = Math.floor(Math.random() * arms.length);
-            else {
-                const vals = estimates.map(e => e.val);
-                const max = Math.max(...vals);
-                choice = vals.indexOf(max);
-            }
-        } else {
-            // UCB
-            const vals = estimates.map((e, i) => {
-                if (e.count === 0) return 9999;
-                return e.val + Math.sqrt(2 * Math.log(stepCount + 1) / e.count);
-            });
-            choice = vals.indexOf(Math.max(...vals));
-        }
-
-        // 2. Reward
-        const reward = Math.random() < arms[choice] ? 1 : 0;
-        
-        // 3. Update
-        const newEst = [...estimates];
-        const { val, count } = newEst[choice];
-        newEst[choice] = {
-            val: val + (reward - val) / (count + 1), // Incremental Mean
-            count: count + 1
-        };
-        setEstimates(newEst);
-        setStepCount(s => s + 1);
-
-        if (onUpdateMetrics) onUpdateMetrics({ episode: stepCount, reward, epsilon: 0.1, steps: 0 });
-
-        if (onLogUpdate && Math.random() < 0.2) {
-            onLogUpdate({
-                algorithm: algo === 'ucb' ? 'UCB' : 'Epsilon-Greedy',
-                stepDescription: `Pulled Arm ${choice + 1}`,
-                formula: 'Q(a) ← Q(a) + 1/n * (R - Q(a))',
-                variables: { 'Reward': reward, 'New Est': newEst[choice].val.toFixed(2) },
-                result: 'Updated Estimate'
-            });
-        }
-
-    }, [algo, arms, estimates, stepCount]);
-
-    useEffect(() => {
-        if (isPlaying) intervalRef.current = setInterval(step, 100);
-        return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-    }, [isPlaying, step]);
-
-    const reset = () => {
-        setEstimates(arms.map(() => ({ val: 0, count: 0 })));
-        setStepCount(0);
+    const resetSim = (newInitQ = initQ) => {
+        setIsPlaying(false);
+        setTotalSteps(0);
+        setTotalReward(0);
+        batchRewardRef.current = 0;
+        setArms(Array(N_ARMS).fill({ count: 0, sum: 0, q: newInitQ }));
         if (onClearMetrics) onClearMetrics();
     };
 
+    const step = useCallback(() => {
+        let action = 0;
+        let logDesc = "";
+        let logFormula = "";
+        
+        // 1. CHOOSE ACTION
+        if (strategy === 'greedy') {
+            // Argmax Q
+            let maxQ = -Infinity;
+            let candidates = [];
+            for (let i=0; i<N_ARMS; i++) {
+                if (arms[i].q > maxQ) { maxQ = arms[i].q; candidates = [i]; }
+                else if (arms[i].q === maxQ) candidates.push(i);
+            }
+            action = candidates[Math.floor(Math.random() * candidates.length)];
+            logDesc = "Greedy: Choosing arm with highest Q-value";
+            logFormula = "a = argmax Q(a)";
+        } 
+        else if (strategy === 'epsilon') {
+            if (Math.random() < epsilon) {
+                action = Math.floor(Math.random() * N_ARMS);
+                logDesc = "Epsilon: Exploring random arm";
+                logFormula = "Random (ε)";
+            } else {
+                let maxQ = -Infinity;
+                let candidates = [];
+                for (let i=0; i<N_ARMS; i++) {
+                    if (arms[i].q > maxQ) { maxQ = arms[i].q; candidates = [i]; }
+                    else if (arms[i].q === maxQ) candidates.push(i);
+                }
+                action = candidates[Math.floor(Math.random() * candidates.length)];
+                logDesc = "Epsilon: Exploiting best arm";
+                logFormula = "Greedy (1-ε)";
+            }
+        }
+        else if (strategy === 'optimistic') {
+            // Same as greedy, but Q starts high
+            let maxQ = -Infinity;
+            let candidates = [];
+            for (let i=0; i<N_ARMS; i++) {
+                if (arms[i].q > maxQ) { maxQ = arms[i].q; candidates = [i]; }
+                else if (arms[i].q === maxQ) candidates.push(i);
+            }
+            action = candidates[Math.floor(Math.random() * candidates.length)];
+            logDesc = "Optimistic: Choosing highest Q (initially high)";
+            logFormula = "a = argmax Q(a)";
+        }
+        else if (strategy === 'ucb') {
+            // argmax [ Q + c * sqrt(ln(t) / N) ]
+            let maxScore = -Infinity;
+            let candidates = [];
+            const t = totalSteps + 1; // avoid log(0)
+            
+            for (let i=0; i<N_ARMS; i++) {
+                if (arms[i].count === 0) {
+                    // Force pick unvisited arms
+                    candidates = [i];
+                    maxScore = Infinity;
+                    break;
+                }
+                const uncertainty = ucbC * Math.sqrt(Math.log(t) / arms[i].count);
+                const score = arms[i].q + uncertainty;
+                if (score > maxScore) { maxScore = score; candidates = [i]; }
+                else if (score === maxScore) candidates.push(i);
+            }
+            action = candidates[Math.floor(Math.random() * candidates.length)];
+            logDesc = "UCB: Balancing Reward + Uncertainty";
+            logFormula = "a = argmax [Q + c√ln(t)/N]";
+        }
+
+        // 2. GET REWARD
+        // Bernoulli trial
+        const reward = Math.random() < TRUE_MEANS[action] ? 1 : 0;
+        
+        // 3. UPDATE
+        const newArms = [...arms];
+        const arm = newArms[action];
+        const newCount = arm.count + 1;
+        const newSum = arm.sum + reward;
+        // Incremental mean update: Q_k+1 = Q_k + 1/k(R - Q_k)
+        // Or just sum/count
+        const newQ = newSum / newCount;
+        
+        newArms[action] = { count: newCount, sum: newSum, q: newQ };
+        setArms(newArms);
+        
+        setTotalSteps(s => s + 1);
+        setTotalReward(r => r + reward);
+        batchRewardRef.current += reward;
+
+        // Logging
+        if (onLogUpdate) {
+            onLogUpdate({
+                algorithm: `Bandit (${strategy})`,
+                stepDescription: logDesc,
+                formula: logFormula,
+                variables: {
+                    'Selected Arm': action + 1,
+                    'Reward': reward,
+                    'Current Q(a)': arm.q.toFixed(3),
+                    'New Q(a)': newQ.toFixed(3)
+                },
+                result: reward === 1 ? 'WIN' : 'LOSS'
+            });
+        }
+        
+        // Update Graph every 10 steps
+        if ((totalSteps + 1) % 10 === 0) {
+            const avgReward = batchRewardRef.current / 10;
+            if (onUpdateMetrics) {
+                onUpdateMetrics({
+                    episode: Math.floor((totalSteps + 1) / 10),
+                    reward: avgReward, // This is technically rate, not total. 0 to 1 scale.
+                    epsilon: strategy === 'epsilon' ? epsilon : 0,
+                    steps: totalSteps
+                });
+            }
+            batchRewardRef.current = 0;
+        }
+
+    }, [arms, strategy, epsilon, ucbC, totalSteps, onLogUpdate, onUpdateMetrics]);
+
+    useEffect(() => {
+        if (isPlaying) {
+            intervalRef.current = setInterval(step, speed);
+        } else {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+        }
+        return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+    }, [isPlaying, speed, step]);
+
+    const getInsightText = () => {
+        if (strategy === 'greedy') return "Greedy: Quickly locks onto one arm. If it picks a sub-optimal arm early and gets lucky (or the best arm gets unlucky), it gets stuck there forever.";
+        if (strategy === 'epsilon') return "Epsilon-Greedy: Continues to explore randomly (ε). This guarantees finding the best arm eventually, but wastes pulls on bad arms forever.";
+        if (strategy === 'optimistic') return "Optimistic: By starting with Q=5.0, the agent is 'disappointed' by every arm initially. It is forced to try every arm multiple times until their values drop to realistic levels. It naturally explores early and exploits late.";
+        if (strategy === 'ucb') return "UCB: It calculates a 'Confidence Interval'. Arms played less have high uncertainty (wide interval), boosting their score. As an arm is played, uncertainty shrinks. It mathematically balances exploration and exploitation efficiently.";
+        return "";
+    };
+
     return (
-        <div className="flex flex-col gap-8">
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 flex justify-between items-center">
-                 <div className="flex gap-2">
-                     <button onClick={() => { setAlgo('epsilon'); reset(); }} className={`px-4 py-2 rounded text-xs font-bold ${algo === 'epsilon' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}>Epsilon-Greedy</button>
-                     <button onClick={() => { setAlgo('ucb'); reset(); }} className={`px-4 py-2 rounded text-xs font-bold ${algo === 'ucb' ? 'bg-purple-600 text-white' : 'bg-gray-800 text-gray-400'}`}>UCB (Optimism)</button>
-                 </div>
-                 <button onClick={() => setIsPlaying(!isPlaying)} className={`p-2 rounded-full ${isPlaying ? 'bg-yellow-600' : 'bg-green-600'}`}>{isPlaying ? <Pause size={16} /> : <Play size={16} />}</button>
-             </div>
-             <div className="bg-gray-800 p-8 rounded-xl h-[400px] flex items-end justify-around gap-4 border border-gray-700">
-                 {arms.map((trueP, idx) => {
-                     const height = Math.min(estimates[idx].val * 100, 100);
-                     return (
-                         <div key={idx} className="w-16 flex flex-col items-center gap-2 relative h-full justify-end">
-                             <div className="text-xs text-gray-400 font-mono mb-1">{estimates[idx].val.toFixed(2)}</div>
-                             <div className="w-full bg-blue-600 rounded-t transition-all duration-300 relative" style={{ height: `${height}%` }}>
-                                 {/* True Probability Marker */}
-                                 <div className="absolute w-full border-t-2 border-green-400 border-dashed" style={{ bottom: `${trueP * 100}%` }}></div>
-                             </div>
-                             <div className="text-xs font-bold text-gray-500">Arm {idx+1}</div>
-                             <div className="text-[10px] text-gray-600">n={estimates[idx].count}</div>
+        <div className="flex flex-col gap-4 w-full">
+            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-col gap-2">
+                         <div className="flex bg-gray-800 rounded p-1 self-start">
+                            <button onClick={() => { setStrategy('greedy'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'greedy' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Greedy</button>
+                            <button onClick={() => { setStrategy('epsilon'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'epsilon' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Epsilon-Greedy</button>
+                            <button onClick={() => { setStrategy('optimistic'); setInitQ(5.0); resetSim(5.0); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'optimistic' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Optimistic Init</button>
+                            <button onClick={() => { setStrategy('ucb'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'ucb' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>UCB</button>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                        </button>
+                        <button onClick={() => resetSim()} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <div className="lg:col-span-9 flex flex-col gap-4">
+                     <div className="bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-inner flex flex-col justify-center items-center relative min-h-[400px]">
+                        
+                        {/* BANDIT ARMS VISUALIZATION */}
+                        <div className="flex items-end justify-center gap-4 h-[250px] w-full max-w-2xl px-4">
+                            {arms.map((arm, i) => {
+                                const heightPct = Math.min(arm.q * 100, 100);
+                                const trueHeightPct = TRUE_MEANS[i] * 100;
+                                const isBest = i === 3; // Hardcoded best
+                                
+                                return (
+                                    <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end relative group">
+                                        {/* Count Badge */}
+                                        <div className="bg-gray-700 text-xs px-2 py-0.5 rounded-full font-mono text-gray-300 mb-1">{arm.count} plays</div>
+                                        
+                                        {/* Bar Container */}
+                                        <div className="w-full bg-gray-900 rounded-t-lg relative border-b border-gray-600 h-full overflow-hidden">
+                                            {/* True Mean (Ghost) - only show on hover or cheat mode? Let's show as faint line */}
+                                            <div className="absolute bottom-0 w-full bg-green-500/10 border-t-2 border-dashed border-green-500/30 transition-all duration-500" style={{ height: `${trueHeightPct}%` }}>
+                                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-green-500/50 opacity-0 group-hover:opacity-100 whitespace-nowrap">True: {TRUE_MEANS[i]}</span>
+                                            </div>
+
+                                            {/* Estimated Mean (Solid) */}
+                                            <div 
+                                                className={`absolute bottom-0 w-full transition-all duration-300 ${isBest && arm.q > 0.7 ? 'bg-blue-500' : 'bg-blue-600/60'}`} 
+                                                style={{ height: `${heightPct}%` }}
+                                            ></div>
+                                            
+                                            {/* Value Label */}
+                                            <div className="absolute bottom-2 w-full text-center text-xs font-bold text-white drop-shadow-md z-10">
+                                                {arm.q.toFixed(2)}
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="text-gray-400 font-bold text-sm mt-1">Arm {i+1}</div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+
+                     </div>
+                     <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                         <div>
+                             <h4 className="text-sm font-bold text-blue-300 mb-1">Strategy Insight</h4>
+                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                                {getInsightText()}
+                             </p>
                          </div>
-                     );
-                 })}
-             </div>
+                     </div>
+                </div>
+                
+                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
+                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Bandit Controls</div>
+                     <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
+                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="1000" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                         
+                         <div className="pt-2 border-t border-gray-700"></div>
+
+                         {strategy === 'epsilon' && (
+                            <div className="space-y-1">
+                                <div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(2)})</span><Map size={12} /></div>
+                                <input type="range" min="0" max="0.5" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
+                            </div>
+                         )}
+
+                         {strategy === 'ucb' && (
+                            <div className="space-y-1">
+                                <div className="flex justify-between text-xs text-gray-400"><span>Confidence (c={ucbC})</span><HelpCircle size={12} /></div>
+                                <input type="range" min="0.5" max="5.0" step="0.5" value={ucbC} onChange={(e) => setUcbC(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
+                                <p className="text-[10px] text-gray-500">Higher = More exploration</p>
+                            </div>
+                         )}
+                         
+                         {strategy === 'optimistic' && (
+                            <div className="space-y-1">
+                                <p className="text-xs text-green-400">Initial Q: {initQ.toFixed(1)}</p>
+                                <p className="text-[10px] text-gray-500">High initial value forces agent to try all arms to verify if they are actually that good.</p>
+                            </div>
+                         )}
+
+                         <div className="mt-4 bg-gray-800 p-2 rounded">
+                            <div className="flex justify-between text-xs mb-1">
+                                <span className="text-gray-400">Total Steps:</span>
+                                <span className="text-white font-mono">{totalSteps}</span>
+                            </div>
+                            <div className="flex justify-between text-xs">
+                                <span className="text-gray-400">Total Reward:</span>
+                                <span className="text-green-400 font-mono">{totalReward}</span>
+                            </div>
+                         </div>
+                     </div>
+                </div>
+            </div>
         </div>
     );
 };
@@ -1005,9 +1555,6 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     // Modes: 'single' (Reach Goal), 'coop' (Rendezvous), 'comp' (Tag/Predator-Prey)
     const [mode, setMode] = useState<'single' | 'coop' | 'comp'>('single');
     
-    // Learning Strategy: IQL (Independent) vs Joint (Centralized/CTDE view)
-    const [learningStrategy, setLearningStrategy] = useState<'iql' | 'joint'>('joint');
-
     const [agentAPos, setAgentAPos] = useState(0);
     const [agentBPos, setAgentBPos] = useState(MA_STATES - 1); // Only for multi
     
@@ -1015,9 +1562,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     const [goalA, setGoalA] = useState(MA_STATES - 1);
     const [goalB, setGoalB] = useState(0); // For coop
     
-    // Q-Tables.
-    // IQL: key = "PosA"
-    // Joint: key = "PosA,PosB"
+    // Q-Tables. Key is complicated. "PosA,PosB"
+    // For single mode, just "PosA"
     const [qTableA, setQTableA] = useState<Record<string, number[]>>({});
     const [qTableB, setQTableB] = useState<Record<string, number[]>>({}); // Only for multi
 
@@ -1037,18 +1583,10 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     const toCoord = (idx: number) => ({ x: idx % MA_W, y: Math.floor(idx / MA_W) });
     const fromCoord = (x: number, y: number) => y * MA_W + x;
 
-    const getKeyA = (pA: number, pB: number) => {
-        if (mode === 'single') return `${pA}`;
-        return learningStrategy === 'joint' ? `${pA},${pB}` : `${pA}`;
-    };
-
-    const getKeyB = (pA: number, pB: number) => {
-        // Only relevant for multi-agent
-        return learningStrategy === 'joint' ? `${pA},${pB}` : `${pB}`;
-    };
+    const getKey = (pA: number, pB: number) => mode === 'single' ? `${pA}` : `${pA},${pB}`;
     
-    const getQA = (pA: number, pB: number) => qTableA[getKeyA(pA, pB)] || [0,0,0,0];
-    const getQB = (pA: number, pB: number) => qTableB[getKeyB(pA, pB)] || [0,0,0,0];
+    const getQA = (pA: number, pB: number) => qTableA[getKey(pA, pB)] || [0,0,0,0];
+    const getQB = (pA: number, pB: number) => qTableB[getKey(pA, pB)] || [0,0,0,0];
 
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
@@ -1076,8 +1614,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
 
     const step = useCallback(() => {
         // Current State
-        const keyA = getKeyA(agentAPos, agentBPos);
-        const keyB = getKeyB(agentAPos, agentBPos);
+        const key = getKey(agentAPos, agentBPos);
         const qA = getQA(agentAPos, agentBPos);
         const qB = getQB(agentAPos, agentBPos);
         
@@ -1101,6 +1638,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
         }
 
         // 2. MOVE
+        // Simultaneous move? Or sequential? Simultaneous is standard for Grid Games.
         const nextA = move(agentAPos, actionA);
         let nextB = agentBPos;
         if (mode !== 'single') nextB = move(agentBPos, actionB);
@@ -1119,6 +1657,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             if (nextA === goalA && nextB === goalB) {
                 rA = 10; rB = 10; done = true; logDesc = "Coop Success!";
             } else {
+                // Shaping?
                 rA = -0.1; rB = -0.1;
             }
         }
@@ -1127,6 +1666,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             if (nextA === nextB) {
                 rA = 10; rB = -10; done = true; logDesc = "Captured!";
             } else {
+                // Shaping to encourage chase?
                 rA = -0.1; rB = 0.1; // B survives another step
             }
         }
@@ -1140,8 +1680,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
         const newQA = currentQA + alpha * (rA + gamma * maxNextQA - currentQA);
         
         const newTableA = { ...qTableA };
-        if (!newTableA[keyA]) newTableA[keyA] = [0,0,0,0];
-        newTableA[keyA][actionA] = newQA;
+        if (!newTableA[key]) newTableA[key] = [0,0,0,0];
+        newTableA[key][actionA] = newQA;
         setQTableA(newTableA);
 
         if (mode !== 'single') {
@@ -1151,8 +1691,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             const newQB = currentQB + alpha * (rB + gamma * maxNextQB - currentQB);
             
             const newTableB = { ...qTableB };
-            if (!newTableB[keyB]) newTableB[keyB] = [0,0,0,0];
-            newTableB[keyB][actionB] = newQB;
+            if (!newTableB[key]) newTableB[key] = [0,0,0,0];
+            newTableB[key][actionB] = newQB;
             setQTableB(newTableB);
         }
 
@@ -1164,8 +1704,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                 formula: 'Q(s,a) ← Q + α δ',
                 variables: {
                     'State': mode === 'single' ? nextA : `(${nextA},${nextB})`,
-                    'Strategy': learningStrategy,
                     'Reward A': rA,
+                    'Reward B': mode === 'single' ? 'N/A' : rB
                 },
                 result: 'Joint Update'
             });
@@ -1188,6 +1728,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             episodeRewardRef.current = 0;
             // Respawn
             if (mode !== 'single') {
+                 // Random respawn for robust learning
                  setAgentAPos(Math.floor(Math.random() * MA_STATES));
                  let b = Math.floor(Math.random() * MA_STATES);
                  while(b === nextA) b = Math.floor(Math.random() * MA_STATES);
@@ -1197,6 +1738,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             }
         } else {
             setSteps(s => s + 1);
+            // Max steps
             if (steps > 50) {
                  setEpisode(e => e + 1);
                  setSteps(0);
@@ -1206,7 +1748,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             }
         }
 
-    }, [agentAPos, agentBPos, qTableA, qTableB, mode, goalA, goalB, alpha, gamma, epsilon, onLogUpdate, onUpdateMetrics, steps, episode, learningStrategy]);
+    }, [agentAPos, agentBPos, qTableA, qTableB, mode, goalA, goalB, alpha, gamma, epsilon, onLogUpdate, onUpdateMetrics, steps, episode]);
 
     useEffect(() => {
         if (isPlaying) {
@@ -1219,14 +1761,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
 
     const getInsightText = () => {
         if (mode === 'single') return "Single Agent: Standard RL. The environment is stationary (the goal doesn't move). Convergence is guaranteed.";
-        if (mode === 'coop') {
-            if (learningStrategy === 'iql') return "Coop (IQL): Agents DO NOT see each other. They only see their own position. They often fail to coordinate because they can't tell if the other agent is going to the goal. It's blind hope.";
-            return "Coop (Joint): Agents see the FULL state (PosA, PosB). Agent A learns 'Go to Goal A ONLY IF Agent B is near Goal B'. They can perfectly synchronize.";
-        }
-        if (mode === 'comp') {
-            if (learningStrategy === 'iql') return "Comp (IQL): Predator sees Prey as 'Environment Noise'. It chases where the prey WAS, not where it IS. The prey runs into walls. Result: Chaos and cycling strategies.";
-            return "Comp (Joint): Agents see each other. Predator learns to intercept. Prey learns to dodge. This is 'Centralized Training', allowing complex strategy.";
-        }
+        if (mode === 'coop') return "Cooperative (Rendezvous): Both agents must learn to coordinate. Agent A learns 'I should go to Goal A, BUT ONLY IF Agent B goes to Goal B'. If they learn independently without seeing each other, they might never synchronize.";
+        if (mode === 'comp') return "Competitive (Tag): Zero-Sum Game. The Predator (Blue) learns to chase. The Prey (Red) learns to run away. The environment is 'Non-Stationary' because the opponent keeps changing its strategy to beat you. This often leads to cycling behavior rather than convergence.";
         return "";
     };
 
@@ -1235,18 +1771,11 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex flex-col gap-2">
-                        <div className="flex bg-gray-800 rounded p-1 self-start mb-2">
+                        <div className="flex bg-gray-800 rounded p-1 self-start">
                             <button onClick={() => { setMode('single'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'single' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Single (Nav)</button>
-                            <button onClick={() => { setMode('coop'); setGoalA(MA_STATES-1); setGoalB(0); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Coop (Meet)</button>
+                            <button onClick={() => { setMode('coop'); setGoalA(0); setGoalB(MA_STATES-1); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Coop (Meet)</button>
                             <button onClick={() => { setMode('comp'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'comp' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Comp (Tag)</button>
                         </div>
-                        {mode !== 'single' && (
-                             <div className="flex bg-gray-800 rounded p-1 self-start items-center gap-2">
-                                <span className="text-[10px] uppercase font-bold text-gray-500 ml-2 mr-1">Learning:</span>
-                                <button onClick={() => { setLearningStrategy('iql'); resetSim(true); }} className={`px-3 py-1.5 rounded text-[10px] font-bold transition-all ${learningStrategy === 'iql' ? 'bg-gray-600 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>Independent (IQL)</button>
-                                <button onClick={() => { setLearningStrategy('joint'); resetSim(true); }} className={`px-3 py-1.5 rounded text-[10px] font-bold transition-all ${learningStrategy === 'joint' ? 'bg-indigo-600 text-white shadow' : 'text-gray-500 hover:text-gray-300'}`}>Joint (CTDE)</button>
-                             </div>
-                        )}
                     </div>
                     <div className="flex items-center gap-2">
                         <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
@@ -1269,16 +1798,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                                 
                                 return (
                                     <div key={idx} className={`w-10 h-10 md:w-12 md:h-12 border border-gray-700 rounded-sm flex items-center justify-center relative bg-gray-900/50`}>
-                                        {isGoalA && (
-                                            <div className="absolute inset-0 bg-blue-900/30 border-2 border-blue-500 rounded-sm flex items-start justify-start p-1">
-                                                <span className="text-[8px] font-bold text-blue-300 uppercase leading-none">Goal A</span>
-                                            </div>
-                                        )}
-                                        {isGoalB && (
-                                            <div className="absolute inset-0 bg-red-900/30 border-2 border-red-500 rounded-sm flex items-start justify-start p-1">
-                                                <span className="text-[8px] font-bold text-red-300 uppercase leading-none">Goal B</span>
-                                            </div>
-                                        )}
+                                        {isGoalA && <div className="absolute inset-0 bg-blue-500/20 border-2 border-blue-500/50 rounded-sm"></div>}
+                                        {isGoalB && <div className="absolute inset-0 bg-red-500/20 border-2 border-red-500/50 rounded-sm"></div>}
                                         
                                         {isAgentA && <div className="w-6 h-6 md:w-8 md:h-8 bg-blue-500 rounded-full shadow-lg border-2 border-white z-20 animate-pulse flex items-center justify-center text-[10px] font-bold text-white">A</div>}
                                         {isAgentB && <div className="w-6 h-6 md:w-8 md:h-8 bg-red-500 rounded-full shadow-lg border-2 border-white z-20 animate-pulse flex items-center justify-center text-[10px] font-bold text-white">B</div>}
@@ -1292,7 +1813,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                          <div>
                              <h4 className="text-sm font-bold text-blue-300 mb-1">Concept Insight</h4>
                              <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
-                                {getInsightText()} {mode === 'coop' && "Blue Agent A must reach Blue Goal A. Red Agent B must reach Red Goal B."}
+                                {getInsightText()}
                              </p>
                          </div>
                      </div>
