@@ -1773,7 +1773,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                     <div className="flex flex-col gap-2">
                         <div className="flex bg-gray-800 rounded p-1 self-start">
                             <button onClick={() => { setMode('single'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'single' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Single (Nav)</button>
-                            <button onClick={() => { setMode('coop'); setGoalA(0); setGoalB(MA_STATES-1); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Coop (Meet)</button>
+                            <button onClick={() => { setMode('coop'); setGoalA(MA_STATES-1); setGoalB(0); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Coop (Meet)</button>
                             <button onClick={() => { setMode('comp'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'comp' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Comp (Tag)</button>
                         </div>
                     </div>
@@ -1798,8 +1798,8 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                                 
                                 return (
                                     <div key={idx} className={`w-10 h-10 md:w-12 md:h-12 border border-gray-700 rounded-sm flex items-center justify-center relative bg-gray-900/50`}>
-                                        {isGoalA && <div className="absolute inset-0 bg-blue-500/20 border-2 border-blue-500/50 rounded-sm"></div>}
-                                        {isGoalB && <div className="absolute inset-0 bg-red-500/20 border-2 border-red-500/50 rounded-sm"></div>}
+                                        {isGoalA && <div className="absolute inset-0 bg-blue-500/20 border-2 border-blue-500/50 rounded-sm flex items-end justify-center pb-0.5"><span className="text-[8px] font-bold text-blue-300">{mode === 'single' ? 'GOAL' : 'GOAL A'}</span></div>}
+                                        {isGoalB && <div className="absolute inset-0 bg-red-500/20 border-2 border-red-500/50 rounded-sm flex items-end justify-center pb-0.5"><span className="text-[8px] font-bold text-red-300">GOAL B</span></div>}
                                         
                                         {isAgentA && <div className="w-6 h-6 md:w-8 md:h-8 bg-blue-500 rounded-full shadow-lg border-2 border-white z-20 animate-pulse flex items-center justify-center text-[10px] font-bold text-white">A</div>}
                                         {isAgentB && <div className="w-6 h-6 md:w-8 md:h-8 bg-red-500 rounded-full shadow-lg border-2 border-white z-20 animate-pulse flex items-center justify-center text-[10px] font-bold text-white">B</div>}
