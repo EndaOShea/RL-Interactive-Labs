@@ -4,9 +4,9 @@ import {
   Map, Navigation, Target, Activity, Zap, 
   BarChart2, Users, Layers, Shield, AlertTriangle,
   Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle
+  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, MessageSquare
 } from 'lucide-react';
-import { SimulationUpdate, TrainingMetrics } from '../types';
+import { SimulationUpdate, TrainingMetrics, AITutorProps } from '../types';
 
 // --- SHARED HELPER TYPES/CONSTANTS ---
 const GRID_W = 8;
@@ -96,6 +96,79 @@ const LiveMathOverlay: React.FC<{ update: SimulationUpdate | null }> = ({ update
   );
 };
 
+// --- SHARED: AI TUTOR PANEL ---
+const AITutorPanel: React.FC<AITutorProps & { currentParams: any }> = ({ chatHistory, onAsk, isThinking, currentParams }) => {
+    const [question, setQuestion] = useState("");
+    const chatEndRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (chatEndRef.current) {
+            chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [chatHistory, isThinking]);
+
+    const handleSend = () => {
+        const q = question.trim();
+        if (!q) return;
+        onAsk(q, currentParams);
+        setQuestion("");
+    };
+
+    return (
+        <div className="flex flex-col h-full bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden shadow-inner">
+            <div className="flex items-center gap-2 p-3 border-b border-gray-700 bg-gray-900/30">
+                <Brain size={14} className="text-blue-400" />
+                <span className="text-xs font-bold text-gray-300">AI Tutor</span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar min-h-[200px]">
+                {chatHistory.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50">
+                        <Brain size={24} />
+                        <p className="text-[10px] text-center max-w-[150px]">
+                            Ask me about the current simulation settings and results!
+                        </p>
+                    </div>
+                ) : (
+                    chatHistory.map((msg, idx) => (
+                        <div key={idx} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`
+                                rounded-lg p-2 text-[11px] max-w-[90%] leading-relaxed
+                                ${msg.role === 'user' 
+                                    ? 'bg-blue-600 text-white' 
+                                    : 'bg-gray-800 text-gray-300 border border-gray-700'}
+                            `}>
+                                {msg.content}
+                            </div>
+                        </div>
+                    ))
+                )}
+                {isThinking && <div className="text-[10px] text-gray-500 animate-pulse pl-1">Thinking...</div>}
+                <div ref={chatEndRef} />
+            </div>
+
+            <div className="p-2 border-t border-gray-700 bg-gray-900/30 flex gap-2">
+                <input
+                    className="flex-1 bg-gray-900 border border-gray-700 rounded p-1.5 text-[11px] text-gray-300 focus:border-blue-500 focus:outline-none placeholder-gray-600"
+                    placeholder="Ask about Alpha, Gamma..."
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    disabled={isThinking}
+                />
+                <button 
+                    onClick={handleSend} 
+                    disabled={isThinking}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-2 rounded flex items-center justify-center disabled:opacity-50"
+                >
+                    <MessageSquare size={14} />
+                </button>
+            </div>
+        </div>
+    );
+};
+
+
 // --- HELPER: PATHFINDING (BFS) ---
 const isReachable = (start: number, goal: number, obstacles: number[], width: number, height: number) => {
     const queue = [start];
@@ -129,10 +202,11 @@ interface LabProps {
     onLogUpdate?: (update: SimulationUpdate) => void;
     onUpdateMetrics?: (metric: TrainingMetrics) => void;
     onClearMetrics?: () => void;
+    aiTutor?: AITutorProps;
 }
 
 // --- 1. Model-Free vs Model-Based (Universal RL Lab) ---
-export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
   // --- Environment State ---
   const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
   const [startPos] = useState(START_DEFAULT);
@@ -688,16 +762,35 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                   <div><h4 className="text-xs font-bold text-blue-400 mb-1">Algorithm Context</h4><p className="text-[11px] text-gray-400 leading-relaxed font-mono">{getTrainingInsight()}</p></div>
               </div>
           </div>
-          <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
-              <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Training Parameters</div>
-              <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
-                  <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                  <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                  <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Gamma ({gamma})</span></div><input type="range" min="0.1" max="0.99" step="0.01" value={gamma} onChange={(e) => setGamma(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                  {(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
-                  {(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
-                  {algoMode === 'based' && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Planning Steps ({planningSteps})</span><Layers size={12} /></div><input type="range" min="0" max="50" step="5" value={planningSteps} onChange={(e) => setPlanningSteps(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
+          <div className="lg:col-span-3 flex flex-col gap-4 h-full">
+              {/* SETTINGS TOP HALF */}
+              <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
+                  <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Training Parameters</div>
+                  <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
+                      <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                      <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                      <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Gamma ({gamma})</span></div><input type="range" min="0.1" max="0.99" step="0.01" value={gamma} onChange={(e) => setGamma(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                      {(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
+                      {(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
+                      {algoMode === 'based' && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Planning Steps ({planningSteps})</span><Layers size={12} /></div><input type="range" min="0" max="50" step="5" value={planningSteps} onChange={(e) => setPlanningSteps(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
+                  </div>
               </div>
+              
+              {/* AI TUTOR BOTTOM HALF */}
+              {aiTutor && (
+                <div className="flex-1 min-h-[300px]">
+                    <AITutorPanel 
+                        {...aiTutor} 
+                        currentParams={{
+                            alpha, 
+                            gamma, 
+                            epsilon, 
+                            decay: epsilonDecay,
+                            algorithm: algoMode === 'based' ? 'Dyna-Q' : subAlgo.toUpperCase()
+                        }} 
+                    />
+                </div>
+              )}
           </div>
       </div>
     </div>
@@ -705,7 +798,7 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 };
 
 // --- 2. Deterministic vs Stochastic Lab ---
-export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
@@ -1019,29 +1112,45 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
                      </div>
                 </div>
                 
-                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
-                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Environment & Policy</div>
-                     <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         
-                         <div className="pt-2 border-t border-gray-700"></div>
-                         <div className="space-y-1">
-                             <div className="flex justify-between text-xs text-gray-400"><span>Env Slip Chance ({(slipChance * 100).toFixed(0)}%)</span><Wind size={12} /></div>
-                             <input type="range" min="0" max="0.5" step="0.05" value={slipChance} onChange={(e) => setSlipChance(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
-                             <p className="text-[10px] text-gray-500">Prob. of moving in random direction</p>
+                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
+                     <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
+                         <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Environment & Policy</div>
+                         <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
+                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                             
+                             <div className="pt-2 border-t border-gray-700"></div>
+                             <div className="space-y-1">
+                                 <div className="flex justify-between text-xs text-gray-400"><span>Env Slip Chance ({(slipChance * 100).toFixed(0)}%)</span><Wind size={12} /></div>
+                                 <input type="range" min="0" max="0.5" step="0.05" value={slipChance} onChange={(e) => setSlipChance(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
+                                 <p className="text-[10px] text-gray-500">Prob. of moving in random direction</p>
+                             </div>
+
+                             {policyType === 'stochastic' && (
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-gray-400"><span>Policy Temp ({temperature})</span><Thermometer size={12} /></div>
+                                    <input type="range" min="0.1" max="5.0" step="0.1" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
+                                    <p className="text-[10px] text-gray-500">Higher = More random (Softmax)</p>
+                                </div>
+                             )}
+
+                             <div className="pt-2 border-t border-gray-700"></div>
+                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
                          </div>
-
-                         {policyType === 'stochastic' && (
-                            <div className="space-y-1">
-                                <div className="flex justify-between text-xs text-gray-400"><span>Policy Temp ({temperature})</span><Thermometer size={12} /></div>
-                                <input type="range" min="0.1" max="5.0" step="0.1" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
-                                <p className="text-[10px] text-gray-500">Higher = More random (Softmax)</p>
-                            </div>
-                         )}
-
-                         <div className="pt-2 border-t border-gray-700"></div>
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
                      </div>
+                     {aiTutor && (
+                        <div className="flex-1 min-h-[300px]">
+                            <AITutorPanel 
+                                {...aiTutor} 
+                                currentParams={{
+                                    alpha, 
+                                    gamma, 
+                                    policyType,
+                                    slipChance,
+                                    temperature
+                                }} 
+                            />
+                        </div>
+                     )}
                 </div>
             </div>
         </div>
@@ -1049,7 +1158,7 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
 };
 
 // --- 3. Tabular vs Deep RL Lab ---
-export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
@@ -1318,25 +1427,41 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                      </div>
                 </div>
 
-                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
-                    <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Neural Network Config</div>
-                    <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
-                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                        
-                        {mode === 'deep' && (
-                            <div className="space-y-1 bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
-                                <div className="flex justify-between text-xs text-indigo-300"><span>Generalization Radius ({genRadius})</span><Network size={12} /></div>
-                                <input type="range" min="0.5" max="3.0" step="0.1" value={genRadius} onChange={(e) => setGenRadius(Number(e.target.value))} className="w-full h-1 bg-indigo-500 rounded-lg cursor-pointer" />
-                                <p className="text-[9px] text-gray-400 mt-1">How far learning spreads to neighbors. Higher = Faster but blurrier.</p>
-                            </div>
-                        )}
-                        <div className="pt-2 border-t border-gray-700"></div>
-                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                        
-                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
+                    <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
+                        <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Neural Network Config</div>
+                        <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
+                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                            
+                            {mode === 'deep' && (
+                                <div className="space-y-1 bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
+                                    <div className="flex justify-between text-xs text-indigo-300"><span>Generalization Radius ({genRadius})</span><Network size={12} /></div>
+                                    <input type="range" min="0.5" max="3.0" step="0.1" value={genRadius} onChange={(e) => setGenRadius(Number(e.target.value))} className="w-full h-1 bg-indigo-500 rounded-lg cursor-pointer" />
+                                    <p className="text-[9px] text-gray-400 mt-1">How far learning spreads to neighbors. Higher = Faster but blurrier.</p>
+                                </div>
+                            )}
+                            <div className="pt-2 border-t border-gray-700"></div>
+                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                            
+                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
 
+                        </div>
                     </div>
+                    {aiTutor && (
+                        <div className="flex-1 min-h-[300px]">
+                            <AITutorPanel 
+                                {...aiTutor} 
+                                currentParams={{
+                                    alpha, 
+                                    gamma, 
+                                    epsilon, 
+                                    decay: epsilonDecay,
+                                    mode
+                                }} 
+                            />
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -1344,7 +1469,7 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 };
 
 // --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
-export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
     const N_ARMS = 5;
     const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
     
@@ -1607,46 +1732,61 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
                      </div>
                 </div>
                 
-                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
-                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> Bandit Controls</div>
-                     <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="1000" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         
-                         <div className="pt-2 border-t border-gray-700"></div>
+                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
+                     <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
+                         <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Bandit Controls</div>
+                         <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
+                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="1000" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                             
+                             <div className="pt-2 border-t border-gray-700"></div>
 
-                         {strategy === 'epsilon' && (
-                            <div className="space-y-1">
-                                <div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(2)})</span><Map size={12} /></div>
-                                <input type="range" min="0" max="0.5" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
-                            </div>
-                         )}
+                             {strategy === 'epsilon' && (
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(2)})</span><Map size={12} /></div>
+                                    <input type="range" min="0" max="0.5" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
+                                </div>
+                             )}
 
-                         {strategy === 'ucb' && (
-                            <div className="space-y-1">
-                                <div className="flex justify-between text-xs text-gray-400"><span>Confidence (c={ucbC})</span><HelpCircle size={12} /></div>
-                                <input type="range" min="0.5" max="5.0" step="0.5" value={ucbC} onChange={(e) => setUcbC(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
-                                <p className="text-[10px] text-gray-500">Higher = More exploration</p>
-                            </div>
-                         )}
-                         
-                         {strategy === 'optimistic' && (
-                            <div className="space-y-1">
-                                <p className="text-xs text-green-400">Initial Q: {initQ.toFixed(1)}</p>
-                                <p className="text-[10px] text-gray-500">High initial value forces agent to try all arms to verify if they are actually that good.</p>
-                            </div>
-                         )}
+                             {strategy === 'ucb' && (
+                                <div className="space-y-1">
+                                    <div className="flex justify-between text-xs text-gray-400"><span>Confidence (c={ucbC})</span><HelpCircle size={12} /></div>
+                                    <input type="range" min="0.5" max="5.0" step="0.5" value={ucbC} onChange={(e) => setUcbC(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
+                                    <p className="text-[10px] text-gray-500">Higher = More exploration</p>
+                                </div>
+                             )}
+                             
+                             {strategy === 'optimistic' && (
+                                <div className="space-y-1">
+                                    <p className="text-xs text-green-400">Initial Q: {initQ.toFixed(1)}</p>
+                                    <p className="text-[10px] text-gray-500">High initial value forces agent to try all arms to verify if they are actually that good.</p>
+                                </div>
+                             )}
 
-                         <div className="mt-4 bg-gray-800 p-2 rounded">
-                            <div className="flex justify-between text-xs mb-1">
-                                <span className="text-gray-400">Total Steps:</span>
-                                <span className="text-white font-mono">{totalSteps}</span>
-                            </div>
-                            <div className="flex justify-between text-xs">
-                                <span className="text-gray-400">Total Reward:</span>
-                                <span className="text-green-400 font-mono">{totalReward}</span>
-                            </div>
+                             <div className="mt-4 bg-gray-800 p-2 rounded">
+                                <div className="flex justify-between text-xs mb-1">
+                                    <span className="text-gray-400">Total Steps:</span>
+                                    <span className="text-white font-mono">{totalSteps}</span>
+                                </div>
+                                <div className="flex justify-between text-xs">
+                                    <span className="text-gray-400">Total Reward:</span>
+                                    <span className="text-green-400 font-mono">{totalReward}</span>
+                                </div>
+                             </div>
                          </div>
                      </div>
+                     {aiTutor && (
+                        <div className="flex-1 min-h-[300px]">
+                            <AITutorPanel 
+                                {...aiTutor} 
+                                currentParams={{
+                                    strategy,
+                                    epsilon, 
+                                    ucbC,
+                                    initQ
+                                }} 
+                            />
+                        </div>
+                     )}
                 </div>
             </div>
         </div>
@@ -1654,7 +1794,7 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
 };
 
 // --- 5. Single vs Multi-Agent Lab ---
-export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
+export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
     const MA_W = 6;
     const MA_H = 6;
     const MA_STATES = MA_W * MA_H;
@@ -1929,13 +2069,28 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                      </div>
                 </div>
 
-                <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
-                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> MARL Settings</div>
-                     <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
+                     <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
+                         <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> MARL Settings</div>
+                         <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
+                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                         </div>
                      </div>
+                     {aiTutor && (
+                        <div className="flex-1 min-h-[300px]">
+                            <AITutorPanel 
+                                {...aiTutor} 
+                                currentParams={{
+                                    alpha, 
+                                    gamma, 
+                                    epsilon,
+                                    mode
+                                }} 
+                            />
+                        </div>
+                     )}
                 </div>
             </div>
         </div>

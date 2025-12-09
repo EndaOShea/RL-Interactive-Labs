@@ -14,7 +14,7 @@ import {
   DEFAULT_HYPERPARAMS, LIFECYCLE_CONTEXTS, MODULE_CONTENT
 } from './constants';
 import { 
-  HyperParameters, ModuleId, SimulationStatus, TrainingMetrics, SimulationUpdate
+  HyperParameters, ModuleId, SimulationStatus, TrainingMetrics, SimulationUpdate, ChatMessage
 } from './types';
 import { generateExplanation } from './services/geminiService';
 
@@ -36,11 +36,8 @@ const App: React.FC = () => {
   
   // AI Interaction State
   const [aiThinking, setAiThinking] = useState(false);
-  const [chatHistory, setChatHistory] = useState<Array<{role: 'user' | 'ai', content: string}>>([]);
-  const [userQuestion, setUserQuestion] = useState<string>(""); 
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
   // Derived State for API Key
   const currentApiKey = manualKey.length > 0 ? manualKey : undefined;
 
@@ -58,13 +55,6 @@ const App: React.FC = () => {
     setLiveUpdate(null);
     setMetrics([]); 
   }, [activeModule]);
-
-  // Scroll to bottom of chat
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatHistory, aiThinking]);
 
   // Handle Metrics Update from Simulation
   const handleMetricUpdate = (metric: TrainingMetrics) => {
@@ -92,22 +82,26 @@ const App: React.FC = () => {
     setKeyInput(trimmedKey);
   };
 
-  const askAITutor = async () => {
-    const currentQuestion = userQuestion.trim();
+  const askAITutor = async (question: string, contextParams: any) => {
     setAiThinking(true);
     
-    if (currentQuestion) {
-        setChatHistory(prev => [...prev, { role: 'user', content: currentQuestion }]);
-        setUserQuestion("");
+    if (question) {
+        setChatHistory(prev => [...prev, { role: 'user', content: question }]);
     }
 
-    const systemContext = `I am training with Alpha=${hyperParams.alpha} and Epsilon=${hyperParams.epsilon}. The agent is ${metrics.length > 0 && metrics[metrics.length-1].reward < 0 ? "failing often" : "learning correctly"}.`;
+    // Build context using the passed params (which come from the specific Lab's state)
+    let systemContext = `I am in module "${(MODULE_CONTENT as any)[activeModule]?.title}". `;
+    systemContext += `My current parameters are: ${JSON.stringify(contextParams)}. `;
+    systemContext += `Recent performance: ${metrics.length > 0 && metrics[metrics.length-1].reward < 0 ? "The agent is struggling (negative reward)." : "The agent is performing reasonably well."}`;
     
-    const finalContext = currentQuestion 
-        ? `User Question: "${currentQuestion}"\nSystem Context: ${systemContext}`
+    const finalContext = question 
+        ? `User Question: "${question}"\nSystem Context: ${systemContext}`
         : systemContext;
 
-    const explanation = await generateExplanation(finalContext, hyperParams, currentApiKey);
+    // Use a temporary HyperParameters object for the service call, merging contextParams
+    const tempParams: HyperParameters = { ...DEFAULT_HYPERPARAMS, ...contextParams };
+
+    const explanation = await generateExplanation(finalContext, tempParams, currentApiKey);
     
     setChatHistory(prev => [...prev, { role: 'ai', content: explanation }]);
     setAiThinking(false);
@@ -129,8 +123,6 @@ const App: React.FC = () => {
     </button>
   );
 
-  // --- Reusable Component Blocks ---
-  
   const renderPerformanceGraph = () => (
       <div className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
           <h3 className="text-gray-400 text-xs font-bold uppercase mb-4 ml-2">Training Performance</h3>
@@ -151,58 +143,11 @@ const App: React.FC = () => {
       </div>
   );
 
-  const renderAITutor = () => (
-     <div className="bg-gray-800 rounded-xl border border-gray-700 p-4 flex flex-col gap-4 h-full overflow-hidden shadow-lg">
-        <div className="flex border-b border-gray-700 pb-2">
-           <button className="text-xs font-bold text-blue-400 border-b-2 border-blue-400 px-3 pb-2 flex items-center gap-2 uppercase tracking-wide">
-               <Brain size={12} /> AI Tutor
-           </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto bg-gray-900/50 rounded-lg border border-gray-800 p-3 space-y-3 custom-scrollbar">
-            {chatHistory.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2">
-                    <Brain size={24} className="opacity-50" />
-                    <p className="text-[10px] text-center">Ask me anything about the current simulation!</p>
-                </div>
-            ) : (
-                chatHistory.map((msg, idx) => (
-                    <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`
-                            rounded-lg p-2 text-xs max-w-[90%] leading-relaxed
-                            ${msg.role === 'user' 
-                                ? 'bg-blue-600 text-white' 
-                                : 'bg-gray-800 text-gray-300 border border-gray-700'}
-                        `}>
-                            {msg.content}
-                        </div>
-                    </div>
-                ))
-            )}
-            {aiThinking && <div className="text-xs text-gray-500 animate-pulse">AI is thinking...</div>}
-            <div ref={chatEndRef} />
-        </div>
-
-        <div className="flex gap-2 mt-auto">
-            <input
-                className="flex-1 bg-gray-900 border border-gray-700 rounded p-2 text-xs text-gray-300 focus:border-blue-500 focus:outline-none"
-                placeholder="Ask AI..."
-                value={userQuestion}
-                onChange={(e) => setUserQuestion(e.target.value)}
-                onKeyDown={(e) => {
-                    if (e.key === 'Enter') askAITutor();
-                }}
-            />
-            <button 
-                onClick={askAITutor} 
-                disabled={aiThinking}
-                className="bg-blue-600 hover:bg-blue-500 text-white px-3 rounded flex items-center justify-center"
-            >
-                <MessageSquare size={14} />
-            </button>
-        </div>
-     </div>
-  );
+  const aiTutorProps = {
+      chatHistory,
+      onAsk: askAITutor,
+      isThinking: aiThinking
+  };
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col md:flex-row font-sans">
@@ -319,19 +264,18 @@ const App: React.FC = () => {
         <div className="flex-1 overflow-y-auto p-6 pb-20 custom-scrollbar relative">
           <div className="max-w-7xl mx-auto space-y-6">
             
-            {/* 1. Interactive Simulation Layer */}
+            {/* 1. Interactive Simulation Layer (Now includes AI Tutor in sidebar) */}
             <div className="animate-in fade-in zoom-in-95 duration-500">
-               {activeModule === ModuleId.MODEL_VS_FREE && <ModelVsFreeLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-               {activeModule === ModuleId.DET_STOCHASTIC && <DetStochLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-               {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-               {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
-               {activeModule === ModuleId.SINGLE_MULTI && <MultiAgentLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} />}
+               {activeModule === ModuleId.MODEL_VS_FREE && <ModelVsFreeLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} aiTutor={aiTutorProps} />}
+               {activeModule === ModuleId.DET_STOCHASTIC && <DetStochLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} aiTutor={aiTutorProps} />}
+               {activeModule === ModuleId.TABULAR_DEEP && <TabularDeepLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} aiTutor={aiTutorProps} />}
+               {activeModule === ModuleId.EXPLORE_EXPLOIT && <ExploreExploitLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} aiTutor={aiTutorProps} />}
+               {activeModule === ModuleId.SINGLE_MULTI && <MultiAgentLab onLogUpdate={setLiveUpdate} onUpdateMetrics={handleMetricUpdate} onClearMetrics={handleClearMetrics} aiTutor={aiTutorProps} />}
             </div>
 
-            {/* 2. Analysis & Tools Layer (Graph + Tutor) */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-80">
+            {/* 2. Analysis & Tools Layer (Graph Only) */}
+            <div className="h-64">
                 {renderPerformanceGraph()}
-                {renderAITutor()}
             </div>
 
             {/* 3. Lifecycle Architect Layer */}

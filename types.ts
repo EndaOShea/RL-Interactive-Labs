@@ -63,3 +63,14 @@ export interface SimulationUpdate {
     implication: string;
   };
 }
+
+export interface ChatMessage {
+  role: 'user' | 'ai';
+  content: string;
+}
+
+export interface AITutorProps {
+  chatHistory: ChatMessage[];
+  onAsk: (question: string, contextParams: any) => void;
+  isThinking: boolean;
+}
