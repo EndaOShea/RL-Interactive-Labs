@@ -3,8 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
 } from 'recharts';
-import { 
-  Brain, Settings, MessageSquare, ChevronRight, Key, Eye, EyeOff, Layers, Box, Target, Users
+import {
+  Brain, Settings, MessageSquare, ChevronRight, Key, Eye, Layers, Box, Target, Users
 } from 'lucide-react';
 import LifecyclePanel from './components/LifecyclePanel';
 import { 
@@ -32,8 +32,8 @@ const App: React.FC = () => {
   // API Key State
   const [keyInput, setKeyInput] = useState('');     // What the user types
   const [manualKey, setManualKey] = useState('');   // What is actually used (Active Standard Key)
-  const [showKey, setShowKey] = useState(false);
-  
+  const [usageLimitReached, setUsageLimitReached] = useState(false);
+
   // AI Interaction State
   const [aiThinking, setAiThinking] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -41,12 +41,39 @@ const App: React.FC = () => {
   // Derived State for API Key
   const currentApiKey = manualKey.length > 0 ? manualKey : undefined;
 
+  // Check if env key exists (defined in vite.config.ts)
+  const hasEnvKey = !!(process.env.API_KEY || process.env.GEMINI_API_KEY);
+
   // Check for API Key
   useEffect(() => {
     if ((window as any).aistudio?.hasSelectedApiKey) {
       (window as any).aistudio.hasSelectedApiKey().then((has: boolean) => setHasKey(has));
     }
   }, []);
+
+  // Test env key on load if no custom key is set
+  useEffect(() => {
+    const testEnvKey = async () => {
+      if (!manualKey && hasEnvKey) {
+        try {
+          const testExplanation = await generateExplanation(
+            "Test connection",
+            DEFAULT_HYPERPARAMS,
+            undefined // Use env key
+          );
+
+          // Check if the response indicates quota exceeded
+          if (testExplanation.includes("Quota Exceeded") && testExplanation.includes("System Key")) {
+            setUsageLimitReached(true);
+          }
+        } catch (error) {
+          console.log("Env key test failed:", error);
+        }
+      }
+    };
+
+    testEnvKey();
+  }, [hasEnvKey, manualKey]);
 
   // Auto-switch Lifecycle Tab & Clear Metrics on Module Change
   useEffect(() => {
@@ -80,11 +107,12 @@ const App: React.FC = () => {
     const trimmedKey = keyInput.trim();
     setManualKey(trimmedKey);
     setKeyInput(trimmedKey);
+    setUsageLimitReached(false); // Reset usage limit when user provides their own key
   };
 
   const askAITutor = async (question: string, contextParams: any) => {
     setAiThinking(true);
-    
+
     if (question) {
         setChatHistory(prev => [...prev, { role: 'user', content: question }]);
     }
@@ -93,8 +121,8 @@ const App: React.FC = () => {
     let systemContext = `I am in module "${(MODULE_CONTENT as any)[activeModule]?.title}". `;
     systemContext += `My current parameters are: ${JSON.stringify(contextParams)}. `;
     systemContext += `Recent performance: ${metrics.length > 0 && metrics[metrics.length-1].reward < 0 ? "The agent is struggling (negative reward)." : "The agent is performing reasonably well."}`;
-    
-    const finalContext = question 
+
+    const finalContext = question
         ? `User Question: "${question}"\nSystem Context: ${systemContext}`
         : systemContext;
 
@@ -102,9 +130,18 @@ const App: React.FC = () => {
     const tempParams: HyperParameters = { ...DEFAULT_HYPERPARAMS, ...contextParams };
 
     const explanation = await generateExplanation(finalContext, tempParams, currentApiKey);
-    
+
+    // Check if the env key has hit usage limits
+    if (!currentApiKey && explanation.includes("Quota Exceeded") && explanation.includes("System Key")) {
+        setUsageLimitReached(true);
+    }
+
     setChatHistory(prev => [...prev, { role: 'ai', content: explanation }]);
     setAiThinking(false);
+  };
+
+  const handleClearChat = () => {
+    setChatHistory([]);
   };
 
   const renderSidebarItem = (id: ModuleId, label: string, icon: React.ReactNode) => (
@@ -124,9 +161,9 @@ const App: React.FC = () => {
   );
 
   const renderPerformanceGraph = () => (
-      <div className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 h-full flex flex-col">
+      <div className="bg-gray-800/50 rounded-xl border border-gray-700 p-4 h-full flex flex-col min-h-[200px]">
           <h3 className="text-gray-400 text-xs font-bold uppercase mb-4 ml-2">Training Performance</h3>
-          <div className="flex-1 min-h-0">
+          <div className="flex-1 min-h-[150px]">
             <ResponsiveContainer width="100%" height="100%">
             <LineChart data={metrics}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -146,6 +183,7 @@ const App: React.FC = () => {
   const aiTutorProps = {
       chatHistory,
       onAsk: askAITutor,
+      onClear: handleClearChat,
       isThinking: aiThinking
   };
 
@@ -166,7 +204,7 @@ const App: React.FC = () => {
         
         <nav className="p-2 flex-1 overflow-y-auto custom-scrollbar">
             <div className="mb-4">
-                <p className="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 mt-2">Theory Labs</p>
+                <p className="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 mt-2">Interactive Labs</p>
                 {renderSidebarItem(ModuleId.MODEL_VS_FREE, "Model Types", <Layers size={14} />)}
                 {renderSidebarItem(ModuleId.DET_STOCHASTIC, "Det. vs Stoch.", <Target size={14} />)}
                 {renderSidebarItem(ModuleId.TABULAR_DEEP, "Tabular vs Deep", <Box size={14} />)}
@@ -178,11 +216,24 @@ const App: React.FC = () => {
              <div className="px-3 mb-3">
                  <div className="flex justify-between items-center text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">
                      <span>Status</span>
-                     <span className={manualKey || hasKey ? 'text-green-400' : 'text-red-400'}>{manualKey || hasKey ? 'ONLINE' : 'OFFLINE'}</span>
+                     <span className={manualKey || ((hasKey || hasEnvKey) && !usageLimitReached) ? 'text-green-400' : 'text-red-400'}>
+                         {manualKey || ((hasKey || hasEnvKey) && !usageLimitReached) ? 'ONLINE' : 'OFFLINE'}
+                     </span>
                  </div>
                  <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden">
-                     <div className={`h-full ${manualKey || hasKey ? 'bg-green-500' : 'bg-red-500'} w-full`}></div>
+                     <div className={`h-full ${manualKey || ((hasKey || hasEnvKey) && !usageLimitReached) ? 'bg-green-500' : 'bg-red-500'} w-full`}></div>
                  </div>
+                 {(manualKey || hasKey || hasEnvKey) && (
+                     <div className="mt-1.5 text-[9px] text-gray-500 flex items-center gap-1">
+                         <div className={`w-1.5 h-1.5 rounded-full ${manualKey ? 'bg-green-400' : 'bg-blue-400'}`}></div>
+                         <span>Using {manualKey ? 'Custom' : 'Env'} Key</span>
+                     </div>
+                 )}
+                 {usageLimitReached && !manualKey && (
+                     <div className="mt-2 text-[9px] text-yellow-400 bg-yellow-900/20 border border-yellow-700/30 rounded p-2">
+                         ⚠️ Usage limit reached. Please enter your own API key to continue.
+                     </div>
+                 )}
              </div>
 
              <div className="px-3 space-y-2">
@@ -201,16 +252,13 @@ const App: React.FC = () => {
                         <div className="pl-2">
                             <Key size={10} className={manualKey ? "text-green-500" : "text-gray-500"} />
                         </div>
-                        <input 
-                            type={showKey ? "text" : "password"}
+                        <input
+                            type="password"
                             placeholder="Custom Key..."
-                            className="w-full bg-transparent border-none text-[10px] text-gray-300 px-2 py-1.5 focus:ring-0 focus:outline-none"
+                            className="w-full bg-transparent border-none text-[10px] text-gray-300 px-2 py-1.5 pr-2 focus:ring-0 focus:outline-none"
                             value={keyInput}
                             onChange={(e) => setKeyInput(e.target.value)}
                         />
-                         <button onClick={() => setShowKey(!showKey)} className="pr-2 text-gray-500 hover:text-gray-300">
-                            {showKey ? <EyeOff size={10} /> : <Eye size={10} />}
-                        </button>
                     </div>
                     {(keyInput.trim() !== manualKey) && keyInput.length > 0 && (
                         <button 
@@ -220,6 +268,23 @@ const App: React.FC = () => {
                             SET
                         </button>
                     )}
+                 </div>
+
+                 <div className="text-[8px] text-gray-600 leading-relaxed px-1">
+                     <p className="mb-1">
+                         💡 <span className="text-gray-500">Use a Gemini API key</span>
+                     </p>
+                     <p className="text-gray-700">
+                         Get yours at{' '}
+                         <a
+                             href="https://aistudio.google.com/app/apikey"
+                             target="_blank"
+                             rel="noopener noreferrer"
+                             className="text-blue-500 hover:text-blue-400 underline"
+                         >
+                             aistudio.google.com/apikey
+                         </a>
+                     </p>
                  </div>
              </div>
           </div>

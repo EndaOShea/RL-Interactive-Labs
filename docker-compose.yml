@@ -1,0 +1,39 @@
+services:
+  rl-interactive-labs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        GEMINI_API_KEY: ${GEMINI_API_KEY}
+    image: rl-interactive-labs:latest
+    container_name: rl-interactive-labs
+    ports:
+      - "2100:80"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "com.rl-labs.description=RL Interactive Labs Application"
+      - "com.rl-labs.version=1.0"
+
+# Optional: Add development service
+  # rl-interactive-labs-dev:
+  #   build:
+  #     context: .
+  #     target: builder
+  #   container_name: rl-interactive-labs-dev
+  #   ports:
+  #     - "2100:2100"
+  #   volumes:
+  #     - ./src:/app/src
+  #     - ./public:/app/public
+  #   environment:
+  #     - NODE_ENV=development
+  #     - GEMINI_API_KEY=${GEMINI_API_KEY}
+  #   command: npm run dev

@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  Map, Navigation, Target, Activity, Zap, 
+import {
+  Map, Navigation, Target, Activity, Zap,
   BarChart2, Users, Layers, Shield, AlertTriangle,
   Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, MessageSquare, FileCode
+  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, MessageSquare, FileCode, Trash2
 } from 'lucide-react';
 import { SimulationUpdate, TrainingMetrics, AITutorProps } from '../types';
 
@@ -120,15 +120,9 @@ const LiveMathOverlay: React.FC<{ update: SimulationUpdate | null }> = ({ update
 };
 
 // --- SHARED: AI TUTOR PANEL ---
-const AITutorPanel: React.FC<AITutorProps & { currentParams: any }> = ({ chatHistory, onAsk, isThinking, currentParams }) => {
+const AITutorPanel: React.FC<AITutorProps & { currentParams: any }> = ({ chatHistory, onAsk, onClear, isThinking, currentParams }) => {
     const [question, setQuestion] = useState("");
     const chatEndRef = useRef<HTMLDivElement>(null);
-
-    useEffect(() => {
-        if (chatEndRef.current) {
-            chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-        }
-    }, [chatHistory, isThinking]);
 
     const handleSend = () => {
         const q = question.trim();
@@ -138,13 +132,24 @@ const AITutorPanel: React.FC<AITutorProps & { currentParams: any }> = ({ chatHis
     };
 
     return (
-        <div className="flex flex-col h-full bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden shadow-inner">
-            <div className="flex items-center gap-2 p-3 border-b border-gray-700 bg-gray-900/30">
-                <Brain size={14} className="text-blue-400" />
-                <span className="text-xs font-bold text-gray-300">AI Tutor</span>
+        <div className="flex flex-col h-full max-h-[600px] bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden shadow-inner">
+            <div className="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-900/30 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                    <Brain size={14} className="text-blue-400" />
+                    <span className="text-xs font-bold text-gray-300">AI Tutor</span>
+                </div>
+                {chatHistory.length > 0 && (
+                    <button
+                        onClick={onClear}
+                        className="text-gray-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-gray-800/50"
+                        title="Clear conversation"
+                    >
+                        <Trash2 size={12} />
+                    </button>
+                )}
             </div>
-            
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar min-h-[200px]">
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar min-h-0">
                 {chatHistory.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50">
                         <Brain size={24} />
@@ -170,7 +175,7 @@ const AITutorPanel: React.FC<AITutorProps & { currentParams: any }> = ({ chatHis
                 <div ref={chatEndRef} />
             </div>
 
-            <div className="p-2 border-t border-gray-700 bg-gray-900/30 flex gap-2">
+            <div className="p-2 border-t border-gray-700 bg-gray-900/30 flex gap-2 flex-shrink-0">
                 <input
                     className="flex-1 bg-gray-900 border border-gray-700 rounded p-1.5 text-[11px] text-gray-300 focus:border-blue-500 focus:outline-none placeholder-gray-600"
                     placeholder="Ask about Alpha, Gamma..."

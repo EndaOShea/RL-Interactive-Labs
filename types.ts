@@ -72,5 +72,6 @@ export interface ChatMessage {
 export interface AITutorProps {
   chatHistory: ChatMessage[];
   onAsk: (question: string, contextParams: any) => void;
+  onClear: () => void;
   isThinking: boolean;
 }
