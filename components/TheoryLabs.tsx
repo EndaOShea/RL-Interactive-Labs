@@ -4,7 +4,7 @@ import {
   Map, Navigation, Target, Activity, Zap, 
   BarChart2, Users, Layers, Shield, AlertTriangle,
   Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, MessageSquare
+  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, MessageSquare, FileCode
 } from 'lucide-react';
 import { SimulationUpdate, TrainingMetrics, AITutorProps } from '../types';
 
@@ -18,7 +18,30 @@ const START_DEFAULT = 32; // Bottom left
 // Initial simple layout
 const DEFAULT_OBSTACLES = [12, 13, 14, 22, 30, 38]; 
 
+// --- SHARED HELPER FUNCTIONS ---
+
+const downloadPython = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/x-python' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+};
+
 // --- SHARED COMPONENTS ---
+
+const PythonLogo = ({ size = 16 }: { size?: number }) => (
+    <svg width={size} height={size} viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#306998" d="M126.916.072c-64.832 0-60.784 28.115-60.784 28.115l.072 29.128h61.868v8.745H41.631S.113 62.246.113 126.91c0 64.656 36.41 63.097 36.41 63.097h21.606v-30.347c0-26.777 22.95-27.464 22.95-27.464h36.004c27.143 0 27.21-25.756 27.21-25.756V67.883c0-26.6-24.965-27.05-24.965-27.05h-15.707v22.256h22.256v15.707H90.875V15.707h16.273v21.53h22.256V.072h-2.488z"/>
+        <path fill="#FFD43B" d="M128.757 254.126c64.832 0 60.784-28.115 60.784-28.115l-.072-29.127H127.6v-8.745h86.441s41.518 3.812 41.518-60.85c0-64.656-36.41-63.097-36.41-63.097h-21.606v30.347c0 26.777-22.95 27.464-22.95 27.464h-36.004c-27.143 0-27.21 25.756-27.21 25.756v38.558c0 26.6 24.965 27.05 24.965 27.05h15.707v-22.256h-22.256v-15.707h35.803v63.086h-16.273v-21.53h-22.256v21.53h2.488z"/>
+        <circle cx="92.148" cy="27.458" r="11.834" fill="#fff"/>
+        <circle cx="163.785" cy="227.411" r="11.834" fill="#fff"/>
+    </svg>
+);
 
 const LiveMathOverlay: React.FC<{ update: SimulationUpdate | null }> = ({ update }) => {
   if (!update) return (
@@ -258,6 +281,245 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     const exps = prefs.map(p => Math.exp(p));
     const sum = exps.reduce((a,b) => a+b, 0) || 1;
     return exps.map(e => e/sum);
+  };
+
+  const handleDownload = () => {
+    let pythonCode = "";
+    // Common Environment Setup
+    const commonEnv = `import numpy as np
+import random
+
+class GridWorld:
+    def __init__(self, width, height, obstacles, goal, start):
+        self.width = width
+        self.height = height
+        self.obstacles = obstacles
+        self.goal = goal
+        self.start = start
+        self.agent_pos = start
+
+    def reset(self):
+        self.agent_pos = self.start
+        return self.agent_pos
+
+    def step(self, action):
+        # Actions: 0:Up, 1:Right, 2:Down, 3:Left
+        x = self.agent_pos % self.width
+        y = self.agent_pos // self.width
+        
+        if action == 0: y = max(0, y - 1)
+        elif action == 1: x = min(self.width - 1, x + 1)
+        elif action == 2: y = min(self.height - 1, y + 1)
+        elif action == 3: x = max(0, x - 1)
+        
+        new_pos = y * self.width + x
+        
+        reward = -0.1
+        done = False
+        
+        if new_pos in self.obstacles:
+            new_pos = self.agent_pos # Hit wall/pit
+            reward = -1.0
+        elif new_pos == self.goal:
+            reward = 100.0
+            done = True
+            
+        self.agent_pos = new_pos
+        return new_pos, reward, done
+
+env = GridWorld(${GRID_W}, ${GRID_H}, ${JSON.stringify(obstacles)}, ${goalPos}, ${startPos})`;
+
+    if (algoMode === 'based') {
+        // DYNA-Q
+        pythonCode = `${commonEnv}
+
+# --- Dyna-Q (Model-Based) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+PLANNING_STEPS = ${planningSteps}
+
+q_table = np.zeros((env.width * env.height, 4))
+model = {} # Map (state, action) -> (next_state, reward)
+visited_states = set()
+
+for episode in range(100):
+    state = env.reset()
+    done = False
+    while not done:
+        # Epsilon Greedy
+        if random.random() < EPSILON:
+            action = random.randint(0, 3)
+        else:
+            action = np.argmax(q_table[state])
+            
+        next_state, reward, done = env.step(action)
+        
+        # Q-Update
+        best_next = np.max(q_table[next_state])
+        q_table[state][action] += ALPHA * (reward + GAMMA * best_next - q_table[state][action])
+        
+        # Model Update
+        model[(state, action)] = (next_state, reward)
+        visited_states.add(state)
+        
+        # Planning
+        for _ in range(PLANNING_STEPS):
+            s = random.choice(list(visited_states))
+            # Get actions taken in s
+            taken_actions = [a for (st, a) in model.keys() if st == s]
+            if not taken_actions: continue
+            
+            a = random.choice(taken_actions)
+            s_prime, r = model[(s, a)]
+            
+            best_s_prime = np.max(q_table[s_prime])
+            q_table[s][a] += ALPHA * (r + GAMMA * best_s_prime - q_table[s][a])
+            
+        state = next_state
+        if done: print(f"Episode {episode} finished.")`;
+    } else {
+        // Model Free
+        if (subAlgo === 'q') {
+            pythonCode = `${commonEnv}
+
+# --- Q-Learning (Off-Policy) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+
+q_table = np.zeros((env.width * env.height, 4))
+
+for episode in range(100):
+    state = env.reset()
+    done = False
+    while not done:
+        if random.random() < EPSILON:
+            action = random.randint(0, 3)
+        else:
+            action = np.argmax(q_table[state])
+            
+        next_state, reward, done = env.step(action)
+        
+        best_next = np.max(q_table[next_state])
+        q_table[state][action] += ALPHA * (reward + GAMMA * best_next - q_table[state][action])
+        
+        state = next_state
+        if done: print(f"Episode {episode} finished.")`;
+        } else if (subAlgo === 'sarsa') {
+             pythonCode = `${commonEnv}
+
+# --- SARSA (On-Policy) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+
+q_table = np.zeros((env.width * env.height, 4))
+
+def choose_action(s):
+    if random.random() < EPSILON:
+        return random.randint(0, 3)
+    return np.argmax(q_table[s])
+
+for episode in range(100):
+    state = env.reset()
+    action = choose_action(state)
+    done = False
+    
+    while not done:
+        next_state, reward, done = env.step(action)
+        next_action = choose_action(next_state)
+        
+        target = reward + GAMMA * q_table[next_state][next_action]
+        q_table[state][action] += ALPHA * (target - q_table[state][action])
+        
+        state = next_state
+        action = next_action
+        if done: print(f"Episode {episode} finished.")`;
+        } else if (subAlgo === 'reinforce') {
+             pythonCode = `${commonEnv}
+
+# --- REINFORCE (Policy Gradient) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+
+# Policy preferences (theta)
+theta = np.zeros((env.width * env.height, 4))
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
+for episode in range(500):
+    state = env.reset()
+    done = False
+    trajectory = []
+    
+    # 1. Generate Episode
+    while not done:
+        probs = softmax(theta[state])
+        action = np.random.choice(4, p=probs)
+        next_state, reward, done = env.step(action)
+        trajectory.append((state, action, reward))
+        state = next_state
+        
+    # 2. Update Weights
+    G = 0
+    for t in reversed(range(len(trajectory))):
+        s, a, r = trajectory[t]
+        G = GAMMA * G + r
+        
+        # Gradient of log-softmax is (1 - p) for chosen action, -p for others
+        probs = softmax(theta[s])
+        d_log_pi = -probs
+        d_log_pi[a] += 1
+        
+        theta[s] += ALPHA * G * d_log_pi
+        
+    if episode % 50 == 0: print(f"Episode {episode} finished.")`;
+        } else if (subAlgo === 'ac') {
+             pythonCode = `${commonEnv}
+
+# --- Actor-Critic ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+
+# Actor (Policy) and Critic (Value)
+theta = np.zeros((env.width * env.height, 4))
+v_table = np.zeros(env.width * env.height)
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum()
+
+for episode in range(200):
+    state = env.reset()
+    done = False
+    
+    while not done:
+        probs = softmax(theta[state])
+        action = np.random.choice(4, p=probs)
+        
+        next_state, reward, done = env.step(action)
+        
+        # TD Error (Critic's surprise)
+        target = reward + GAMMA * (0 if done else v_table[next_state])
+        delta = target - v_table[state]
+        
+        # Critic Update
+        v_table[state] += ALPHA * delta
+        
+        # Actor Update
+        d_log_pi = -probs
+        d_log_pi[action] += 1
+        theta[state] += ALPHA * delta * d_log_pi
+        
+        state = next_state
+        
+    if episode % 20 == 0: print(f"Episode {episode} finished.")`;
+        }
+    }
+    downloadPython(`experiment_model_vs_free.py`, pythonCode.trim());
   };
 
   const randomizeEnvironment = () => {
@@ -702,6 +964,15 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-9 flex flex-col gap-4">
               <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                {/* DOWNLOAD CODE BUTTON */}
+                <button 
+                    onClick={handleDownload}
+                    className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
+                >
+                    <PythonLogo size={14} />
+                    <span>Python</span>
+                </button>
+                
                 {/* GRID MAP */}
                 <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
                     {Array.from({ length: N_STATES }).map((_, idx) => {
@@ -823,6 +1094,88 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
 
     const getQ = (s: number) => qTable[s] || [0, 0, 0, 0];
     const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
+
+    const handleDownload = () => {
+        const code = `import numpy as np
+import random
+
+# --- Deterministic vs Stochastic Experiment ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+POLICY_TYPE = "${policyType}"
+SLIP_CHANCE = ${slipChance}
+TEMPERATURE = ${temperature}
+GRID_W, GRID_H = ${GRID_W}, ${GRID_H}
+GOAL = ${goalPos}
+START = ${startPos}
+OBSTACLES = ${JSON.stringify(obstacles)}
+
+class StochasticGridWorld:
+    def __init__(self):
+        self.pos = START
+
+    def reset(self):
+        self.pos = START
+        return self.pos
+
+    def step(self, action):
+        # Apply Environment Noise (Slip)
+        if random.random() < SLIP_CHANCE:
+             possible = [0,1,2,3]
+             possible.remove(action)
+             action = random.choice(possible)
+
+        x = self.pos % GRID_W
+        y = self.pos // GRID_W
+        if action == 0: y = max(0, y - 1)
+        elif action == 1: x = min(GRID_W - 1, x + 1)
+        elif action == 2: y = min(GRID_H - 1, y + 1)
+        elif action == 3: x = max(0, x - 1)
+        
+        new_pos = y * GRID_W + x
+        done = False
+        reward = -0.1
+        
+        if new_pos in OBSTACLES:
+            new_pos = self.pos
+            reward = -1.0
+        elif new_pos == GOAL:
+            reward = 100.0
+            done = True
+            
+        self.pos = new_pos
+        return new_pos, reward, done
+
+q_table = np.zeros((GRID_W * GRID_H, 4)) 
+
+def choose_action(state):
+    if POLICY_TYPE == "deterministic":
+        # Argmax (Greedy)
+        return np.argmax(q_table[state])
+    else:
+        # Softmax (Stochastic)
+        q = q_table[state]
+        exps = np.exp(q / TEMPERATURE)
+        probs = exps / np.sum(exps)
+        return np.random.choice(4, p=probs)
+
+env = StochasticGridWorld()
+
+for episode in range(100):
+    state = env.reset()
+    done = False
+    while not done:
+        action = choose_action(state)
+        next_state, reward, done = env.step(action)
+        
+        # Q-Learning Update
+        best_next = np.max(q_table[next_state])
+        q_table[state][action] += ALPHA * (reward + GAMMA * best_next - q_table[state][action])
+        
+        state = next_state
+        if done: print(f"Episode {episode} finished.")`;
+        downloadPython(`experiment_det_vs_stoch.py`, code.trim());
+    };
 
     const randomizeEnvironment = () => {
         setIsPlaying(false);
@@ -1073,6 +1426,15 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
                 <div className="lg:col-span-9 flex flex-col gap-4">
                      <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
                         
+                        {/* DOWNLOAD CODE BUTTON */}
+                        <button 
+                            onClick={handleDownload}
+                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
+                        >
+                            <PythonLogo size={14} />
+                            <span>Python</span>
+                        </button>
+
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
                              {Array.from({ length: N_STATES }).map((_, idx) => {
                                 const isAgent = agentPos === idx;
@@ -1187,6 +1549,149 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         const c1 = toCoord(idx1);
         const c2 = toCoord(idx2);
         return Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
+    };
+
+    const handleDownload = () => {
+        let pythonCode = "";
+        const commonEnv = `import numpy as np
+import random
+
+class GridWorld:
+    def __init__(self):
+        self.width = ${GRID_W}
+        self.height = ${GRID_H}
+        self.obstacles = ${JSON.stringify(obstacles)}
+        self.goal = ${goalPos}
+        self.start = ${startPos}
+        self.pos = self.start
+
+    def reset(self):
+        self.pos = self.start
+        return self.pos
+
+    def step(self, action):
+        x = self.pos % self.width
+        y = self.pos // self.width
+        if action == 0: y = max(0, y - 1)
+        elif action == 1: x = min(self.width - 1, x + 1)
+        elif action == 2: y = min(self.height - 1, y + 1)
+        elif action == 3: x = max(0, x - 1)
+        
+        new_pos = y * self.width + x
+        reward = -0.1
+        done = False
+        
+        if new_pos in self.obstacles:
+            new_pos = self.pos
+            reward = -1.0
+        elif new_pos == self.goal:
+            reward = 100.0
+            done = True
+        
+        self.pos = new_pos
+        return new_pos, reward, done
+
+env = GridWorld()`;
+
+        if (mode === 'tabular') {
+            pythonCode = `${commonEnv}
+
+# --- Tabular Q-Learning ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+
+q_table = np.zeros((${N_STATES}, 4))
+
+for episode in range(100):
+    state = env.reset()
+    done = False
+    while not done:
+        if random.random() < EPSILON:
+            action = random.randint(0, 3)
+        else:
+            action = np.argmax(q_table[state])
+            
+        next_state, reward, done = env.step(action)
+        
+        # Exact Update
+        best_next = np.max(q_table[next_state])
+        q_table[state][action] += ALPHA * (reward + GAMMA * best_next - q_table[state][action])
+        
+        state = next_state
+    
+    EPSILON *= ${epsilonDecay}
+    if episode % 10 == 0: print(f"Episode {episode} done.")`;
+        } else {
+            pythonCode = `${commonEnv}
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
+# --- Deep Q-Network (DQN) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+
+class DQN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(DQN, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, output_dim)
+        
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
+# Setup
+model = DQN(2, 4) # Input: [x/W, y/H], Output: 4 actions
+optimizer = optim.Adam(model.parameters(), lr=ALPHA)
+criterion = nn.MSELoss()
+
+def get_state_tensor(idx):
+    x = (idx % ${GRID_W}) / ${GRID_W}
+    y = (idx // ${GRID_W}) / ${GRID_H}
+    return torch.FloatTensor([x, y])
+
+for episode in range(200):
+    state_idx = env.reset()
+    state = get_state_tensor(state_idx)
+    done = False
+    
+    while not done:
+        if random.random() < EPSILON:
+            action = random.randint(0, 3)
+        else:
+            with torch.no_grad():
+                q_vals = model(state)
+                action = torch.argmax(q_vals).item()
+                
+        next_state_idx, reward, done = env.step(action)
+        next_state = get_state_tensor(next_state_idx)
+        
+        # Compute Target
+        with torch.no_grad():
+            if done:
+                target_q = reward
+            else:
+                target_q = reward + GAMMA * torch.max(model(next_state)).item()
+        
+        # Compute Loss & Update
+        current_q = model(state)[action]
+        loss = criterion(current_q, torch.tensor(target_q))
+        
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        
+        state = next_state
+        
+    EPSILON *= ${epsilonDecay}
+    if episode % 10 == 0: print(f"Episode {episode}, Loss: {loss.item():.4f}")`;
+        }
+        downloadPython(`experiment_${mode}.py`, pythonCode.trim());
     };
 
     const randomizeEnvironment = () => {
@@ -1388,6 +1893,15 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                 <div className="lg:col-span-9 flex flex-col gap-4">
                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
                         
+                        {/* DOWNLOAD CODE BUTTON */}
+                        <button 
+                            onClick={handleDownload}
+                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
+                        >
+                            <PythonLogo size={14} />
+                            <span>Python</span>
+                        </button>
+
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
                              {Array.from({ length: N_STATES }).map((_, idx) => {
                                 const isAgent = agentPos === idx;
@@ -1491,6 +2005,80 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
     
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const batchRewardRef = useRef(0);
+
+    const handleDownload = () => {
+        const code = `import numpy as np
+import random
+import math
+
+# --- Multi-Armed Bandit Experiment ---
+STRATEGY = "${strategy}"
+EPSILON = ${epsilon}
+UCB_C = ${ucbC}
+INIT_Q = ${initQ}
+N_ARMS = ${N_ARMS}
+TRUE_MEANS = ${JSON.stringify(TRUE_MEANS)}
+
+class MultiArmedBandit:
+    def __init__(self, n_arms, initial_q=0.0):
+        self.n_arms = n_arms
+        self.counts = np.zeros(n_arms)
+        self.q_values = np.full(n_arms, initial_q)
+        self.total_steps = 0
+
+    def select_action(self):
+        self.total_steps += 1
+        
+        if STRATEGY == 'greedy':
+            # Pure Exploitation
+            return np.argmax(self.q_values)
+            
+        elif STRATEGY == 'epsilon':
+            # Epsilon-Greedy
+            if random.random() < EPSILON:
+                return random.randint(0, self.n_arms - 1)
+            return np.argmax(self.q_values)
+            
+        elif STRATEGY == 'optimistic':
+            # Greedy with High Init Q
+            return np.argmax(self.q_values)
+            
+        elif STRATEGY == 'ucb':
+            # Upper Confidence Bound
+            scores = []
+            for i in range(self.n_arms):
+                if self.counts[i] == 0:
+                    return i # Try unseen arms first
+                
+                # UCB Formula
+                uncertainty = UCB_C * math.sqrt(math.log(self.total_steps) / self.counts[i])
+                scores.append(self.q_values[i] + uncertainty)
+            return np.argmax(scores)
+
+    def update(self, action, reward):
+        self.counts[action] += 1
+        n = self.counts[action]
+        q = self.q_values[action]
+        # Incremental Mean Update
+        self.q_values[action] = q + (1.0/n) * (reward - q)
+
+bandit = MultiArmedBandit(N_ARMS, INIT_Q)
+rewards_history = []
+
+for t in range(1, 501):
+    action = bandit.select_action()
+    
+    # Simulate Environment
+    reward = 1 if random.random() < TRUE_MEANS[action] else 0
+    
+    bandit.update(action, reward)
+    rewards_history.append(reward)
+    
+    if t % 50 == 0:
+        avg = sum(rewards_history[-50:]) / 50.0
+        print(f"Step {t}, Avg Reward: {avg:.2f}, Q-Vals: {bandit.q_values.round(2)}")`;
+        downloadPython(`experiment_bandits.py`, code.trim());
+    };
 
     const resetSim = (newInitQ = initQ) => {
         setIsPlaying(false);
@@ -1689,6 +2277,15 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
                 <div className="lg:col-span-9 flex flex-col gap-4">
                      <div className="bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-inner flex flex-col justify-center items-center relative min-h-[400px]">
                         
+                        {/* DOWNLOAD CODE BUTTON */}
+                        <button 
+                            onClick={handleDownload}
+                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
+                        >
+                            <PythonLogo size={14} />
+                            <span>Python</span>
+                        </button>
+
                         {/* BANDIT ARMS VISUALIZATION */}
                         <div className="flex items-end justify-center gap-4 h-[250px] w-full max-w-2xl px-4">
                             {arms.map((arm, i) => {
@@ -1825,6 +2422,103 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     const getKey = (pA: number, pB: number) => mode === 'single' ? `${pA}` : `${pA},${pB}`;
     const getQA = (pA: number, pB: number) => qTableA[getKey(pA, pB)] || [0,0,0,0];
     const getQB = (pA: number, pB: number) => qTableB[getKey(pA, pB)] || [0,0,0,0];
+
+    const handleDownload = () => {
+        const code = `import numpy as np
+import random
+
+# --- Multi-Agent RL (${mode}) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+MODE = "${mode}"
+WIDTH, HEIGHT = ${MA_W}, ${MA_H}
+GOAL_A = ${goalA}
+GOAL_B = ${goalB}
+
+class JointStateGridWorld:
+    def __init__(self):
+        self.pos_a = 0
+        self.pos_b = WIDTH * HEIGHT - 1
+
+    def reset(self):
+        self.pos_a = 0
+        self.pos_b = WIDTH * HEIGHT - 1
+        return self.pos_a, self.pos_b
+
+    def move(self, pos, action):
+        x = pos % WIDTH
+        y = pos // WIDTH
+        if action == 0: y = max(0, y - 1)
+        elif action == 1: x = min(WIDTH - 1, x + 1)
+        elif action == 2: y = min(HEIGHT - 1, y + 1)
+        elif action == 3: x = max(0, x - 1)
+        return y * WIDTH + x
+
+    def step(self, action_a, action_b):
+        new_a = self.move(self.pos_a, action_a)
+        new_b = self.pos_b
+        if MODE != 'single':
+            new_b = self.move(self.pos_b, action_b)
+            
+        r_a, r_b = -0.1, -0.1
+        done = False
+        
+        if MODE == 'single':
+            if new_a == GOAL_A:
+                r_a = 10
+                done = True
+        elif MODE == 'coop':
+            # Rendezvous at respective goals
+            if new_a == GOAL_A and new_b == GOAL_B:
+                r_a = 10; r_b = 10
+                done = True
+        elif MODE == 'comp':
+            # Tag / Zero Sum
+            if new_a == new_b:
+                r_a = 10; r_b = -10 # Capture
+                done = True
+            else:
+                r_a = -0.1; r_b = 0.1 # Evade reward
+                
+        self.pos_a = new_a
+        self.pos_b = new_b
+        return (new_a, new_b), (r_a, r_b), done
+
+# Joint State Q-Table: (pos_a, pos_b, action)
+q_table_a = np.zeros((WIDTH*HEIGHT, WIDTH*HEIGHT, 4))
+q_table_b = np.zeros((WIDTH*HEIGHT, WIDTH*HEIGHT, 4))
+
+env = JointStateGridWorld()
+
+for episode in range(100):
+    pa, pb = env.reset()
+    done = False
+    while not done:
+        # Agent A Action
+        if random.random() < EPSILON: action_a = random.randint(0, 3)
+        else: action_a = np.argmax(q_table_a[pa, pb])
+        
+        # Agent B Action
+        if random.random() < EPSILON: action_b = random.randint(0, 3)
+        else: action_b = np.argmax(q_table_b[pa, pb])
+        
+        (na, nb), (ra, rb), done = env.step(action_a, action_b)
+        
+        # Joint Update A
+        best_next_a = np.max(q_table_a[na, nb])
+        q_table_a[pa, pb, action_a] += ALPHA * (ra + GAMMA * best_next_a - q_table_a[pa, pb, action_a])
+        
+        # Joint Update B
+        if MODE != 'single':
+            best_next_b = np.max(q_table_b[na, nb])
+            q_table_b[pa, pb, action_b] += ALPHA * (rb + GAMMA * best_next_b - q_table_b[pa, pb, action_b])
+            
+        pa, pb = na, nb
+        
+    if episode % 10 == 0: print(f"Episode {episode} finished.")`;
+        downloadPython(`experiment_marl_${mode}.py`, code.trim());
+    };
 
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
@@ -2034,6 +2728,15 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                 <div className="lg:col-span-9 flex flex-col gap-4">
                      <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
                         
+                        {/* DOWNLOAD CODE BUTTON */}
+                        <button 
+                            onClick={handleDownload}
+                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
+                        >
+                            <PythonLogo size={14} />
+                            <span>Python</span>
+                        </button>
+
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${MA_W}, min-content)` }}>
                              {Array.from({ length: MA_STATES }).map((_, idx) => {
                                 const isAgentA = agentAPos === idx;
