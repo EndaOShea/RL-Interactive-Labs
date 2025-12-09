@@ -47,10 +47,19 @@ export interface HyperParameters {
   episodes: number;
 }
 
+export interface MathDetail {
+  label: string;
+  info: string;
+}
+
 export interface SimulationUpdate {
   algorithm: string;
   stepDescription: string;
   formula: string;
   variables: Record<string, number | string>;
   result: string;
+  mathDetails?: {
+    params: MathDetail[];
+    implication: string;
+  };
 }

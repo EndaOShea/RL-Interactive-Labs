@@ -18,8 +18,85 @@ const START_DEFAULT = 32; // Bottom left
 // Initial simple layout
 const DEFAULT_OBSTACLES = [12, 13, 14, 22, 30, 38]; 
 
+// --- SHARED COMPONENTS ---
+
+const LiveMathOverlay: React.FC<{ update: SimulationUpdate | null }> = ({ update }) => {
+  if (!update) return (
+      <div className="bg-gray-900/50 border border-gray-800 p-6 rounded-xl text-center text-gray-500 text-sm font-mono min-h-[160px] flex flex-col items-center justify-center animate-in fade-in">
+        <Activity className="mb-2 opacity-20" size={32} />
+        <span className="font-bold mb-1">Live Math Analysis</span>
+        <span className="text-xs opacity-50">Press Play to see real-time mathematical breakdown</span>
+      </div>
+  );
+
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-lg flex flex-col md:flex-row animate-in fade-in duration-300">
+       {/* Left Column: Equation & State */}
+       <div className="flex-1 p-4 border-b md:border-b-0 md:border-r border-gray-800 bg-gray-900/50">
+          <div className="flex justify-between items-start mb-3">
+             <div className="flex flex-col">
+                <span className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">{update.algorithm}</span>
+                <span className="text-sm text-gray-200 font-medium">{update.stepDescription}</span>
+             </div>
+             <span className="px-2 py-1 rounded bg-gray-800 border border-gray-700 text-xs font-mono text-green-400 font-bold whitespace-nowrap">
+                {update.result}
+             </span>
+          </div>
+          
+          <div className="bg-gray-950 rounded-lg p-3 border border-gray-800 mb-3 shadow-inner">
+             <div className="text-yellow-100 font-mono text-xs md:text-sm mb-3 text-center py-1 border-b border-gray-800/50 pb-2 break-all">
+                {update.formula}
+             </div>
+             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                {Object.entries(update.variables).map(([k,v]) => (
+                    <div key={k} className="flex justify-between items-center text-xs group">
+                        <span className="text-gray-500 group-hover:text-gray-300 transition-colors font-mono mr-2">{k}</span>
+                        <span className="text-blue-300 font-mono font-bold truncate">{typeof v === 'number' ? v.toFixed(3) : v}</span>
+                    </div>
+                ))}
+             </div>
+          </div>
+       </div>
+
+       {/* Right Column: Detailed Analysis */}
+       <div className="flex-[1.3] p-4 bg-gray-800/30 flex flex-col justify-center">
+            {update.mathDetails ? (
+                <div className="space-y-3">
+                    <div className="flex items-center gap-2 mb-1">
+                        <div className="p-1 bg-blue-500/10 rounded">
+                            <Info size={14} className="text-blue-400" />
+                        </div>
+                        <span className="text-xs font-bold text-gray-300 uppercase tracking-wide">Parameter Influence & Analysis</span>
+                    </div>
+                    
+                    <div className="space-y-2 pl-1">
+                        {update.mathDetails.params.map((p, i) => (
+                            <div key={i} className="text-xs grid grid-cols-[110px_1fr] gap-2 items-baseline">
+                                <span className="font-bold text-blue-300 text-right">{p.label}:</span>
+                                <span className="text-gray-400 leading-relaxed">{p.info}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t border-gray-700/50">
+                        <div className="flex items-start gap-2 bg-blue-900/10 p-2.5 rounded border-l-2 border-blue-500/50">
+                             <TrendingUp size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                             <div className="text-xs text-blue-200 leading-relaxed">
+                                 <span className="font-bold text-blue-100 block mb-0.5 uppercase text-[10px] tracking-wider">Implication</span>
+                                 {update.mathDetails.implication}
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="text-center text-gray-500 text-xs">No detailed analysis available for this step.</div>
+            )}
+       </div>
+    </div>
+  );
+};
+
 // --- HELPER: PATHFINDING (BFS) ---
-// Ensures we don't generate impossible maps
 const isReachable = (start: number, goal: number, obstacles: number[], width: number, height: number) => {
     const queue = [start];
     const visited = new Set<number>([start]);
@@ -66,39 +143,33 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
   const [agentPos, setAgentPos] = useState(START_DEFAULT);
   const [episode, setEpisode] = useState(0);
   const [steps, setSteps] = useState(0);
+  
+  // Local Log State for Overlay
+  const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
   // Algorithms
-  // Mode: 'free' (Model-Free) or 'based' (Model-Based/Dyna-Q)
   const [algoMode, setAlgoMode] = useState<'free' | 'based'>('free');
-  // Sub-Algo for Model-Free: 
   const [subAlgo, setSubAlgo] = useState<'q' | 'sarsa' | 'reinforce' | 'ac'>('q');
 
   // --- Data Structures ---
-  // Value-Based (Q/SARSA/Dyna)
   const [qTable, setQTable] = useState<Record<number, number[]>>({}); 
-  const [sarsaNextAction, setSarsaNextAction] = useState<number | null>(null); // For strict SARSA
-  
-  // Model-Based (Dyna)
+  const [sarsaNextAction, setSarsaNextAction] = useState<number | null>(null); 
   const [model, setModel] = useState<Record<number, Record<number, { next: number, reward: number }>>>({});
   const [visitedStates, setVisitedStates] = useState<number[]>([]);
   const [plannedCells, setPlannedCells] = useState<number[]>([]);
-  
-  // Policy-Based / AC
-  const [policyPrefs, setPolicyPrefs] = useState<Record<number, number[]>>({}); // H(s,a)
-  const [vTable, setVTable] = useState<Record<number, number>>({}); // V(s) for AC
-  const [history, setHistory] = useState<{s:number, a:number, r:number}[]>([]); // REINFORCE memory
+  const [policyPrefs, setPolicyPrefs] = useState<Record<number, number[]>>({}); 
+  const [vTable, setVTable] = useState<Record<number, number>>({}); 
+  const [history, setHistory] = useState<{s:number, a:number, r:number}[]>([]); 
 
   // --- Parameters ---
   const [speed, setSpeed] = useState(50);
-  const [epsilon, setEpsilon] = useState(0.1); // For Value
+  const [epsilon, setEpsilon] = useState(0.1); 
   const [alpha, setAlpha] = useState(0.1);
   const [gamma, setGamma] = useState(0.9);
   const [epsilonDecay, setEpsilonDecay] = useState(0.995);
   const [planningSteps, setPlanningSteps] = useState(20);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  
-  // Reward Tracking for Graph
   const episodeRewardRef = useRef(0);
 
   // --- Helpers ---
@@ -106,7 +177,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
   const getMaxQ = (s: number) => Math.max(...getQ(s));
   const getV = (s: number) => vTable[s] || 0;
   const getPrefs = (s: number) => policyPrefs[s] || [0,0,0,0];
-  
   const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
 
   const getPolicyProbs = (s: number) => {
@@ -116,7 +186,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     return exps.map(e => e/sum);
   };
 
-  // --- Map Generation ---
   const randomizeEnvironment = () => {
     setIsPlaying(false);
     let attempts = 0;
@@ -125,30 +194,22 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
     while (!validMap && attempts < 100) {
         newObstacles = [];
-        // Generate random number of obstacles (between 5 and 15)
         const count = 5 + Math.floor(Math.random() * 10);
-        
         for (let i = 0; i < count; i++) {
             const pos = Math.floor(Math.random() * N_STATES);
-            // Avoid Start, Goal, and duplicates
             if (pos !== startPos && pos !== goalPos && !newObstacles.includes(pos)) {
                 newObstacles.push(pos);
             }
         }
-
-        // Check if solvable
         if (isReachable(startPos, goalPos, newObstacles, GRID_W, GRID_H)) {
             validMap = true;
         }
         attempts++;
     }
-    
     setObstacles(newObstacles);
-    resetSim(true); // Hard reset including agent memory
+    resetSim(true);
   };
 
-  // --- Reset ---
-  // clearMemory: true = clear Q-tables/Policy (New Map), false = just reset agent pos (Retry)
   const resetSim = (clearMemory = true) => {
     setIsPlaying(false);
     setAgentPos(startPos);
@@ -157,6 +218,7 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     setSteps(0);
     setHistory([]);
     episodeRewardRef.current = 0;
+    setLastLog(null);
     
     if (clearMemory) {
         setQTable({});
@@ -165,19 +227,12 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         setPlannedCells([]);
         setPolicyPrefs({});
         setVTable({});
-        // Reset Epsilon
         setEpsilon(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa' ? 0.5 : 0);
-        
-        // Clear parent metrics when resetting
-        if (onClearMetrics) {
-            onClearMetrics();
-        }
+        if (onClearMetrics) onClearMetrics();
     }
   };
 
-  // --- Step Logic ---
   const step = useCallback(() => {
-    // We calculate everything based on current state to ensure strict SARSA flow
     let currPos = agentPos;
     let action = 0;
     let isExploration = false;
@@ -185,11 +240,9 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
     // 1. SELECT ACTION
     if (algoMode === 'free' && subAlgo === 'sarsa' && sarsaNextAction !== null) {
-        // Strict SARSA: Use the action we committed to in the previous step
         action = sarsaNextAction;
     } 
     else if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
-        // Epsilon-Greedy (Standard for Q / Dyna / First Step of SARSA)
         if (Math.random() < epsilon) {
             action = Math.floor(Math.random() * 4);
             isExploration = true;
@@ -199,7 +252,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
             action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
         }
     } else {
-        // Softmax Policy (REINFORCE / AC)
         const probs = getPolicyProbs(currPos);
         const rand = Math.random();
         let cumulative = 0;
@@ -212,13 +264,15 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         }
     }
 
+    const actionStr = ['Up','Right','Down','Left'][action];
+
     // 2. EXECUTE ACTION
     const { x, y } = toCoord(currPos);
     let nx = x, ny = y;
-    if (action === 0) ny = Math.max(0, ny - 1); // U
-    if (action === 1) nx = Math.min(GRID_W - 1, nx + 1); // R
-    if (action === 2) ny = Math.min(GRID_H - 1, ny + 1); // D
-    if (action === 3) nx = Math.max(0, nx - 1); // L
+    if (action === 0) ny = Math.max(0, ny - 1);
+    if (action === 1) nx = Math.min(GRID_W - 1, nx + 1);
+    if (action === 2) ny = Math.min(GRID_H - 1, ny + 1);
+    if (action === 3) nx = Math.max(0, nx - 1);
 
     const nextIdx = ny * GRID_W + nx;
     let nextPos = currPos;
@@ -235,8 +289,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     } else {
         nextPos = nextIdx;
     }
-    
-    // Accumulate Reward
     episodeRewardRef.current += reward;
 
     // 3. LEARNING UPDATES
@@ -247,12 +299,10 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     let newVTable = { ...vTable };
     let flashCells: number[] = [];
 
-    // A) SARSA (Strict On-Policy)
+    // A) SARSA
     if (algoMode === 'free' && subAlgo === 'sarsa') {
         let nextAction = 0;
         let nextQVal = 0;
-
-        // Choose Next Action A' (using Epsilon-Greedy on S')
         if (!done) {
             const nextQVals = getQ(nextPos);
             if (Math.random() < epsilon) {
@@ -264,35 +314,44 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
             }
             nextQVal = nextQVals[nextAction];
         }
-
-        // SARSA Update: Q(s,a) + alpha * [R + gamma * Q(s',a') - Q(s,a)]
         const currentQ = currentQVals[action];
         const target = reward + gamma * nextQVal;
         const newQ = currentQ + alpha * (target - currentQ);
 
         if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
         newQTable[currPos][action] = newQ;
-        
-        // Save A' for next step
         setSarsaNextAction(done ? null : nextAction);
 
         if (onLogUpdate && Math.random() < 0.5) {
-            onLogUpdate({
+            const tdError = target - currentQ;
+            const log = {
                 algorithm: 'SARSA',
-                stepDescription: isExploration ? 'Updating (Exploration step)' : 'Updating (Greedy step)',
-                formula: 'Q(s,a) ← Q(s,a) + α[R + γQ(s\',a\') - Q(s,a)]',
+                stepDescription: isExploration ? 'Exploration Step (Random)' : 'Greedy Step (Policy)',
+                formula: 'Q(s,a) += α[R + γQ(s\',a\') - Q]',
                 variables: {
-                    'Alpha (α)': alpha,
-                    'Gamma (γ)': gamma,
-                    'Reward (R)': reward,
-                    'Q(s,a)': currentQ.toFixed(3),
-                    'Q(s\',a\')': nextQVal.toFixed(3)
+                    'Q(s,a)': currentQ.toFixed(2),
+                    'Target': target.toFixed(2),
+                    'R': reward,
+                    'γ': gamma
                 },
-                result: `New Q: ${newQ.toFixed(3)}`
-            });
+                result: `New Q: ${newQ.toFixed(2)}`,
+                mathDetails: {
+                    params: [
+                        { label: 'Q(s,a)', info: `Quality Score. Expected future reward for "${actionStr}".` },
+                        { label: 'Gamma (γ)', info: `${gamma}. Discount. Future rewards valued at ${(gamma*100).toFixed(0)}%.` },
+                        { label: 'Epsilon (ε)', info: isExploration ? `Active (${epsilon.toFixed(2)}). Random action forced.` : `Inactive (${epsilon.toFixed(2)}). Chosen by policy.` },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate. We accepted ${(alpha*100).toFixed(0)}% of this result.` }
+                    ],
+                    implication: tdError > 0 
+                        ? `Good Surprise (+${tdError.toFixed(2)}): This result was better than expected. "${actionStr}" is now MORE attractive.` 
+                        : `Bad Surprise (${tdError.toFixed(2)}): This result was worse than expected. "${actionStr}" is now LESS attractive.`
+                }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
     } 
-    // B) Q-Learning / Dyna-Q (Off-Policy)
+    // B) Q-Learning / Dyna-Q
     else if (algoMode === 'based' || subAlgo === 'q') {
         const currentQ = currentQVals[action];
         const maxNextQ = done ? 0 : getMaxQ(nextPos);
@@ -303,29 +362,36 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         newQTable[currPos][action] = newQ;
 
         if (onLogUpdate && Math.random() < 0.3) {
-            onLogUpdate({
+            const tdError = target - currentQ;
+            const log = {
                 algorithm: algoMode === 'based' ? 'Dyna-Q' : 'Q-Learning',
-                stepDescription: isExploration ? 'Updating (Exploration step)' : 'Updating (Greedy step)',
-                formula: 'Q(s,a) ← Q(s,a) + α[R + γ max Q(s\') - Q(s,a)]',
+                stepDescription: isExploration ? 'Exploration Step (Random)' : 'Greedy Step (Optimal)',
+                formula: 'Q(s,a) += α[R + γ max Q(s\') - Q]',
                 variables: {
-                    'Alpha (α)': alpha,
-                    'Gamma (γ)': gamma,
-                    'Reward (R)': reward,
-                    'Q(s,a)': currentQ.toFixed(3),
-                    'max Q(s\')': maxNextQ.toFixed(3)
+                    'Q(s,a)': currentQ.toFixed(2),
+                    'Max Q(s\')': maxNextQ.toFixed(2),
+                    'R': reward
                 },
-                result: `New Q: ${newQ.toFixed(3)}`
-            });
+                result: `New Q: ${newQ.toFixed(2)}`,
+                mathDetails: {
+                    params: [
+                        { label: 'Q(s,a)', info: `Quality Score. Expected future reward for "${actionStr}".` },
+                        { label: 'Gamma (γ)', info: `${gamma}. Discount. Future rewards valued at ${(gamma*100).toFixed(0)}%.` },
+                        { label: 'Epsilon (ε)', info: isExploration ? `Active (${epsilon.toFixed(2)}). Random action forced.` : `Inactive (${epsilon.toFixed(2)}). Best action chosen.` },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate. High alpha makes learning fast but unstable.` }
+                    ],
+                    implication: `The value of going ${actionStr} shifted by ${tdError > 0 ? '+' : ''}${tdError.toFixed(2)}. This means ${actionStr} is now ${tdError > 0 ? 'MORE' : 'LESS'} likely to be chosen compared to Up/Down/Left/Right.`
+                }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
 
-        // Dyna-Q Model Learning & Planning
         if (algoMode === 'based') {
             if (!newModel[currPos]) newModel[currPos] = {};
             newModel[currPos][action] = { next: nextPos, reward };
-            
             if (!visitedStates.includes(currPos)) newVisited.push(currPos);
 
-            // Mental Replay
             for(let i=0; i<planningSteps; i++) {
                 const randS = newVisited[Math.floor(Math.random() * newVisited.length)];
                 if (randS === undefined) continue;
@@ -343,21 +409,28 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                 
                 flashCells.push(randS);
 
-                // Log Planning (Sample)
                 if (i === 0 && onLogUpdate && Math.random() < 0.2) {
-                    onLogUpdate({
+                     const log = {
                         algorithm: 'Dyna-Q (Planning)',
-                        stepDescription: 'Mental Replay: Updating Q from internal model',
-                        formula: 'Q(s,a) ← Q + α[R_model + γ max Q(s\') - Q]',
+                        stepDescription: 'Dreaming: Replaying past experience',
+                        formula: 'Q(s,a) += α[R_model + γ max Q(s\') - Q]',
                         variables: {
-                            'Alpha (α)': alpha,
-                            'Gamma (γ)': gamma,
-                            'Sim Reward': simR,
-                            'Sim Max Q': simMax.toFixed(3),
-                            'Old Q': simQ.toFixed(3)
+                            'Sim R': simR,
+                            'Sim Max Q': simMax.toFixed(2),
+                            'Old Q': simQ.toFixed(2)
                         },
-                        result: `New Q: ${plannedQ.toFixed(3)}`
-                    });
+                        result: `Updated Q: ${plannedQ.toFixed(2)}`,
+                        mathDetails: {
+                            params: [
+                                { label: 'Model', info: 'Internal simulation of the world logic.' },
+                                { label: 'Planning', info: 'Updating values in background without moving.' },
+                                { label: 'Alpha (α)', info: 'Learning rate applied to simulated experience.' }
+                            ],
+                            implication: 'The agent is "thinking" about past actions to propagate information faster without needing real steps.'
+                        }
+                    };
+                    onLogUpdate(log);
+                    setLastLog(log);
                 }
             }
         }
@@ -367,49 +440,65 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         const vCurr = getV(currPos);
         const vNext = done ? 0 : getV(nextPos);
         const tdError = reward + gamma * vNext - vCurr;
-        
-        // Update Critic
         newVTable[currPos] = vCurr + alpha * tdError;
         
-        // Update Actor
         if (!newPolicyPrefs[currPos]) newPolicyPrefs[currPos] = [0,0,0,0];
         newPolicyPrefs[currPos][action] += alpha * tdError;
 
         if (onLogUpdate && Math.random() < 0.3) {
-            onLogUpdate({
+            const log = {
                algorithm: 'Actor-Critic',
-               stepDescription: 'Updating Actor & Critic via TD Error',
+               stepDescription: 'Updating Critic (Value) & Actor (Policy)',
                formula: 'δ = R + γV(s\') - V(s)',
                variables: {
-                 'Alpha (α)': alpha,
-                 'Gamma (γ)': gamma,
-                 'Reward (R)': reward,
-                 'V(s\')': vNext.toFixed(3),
-                 'V(s)': vCurr.toFixed(3)
+                 'R': reward,
+                 'V(s\')': vNext.toFixed(2),
+                 'V(s)': vCurr.toFixed(2)
                },
-               result: `TD Error (δ): ${tdError.toFixed(4)}`
-            });
+               result: `TD Error (δ): ${tdError.toFixed(3)}`,
+               mathDetails: {
+                   params: [
+                       { label: 'Critic V(s)', info: 'Estimates how good the state is.' },
+                       { label: 'Actor π(s)', info: 'Decides what action to take.' },
+                       { label: 'TD Error (δ)', info: 'Critique of the action taken.' },
+                       { label: 'Alpha (α)', info: 'Learning Rate for both Actor and Critic.' }
+                   ],
+                   implication: tdError > 0 
+                    ? 'The outcome was better than the Critic expected. The Actor is encouraged to do this again, and the Critic raises its expectation.'
+                    : 'The outcome was worse than expected. The Actor is discouraged, and the Critic lowers its expectation.'
+               }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
     }
     // D) REINFORCE
     else if (subAlgo === 'reinforce') {
         setHistory(prev => [...prev, { s: currPos, a: action, r: reward }]);
         if (onLogUpdate && Math.random() < 0.1) {
-            onLogUpdate({
+             const log = {
                 algorithm: 'REINFORCE',
-                stepDescription: 'Buffering experience (No update until episode ends)',
-                formula: 'Buffer.add(s, a, r)',
+                stepDescription: 'Monte-Carlo: Buffering Experience',
+                formula: 'Buffer.append(s, a, r)',
                 variables: {
                     'State': currPos,
-                    'Action': action,
+                    'Action': actionStr,
                     'Reward': reward
                 },
-                result: 'Stored'
-            });
+                result: 'Stored',
+                mathDetails: {
+                    params: [
+                        { label: 'Monte-Carlo', info: 'Learning only happens at episode end.' },
+                        { label: 'Buffer', info: 'Storing trajectory.' }
+                    ],
+                    implication: 'We cannot know if this action was good until the episode finishes and we see the total return.'
+                }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
     }
 
-    // Apply Batch Updates
     setAgentPos(done ? startPos : nextPos);
     setQTable(newQTable);
     setModel(newModel);
@@ -421,8 +510,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     if (done) {
         setEpisode(e => e + 1);
         setSteps(0);
-        
-        // Report Metrics to Parent (for Graph)
         if (onUpdateMetrics) {
             onUpdateMetrics({
                 episode: episode + 1,
@@ -431,9 +518,8 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                 steps: steps
             });
         }
-        episodeRewardRef.current = 0; // Reset for next episode
+        episodeRewardRef.current = 0;
         
-        // REINFORCE Final Update
         if (subAlgo === 'reinforce' && algoMode === 'free') {
              const finalHist = [...history, { s: currPos, a: action, r: reward }];
              const updatedPrefs = { ...newPolicyPrefs };
@@ -448,21 +534,31 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
              setHistory([]);
 
              if (onLogUpdate) {
-                onLogUpdate({
+                const log = {
                     algorithm: 'REINFORCE',
-                    stepDescription: 'Monte-Carlo Update (End of Episode)',
-                    formula: 'θ ← θ + α G ∇ln π',
+                    stepDescription: 'Policy Update (End of Episode)',
+                    formula: 'θ += α * G * ∇ln(π)',
                     variables: {
-                        'Alpha (α)': alpha,
                         'Return (G)': G.toFixed(2),
-                        'Steps': finalHist.length
+                        'Alpha (α)': alpha
                     },
-                    result: 'Policy Updated'
-                });
+                    result: 'Weights Updated',
+                    mathDetails: {
+                        params: [
+                            { label: 'Return (G)', info: 'Total discounted reward from this point onwards.' },
+                            { label: 'Alpha (α)', info: 'Learning Rate. Controls step size of policy update.' },
+                            { label: 'Gradient', info: 'Direction to increase probability.' }
+                        ],
+                        implication: G > 0 
+                            ? 'The total episode was successful. We increase probability for all actions taken.'
+                            : 'The episode yielded poor returns. We decrease probability for actions taken.'
+                    }
+                };
+                onLogUpdate(log);
+                setLastLog(log);
              }
         }
 
-        // Decay Epsilon
         if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
             setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
         }
@@ -475,7 +571,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     algoMode, subAlgo, epsilon, alpha, gamma, planningSteps, epsilonDecay, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics
   ]);
 
-  // Loop
   useEffect(() => {
     if (isPlaying) {
       intervalRef.current = setInterval(step, speed);
@@ -487,7 +582,6 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
   const getTrainingInsight = () => {
     if (episode === 0 && steps === 0) return "Ready to start. Select an algorithm above and press Play to begin training.";
-    
     let text = "";
     if (algoMode === 'based') {
         text += "System: Dyna-Q (Model-Based). The purple flashes are planning steps using the learned model. ";
@@ -519,11 +613,7 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                 )}
             </div>
             <div className="flex items-center gap-2">
-                <button 
-                    onClick={randomizeEnvironment} 
-                    className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300"
-                    title="Generate New Map"
-                >
+                <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
                     <Shuffle size={14} /> New Map
                 </button>
                 <div className="h-6 w-px bg-gray-700 mx-2"></div>
@@ -538,6 +628,7 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-9 flex flex-col gap-4">
               <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                {/* GRID MAP */}
                 <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
                     {Array.from({ length: N_STATES }).map((_, idx) => {
                     const isAgent = agentPos === idx;
@@ -588,9 +679,13 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                     {algoMode === 'based' && <div className="flex items-center gap-2"><div className="w-3 h-3 bg-purple-500 animate-pulse rounded-full"></div><span className="text-gray-300">Planning</span></div>}
                 </div>
               </div>
-              <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
-                  <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
-                  <div><h4 className="text-sm font-bold text-blue-300 mb-1">Training Dialogue & Insight</h4><p className="text-xs text-gray-300 leading-relaxed whitespace-pre-wrap font-mono">{getTrainingInsight()}</p></div>
+              
+              {/* LIVE MATH SECTION - BELOW MAP */}
+              <LiveMathOverlay update={lastLog} />
+              
+              <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
+                  <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
+                  <div><h4 className="text-xs font-bold text-blue-400 mb-1">Algorithm Context</h4><p className="text-[11px] text-gray-400 leading-relaxed font-mono">{getTrainingInsight()}</p></div>
               </div>
           </div>
           <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
@@ -611,26 +706,21 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
 // --- 2. Deterministic vs Stochastic Lab ---
 export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // Environment
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
     const [agentPos, setAgentPos] = useState(START_DEFAULT);
 
-    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
-    
-    // Core Q-Learning State
     const [qTable, setQTable] = useState<Record<number, number[]>>({}); 
+    const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
     
-    // Lab Specific State
     const [policyType, setPolicyType] = useState<'deterministic' | 'stochastic'>('deterministic');
-    const [slipChance, setSlipChance] = useState(0.0); // 0.0 to 0.5
-    const [temperature, setTemperature] = useState(1.0); // Softmax Temp (0.1 to 5.0)
+    const [slipChance, setSlipChance] = useState(0.0);
+    const [temperature, setTemperature] = useState(1.0);
 
-    // Params
     const [speed, setSpeed] = useState(50);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
@@ -670,7 +760,7 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
         setEpisode(0);
         setSteps(0);
         episodeRewardRef.current = 0;
-        
+        setLastLog(null);
         if (clearMemory) {
             setQTable({});
             if (onClearMetrics) onClearMetrics();
@@ -683,16 +773,13 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
         let action = 0;
         let logDescription = "";
 
-        // 1. ACTION SELECTION (Policy)
+        // 1. ACTION SELECTION
         if (policyType === 'deterministic') {
-            // Argmax (Greedy)
             const maxVal = Math.max(...currentQVals);
             const maxIndices = currentQVals.map((v, i) => v === maxVal ? i : -1).filter(i => i !== -1);
             action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
             logDescription = "Deterministic: Selecting Max Q action";
         } else {
-            // Stochastic (Softmax)
-            // P(a) = exp(Q(s,a)/tau) / sum(...)
             const exps = currentQVals.map(q => Math.exp(q / temperature));
             const sumExps = exps.reduce((a, b) => a + b, 0);
             const probs = exps.map(e => e / sumExps);
@@ -709,23 +796,21 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
             logDescription = `Stochastic: Sampling from Softmax (τ=${temperature})`;
         }
 
-        // 2. ENVIRONMENT TRANSITION (Stochasticity/Slip)
+        // 2. ENVIRONMENT TRANSITION
         let actualAction = action;
         let slipped = false;
         if (Math.random() < slipChance) {
-            // Slip! Choose random direction NOT equal to intended
             const otherActions = [0,1,2,3].filter(a => a !== action);
             actualAction = otherActions[Math.floor(Math.random() * otherActions.length)];
             slipped = true;
         }
 
-        // Execute Actual Action
         const { x, y } = toCoord(currPos);
         let nx = x, ny = y;
-        if (actualAction === 0) ny = Math.max(0, ny - 1); // U
-        if (actualAction === 1) nx = Math.min(GRID_W - 1, nx + 1); // R
-        if (actualAction === 2) ny = Math.min(GRID_H - 1, ny + 1); // D
-        if (actualAction === 3) nx = Math.max(0, nx - 1); // L
+        if (actualAction === 0) ny = Math.max(0, ny - 1);
+        if (actualAction === 1) nx = Math.min(GRID_W - 1, nx + 1);
+        if (actualAction === 2) ny = Math.min(GRID_H - 1, ny + 1);
+        if (actualAction === 3) nx = Math.max(0, nx - 1);
 
         const nextIdx = ny * GRID_W + nx;
         let nextPos = currPos;
@@ -744,10 +829,10 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
         }
         episodeRewardRef.current += reward;
 
-        // 3. UPDATE (Q-Learning)
+        // 3. UPDATE
         const nextQVals = getQ(nextPos);
         const maxNextQ = done ? 0 : Math.max(...nextQVals);
-        const currentQ = currentQVals[action]; // Update intended action's value
+        const currentQ = currentQVals[action];
         const newQ = currentQ + alpha * (reward + gamma * maxNextQ - currentQ);
 
         const newQTable = { ...qTable };
@@ -755,29 +840,41 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
         newQTable[currPos][action] = newQ;
         setQTable(newQTable);
 
-        // LOGGING
         if (onLogUpdate && Math.random() < 0.3) {
             let formula = policyType === 'deterministic' 
                 ? 'π(s) = argmax Q(s,a)' 
                 : 'π(a|s) = exp(Q/τ) / Σ exp(Q/τ)';
             
             if (slipped) {
-                logDescription += " -> SLIPPED! Env altered action.";
+                logDescription += " -> SLIPPED!";
             }
 
-            onLogUpdate({
+            const log = {
                 algorithm: `Q-Learning (${policyType})`,
                 stepDescription: logDescription,
                 formula: formula,
                 variables: {
-                    'Temp (τ)': temperature,
-                    'Slip Chance': slipChance,
                     'Intended': ['U','R','D','L'][action],
                     'Actual': ['U','R','D','L'][actualAction],
+                    'Temp (τ)': temperature,
                     'Reward': reward
                 },
-                result: slipped ? 'Transition Noisy' : 'Transition Clean'
-            });
+                result: slipped ? 'Noise Interfered' : 'Clean Step',
+                mathDetails: {
+                    params: [
+                        { label: 'Q(s,a)', info: 'Quality Score. Expected future reward.' },
+                        { label: 'Policy', info: policyType === 'deterministic' ? 'Rigid (Argmax). No exploration.' : 'Flexible (Softmax). Supports exploration.' },
+                        { label: 'Slip Chance', info: `${(slipChance * 100).toFixed(0)}%. Probability the environment ignores your choice.` },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate. Weight of this update.` },
+                        { label: 'Gamma (γ)', info: `${gamma}. Discount. Future reward importance.` }
+                    ],
+                    implication: slipped 
+                        ? 'Bad Luck: The agent picked a good action, but the environment forced a bad outcome. If Alpha is high, the agent will wrongly learn to avoid this good action.'
+                        : 'Success: The agent successfully executed its chosen action.'
+                }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
 
         setAgentPos(done ? startPos : nextPos);
@@ -789,7 +886,7 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
                 onUpdateMetrics({
                     episode: episode + 1,
                     reward: episodeRewardRef.current,
-                    epsilon: 0, // Not used here directly
+                    epsilon: 0,
                     steps: steps
                 });
             }
@@ -809,28 +906,23 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
     }, [isPlaying, speed, step]);
 
-    // Render Helpers
-    // For Stochastic visualization, we calculate arrow opacities based on Softmax(Q)
     const getRenderData = (idx: number) => {
         const qs = getQ(idx);
         let bgColor = 'rgba(31, 41, 55, 0.5)';
         let arrows: { rot: number, op: number }[] = [];
         
-        // Color based on Max Q (Value)
         const maxQ = Math.max(...qs);
         const intensity = Math.min(Math.abs(maxQ) / 20, 1);
         if (maxQ > 0) bgColor = `rgba(16, 185, 129, ${0.1 + intensity * 0.9})`; 
         else if (maxQ < 0) bgColor = `rgba(239, 68, 68, ${0.1 + intensity * 0.5})`;
 
         if (policyType === 'deterministic') {
-            // Show single arrow for best action
             const bestIdx = qs.indexOf(maxQ);
-            if (maxQ !== 0) { // Don't show if all 0
+            if (maxQ !== 0) {
                 const rots = [0, 90, 180, 270];
                 arrows.push({ rot: rots[bestIdx], op: 1.0 });
             }
         } else {
-            // Show all arrows based on Softmax probs
             const exps = qs.map(q => Math.exp(q / temperature));
             const sum = exps.reduce((a,b) => a+b, 0);
             const probs = exps.map(e => e/sum);
@@ -887,6 +979,7 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-9 flex flex-col gap-4">
                      <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                        
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
                              {Array.from({ length: N_STATES }).map((_, idx) => {
                                 const isAgent = agentPos === idx;
@@ -912,11 +1005,14 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
                             <div className="flex items-center gap-2"><Navigation size={10} className="text-white opacity-40" /><span>Probabilistic</span></div>
                         </div>
                      </div>
-                     <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                     
+                     <LiveMathOverlay update={lastLog} />
+
+                     <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
                          <div>
-                             <h4 className="text-sm font-bold text-blue-300 mb-1">Lab Insight</h4>
-                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                             <h4 className="text-xs font-bold text-blue-400 mb-1">Lab Insight</h4>
+                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
                                 {getInsightText()}
                              </p>
                          </div>
@@ -954,26 +1050,23 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
 
 // --- 3. Tabular vs Deep RL Lab ---
 export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // Basic Environment
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
     const [agentPos, setAgentPos] = useState(START_DEFAULT);
 
-    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
     const [mode, setMode] = useState<'tabular' | 'deep'>('tabular');
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
     const [qTable, setQTable] = useState<Record<number, number[]>>({});
+    const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-    // Params
     const [speed, setSpeed] = useState(50);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
-    const [epsilon, setEpsilon] = useState(1.0); // Start high for decay to matter
+    const [epsilon, setEpsilon] = useState(1.0); 
     const [epsilonDecay, setEpsilonDecay] = useState(0.995);
-    // Generalization Radius (simulates Neural Network 'bleed')
     const [genRadius, setGenRadius] = useState(1.5); 
 
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -989,7 +1082,6 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
     const randomizeEnvironment = () => {
         setIsPlaying(false);
-        // ... (standard random map logic as above) ...
         let attempts = 0;
         let validMap = false;
         let newObstacles: number[] = [];
@@ -1017,9 +1109,10 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         setEpisode(0);
         setSteps(0);
         episodeRewardRef.current = 0;
+        setLastLog(null);
         if (clearMemory) {
             setQTable({});
-            setEpsilon(1.0); // Reset exploration
+            setEpsilon(1.0); 
             if (onClearMetrics) onClearMetrics();
         }
     };
@@ -1028,23 +1121,23 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         const currPos = agentPos;
         const currentQVals = getQ(currPos);
         
-        // Action Selection (Epsilon Greedy)
         let action = 0;
+        let isExploration = false;
         if (Math.random() < epsilon) {
             action = Math.floor(Math.random() * 4);
+            isExploration = true;
         } else {
             const maxVal = Math.max(...currentQVals);
             const maxIndices = currentQVals.map((v, i) => v === maxVal ? i : -1).filter(i => i !== -1);
             action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
         }
 
-        // Execute
         const { x, y } = toCoord(currPos);
         let nx = x, ny = y;
-        if (action === 0) ny = Math.max(0, ny - 1); // U
-        if (action === 1) nx = Math.min(GRID_W - 1, nx + 1); // R
-        if (action === 2) ny = Math.min(GRID_H - 1, ny + 1); // D
-        if (action === 3) nx = Math.max(0, nx - 1); // L
+        if (action === 0) ny = Math.max(0, ny - 1);
+        if (action === 1) nx = Math.min(GRID_W - 1, nx + 1);
+        if (action === 2) ny = Math.min(GRID_H - 1, ny + 1);
+        if (action === 3) nx = Math.max(0, nx - 1);
 
         const nextIdx = ny * GRID_W + nx;
         let nextPos = currPos;
@@ -1063,8 +1156,6 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         }
         episodeRewardRef.current += reward;
 
-        // LEARNING UPDATE
-        // Standard TD Error
         const nextQVals = getQ(nextPos);
         const maxNextQ = done ? 0 : Math.max(...nextQVals);
         const currentQ = getQ(currPos)[action];
@@ -1073,41 +1164,47 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         const newQTable = { ...qTable };
 
         if (mode === 'tabular') {
-            // Precise Update: Only affects current state
             if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
             newQTable[currPos][action] += alpha * tdError;
         } else {
-            // Deep (Simulated): Function Approximation / Generalization
-            // Update neighbors based on radial distance
             for (let s = 0; s < N_STATES; s++) {
                 if (obstacles.includes(s) || s === goalPos) continue;
                 
                 const d = dist(currPos, s);
-                // Gaussian Kernel for similarity
                 const similarity = Math.exp(-Math.pow(d, 2) / (2 * Math.pow(genRadius, 2)));
                 
                 if (similarity > 0.01) {
                     if (!newQTable[s]) newQTable[s] = [0,0,0,0];
-                    // Deep RL update: weights allow generalization
                     newQTable[s][action] += alpha * tdError * similarity;
                 }
             }
         }
         setQTable(newQTable);
 
-        // Logging
         if (onLogUpdate && Math.random() < 0.2) {
-            onLogUpdate({
+            const log = {
                 algorithm: mode === 'tabular' ? 'Tabular Q-Learning' : 'Deep RL (Approx)',
                 stepDescription: mode === 'tabular' ? 'Updating single state exactly.' : `Generalizing update to neighbors (Radius=${genRadius})`,
-                formula: mode === 'tabular' ? 'Q(s,a) ← Q + α δ' : 'Q(s\',a) ← Q + α δ * Similarity(s, s\')',
+                formula: mode === 'tabular' ? 'Q(s,a) += α * δ' : 'Q(s\',a) += α * δ * Similarity',
                 variables: {
-                    'TD Error': tdError.toFixed(3),
-                    'Alpha': alpha,
-                    'Similarity': mode === 'tabular' ? '1.0 (Self)' : 'e^(-d²/2σ²)'
+                    'TD Error (δ)': tdError.toFixed(2),
+                    'Similarity': mode === 'tabular' ? '1.0 (Self)' : 'e^(-d²/2σ²)',
+                    'R': reward
                 },
-                result: 'Weights Updated'
-            });
+                result: 'Weights Updated',
+                mathDetails: {
+                    params: [
+                        { label: 'Q(s,a)', info: 'Quality Score. Expected future reward.' },
+                        { label: 'Epsilon (ε)', info: isExploration ? `Active (${epsilon.toFixed(2)}). Random action taken.` : `Inactive (${epsilon.toFixed(2)}). Greedy action taken.` },
+                        { label: 'TD Error (δ)', info: `${tdError.toFixed(2)}. Surprise factor (Difference between Reality and Prediction).` },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate. Scale of update.` },
+                        { label: 'Generalization', info: mode === 'tabular' ? 'None (Lookup Table)' : 'Radial Basis Function (Approximates Neural Net)' }
+                    ],
+                    implication: `The value of going this way changed by ${tdError.toFixed(2)}. ${tdError < 0 ? 'Since it dropped, this action is now LESS attractive compared to other options.' : 'Since it rose, this action is now MORE attractive.'}`
+                }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
 
         setAgentPos(done ? startPos : nextPos);
@@ -1115,7 +1212,6 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
             setEpisode(e => e + 1);
             setSteps(0);
             
-            // Decay Epsilon
             setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
 
             if (onUpdateMetrics) {
@@ -1142,11 +1238,9 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
     }, [isPlaying, speed, step]);
 
-    // Render logic is similar
      const getRenderData = (idx: number) => {
         const qs = getQ(idx);
         const maxQ = Math.max(...qs);
-        // Normalize
         const intensity = Math.min(Math.abs(maxQ) / 20, 1);
         let bgColor = 'rgba(31, 41, 55, 0.5)';
         if (maxQ > 0) bgColor = `rgba(16, 185, 129, ${0.1 + intensity * 0.9})`; 
@@ -1184,6 +1278,7 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-9 flex flex-col gap-4">
                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                        
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
                              {Array.from({ length: N_STATES }).map((_, idx) => {
                                 const isAgent = agentPos === idx;
@@ -1207,11 +1302,14 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                             {mode === 'deep' && <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500/30 rounded-full blur-[2px]"></div><span>Generalization</span></div>}
                         </div>
                     </div>
-                    <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                    
+                    <LiveMathOverlay update={lastLog} />
+
+                    <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
                          <div>
-                             <h4 className="text-sm font-bold text-blue-300 mb-1">Concept Insight</h4>
-                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                             <h4 className="text-xs font-bold text-blue-400 mb-1">Concept Insight</h4>
+                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
                                 {mode === 'tabular' 
                                   ? "Tabular RL: The agent maintains an exact table of values. Learning about one square tells it NOTHING about its neighbors. It must visit every single square to learn the map. This is slow but precise."
                                   : "Deep RL (Approximated): The agent uses a Function Approximator (simulated here). Learning about one square 'bleeds' into nearby squares because the network generalizes features. It learns the map much faster, but risks blurring fine details."}
@@ -1233,7 +1331,7 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
                             </div>
                         )}
                         <div className="pt-2 border-t border-gray-700"></div>
-                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Learning Rate ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                        <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
                         
                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
@@ -1247,28 +1345,20 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
 // --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
 export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // 5 Arms
     const N_ARMS = 5;
-    // Fixed "True" probabilities for the arms (unknown to agent)
-    // Arm 3 is best (0.8)
     const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
     
     const [strategy, setStrategy] = useState<'greedy' | 'epsilon' | 'optimistic' | 'ucb'>('epsilon');
     
-    // Agent Knowledge
-    // { count: number, sum: number, q: number }
     const [arms, setArms] = useState<{ count: number; sum: number; q: number }[]>(
         Array(N_ARMS).fill({ count: 0, sum: 0, q: 0 })
     );
     
-    // UCB Parameter (c)
     const [ucbC, setUcbC] = useState(2.0);
-    // Epsilon
     const [epsilon, setEpsilon] = useState(0.1);
-    // Initial Q (Optimistic)
     const [initQ, setInitQ] = useState(0.0);
+    const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
     
-    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
     const [totalSteps, setTotalSteps] = useState(0);
     const [totalReward, setTotalReward] = useState(0);
@@ -1283,6 +1373,7 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
         setTotalReward(0);
         batchRewardRef.current = 0;
         setArms(Array(N_ARMS).fill({ count: 0, sum: 0, q: newInitQ }));
+        setLastLog(null);
         if (onClearMetrics) onClearMetrics();
     };
 
@@ -1290,10 +1381,10 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
         let action = 0;
         let logDesc = "";
         let logFormula = "";
+        let mathDetails = { params: [], implication: "" } as any;
         
         // 1. CHOOSE ACTION
         if (strategy === 'greedy') {
-            // Argmax Q
             let maxQ = -Infinity;
             let candidates = [];
             for (let i=0; i<N_ARMS; i++) {
@@ -1303,12 +1394,20 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
             action = candidates[Math.floor(Math.random() * candidates.length)];
             logDesc = "Greedy: Choosing arm with highest Q-value";
             logFormula = "a = argmax Q(a)";
+            mathDetails = {
+                params: [{ label: 'Q(a)', info: 'Quality. Best average reward seen so far.' }],
+                implication: 'We are exploiting our current knowledge. We learn nothing about other arms.'
+            };
         } 
         else if (strategy === 'epsilon') {
             if (Math.random() < epsilon) {
                 action = Math.floor(Math.random() * N_ARMS);
                 logDesc = "Epsilon: Exploring random arm";
                 logFormula = "Random (ε)";
+                mathDetails = {
+                    params: [{ label: 'Epsilon (ε)', info: `${epsilon}. Probability of exploring.` }],
+                    implication: 'We chose to ignore the best arm to gather new data (Exploration).'
+                };
             } else {
                 let maxQ = -Infinity;
                 let candidates = [];
@@ -1319,10 +1418,13 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
                 action = candidates[Math.floor(Math.random() * candidates.length)];
                 logDesc = "Epsilon: Exploiting best arm";
                 logFormula = "Greedy (1-ε)";
+                mathDetails = {
+                     params: [{ label: '1 - Epsilon', info: `${(1-epsilon).toFixed(2)}. Probability of exploiting.` }],
+                     implication: 'We are exploiting known information to maximize immediate reward.'
+                };
             }
         }
         else if (strategy === 'optimistic') {
-            // Same as greedy, but Q starts high
             let maxQ = -Infinity;
             let candidates = [];
             for (let i=0; i<N_ARMS; i++) {
@@ -1332,16 +1434,18 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
             action = candidates[Math.floor(Math.random() * candidates.length)];
             logDesc = "Optimistic: Choosing highest Q (initially high)";
             logFormula = "a = argmax Q(a)";
+            mathDetails = {
+                params: [{ label: 'Init Q', info: `${initQ}. Artificially high.` }],
+                implication: 'Because we assumed the arm is amazing, we are "disappointed" by the real reward, but this forces us to try other arms.'
+            };
         }
         else if (strategy === 'ucb') {
-            // argmax [ Q + c * sqrt(ln(t) / N) ]
             let maxScore = -Infinity;
             let candidates = [];
-            const t = totalSteps + 1; // avoid log(0)
+            const t = totalSteps + 1; 
             
             for (let i=0; i<N_ARMS; i++) {
                 if (arms[i].count === 0) {
-                    // Force pick unvisited arms
                     candidates = [i];
                     maxScore = Infinity;
                     break;
@@ -1353,11 +1457,19 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
             }
             action = candidates[Math.floor(Math.random() * candidates.length)];
             logDesc = "UCB: Balancing Reward + Uncertainty";
-            logFormula = "a = argmax [Q + c√ln(t)/N]";
+            logFormula = "a = argmax [Q(a) + c * √(ln(t) / N(a))]";
+            mathDetails = {
+                params: [
+                    { label: 'Q(a)', info: 'Exploitation Term. Average reward observed for this arm.' },
+                    { label: 'c', info: `${ucbC}. Confidence Level. Weight given to exploration.`},
+                    { label: 't', info: `${totalSteps + 1}. Total Time Steps. Global counter for the simulation.` },
+                    { label: 'N(a)', info: `${arms[action].count}. Visit Count. Number of times this arm has been played.` }
+                ],
+                implication: 'We pick the arm that maximizes the sum of known value (Q) and potential upside (Uncertainty).'
+            };
         }
 
         // 2. GET REWARD
-        // Bernoulli trial
         const reward = Math.random() < TRUE_MEANS[action] ? 1 : 0;
         
         // 3. UPDATE
@@ -1365,8 +1477,6 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
         const arm = newArms[action];
         const newCount = arm.count + 1;
         const newSum = arm.sum + reward;
-        // Incremental mean update: Q_k+1 = Q_k + 1/k(R - Q_k)
-        // Or just sum/count
         const newQ = newSum / newCount;
         
         newArms[action] = { count: newCount, sum: newSum, q: newQ };
@@ -1376,29 +1486,33 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
         setTotalReward(r => r + reward);
         batchRewardRef.current += reward;
 
-        // Logging
         if (onLogUpdate) {
-            onLogUpdate({
+            const log = {
                 algorithm: `Bandit (${strategy})`,
                 stepDescription: logDesc,
                 formula: logFormula,
                 variables: {
-                    'Selected Arm': action + 1,
+                    'Arm': action + 1,
                     'Reward': reward,
-                    'Current Q(a)': arm.q.toFixed(3),
-                    'New Q(a)': newQ.toFixed(3)
+                    'Q(a)': arm.q.toFixed(2),
+                    ...(strategy === 'ucb' ? {
+                        't': totalSteps + 1,
+                        'N(a)': arm.count // Show N used for calculation (before update)
+                    } : {})
                 },
-                result: reward === 1 ? 'WIN' : 'LOSS'
-            });
+                result: reward === 1 ? 'WIN' : 'LOSS',
+                mathDetails: mathDetails
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
         
-        // Update Graph every 10 steps
         if ((totalSteps + 1) % 10 === 0) {
             const avgReward = batchRewardRef.current / 10;
             if (onUpdateMetrics) {
                 onUpdateMetrics({
                     episode: Math.floor((totalSteps + 1) / 10),
-                    reward: avgReward, // This is technically rate, not total. 0 to 1 scale.
+                    reward: avgReward, 
                     epsilon: strategy === 'epsilon' ? epsilon : 0,
                     steps: totalSteps
                 });
@@ -1455,32 +1569,23 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
                             {arms.map((arm, i) => {
                                 const heightPct = Math.min(arm.q * 100, 100);
                                 const trueHeightPct = TRUE_MEANS[i] * 100;
-                                const isBest = i === 3; // Hardcoded best
+                                const isBest = i === 3; 
                                 
                                 return (
                                     <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end relative group">
-                                        {/* Count Badge */}
                                         <div className="bg-gray-700 text-xs px-2 py-0.5 rounded-full font-mono text-gray-300 mb-1">{arm.count} plays</div>
-                                        
-                                        {/* Bar Container */}
                                         <div className="w-full bg-gray-900 rounded-t-lg relative border-b border-gray-600 h-full overflow-hidden">
-                                            {/* True Mean (Ghost) - only show on hover or cheat mode? Let's show as faint line */}
                                             <div className="absolute bottom-0 w-full bg-green-500/10 border-t-2 border-dashed border-green-500/30 transition-all duration-500" style={{ height: `${trueHeightPct}%` }}>
                                                  <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-green-500/50 opacity-0 group-hover:opacity-100 whitespace-nowrap">True: {TRUE_MEANS[i]}</span>
                                             </div>
-
-                                            {/* Estimated Mean (Solid) */}
                                             <div 
                                                 className={`absolute bottom-0 w-full transition-all duration-300 ${isBest && arm.q > 0.7 ? 'bg-blue-500' : 'bg-blue-600/60'}`} 
                                                 style={{ height: `${heightPct}%` }}
                                             ></div>
-                                            
-                                            {/* Value Label */}
                                             <div className="absolute bottom-2 w-full text-center text-xs font-bold text-white drop-shadow-md z-10">
                                                 {arm.q.toFixed(2)}
                                             </div>
                                         </div>
-                                        
                                         <div className="text-gray-400 font-bold text-sm mt-1">Arm {i+1}</div>
                                     </div>
                                 );
@@ -1488,11 +1593,14 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
                         </div>
 
                      </div>
-                     <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+
+                     <LiveMathOverlay update={lastLog} />
+
+                     <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
                          <div>
-                             <h4 className="text-sm font-bold text-blue-300 mb-1">Strategy Insight</h4>
-                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                             <h4 className="text-xs font-bold text-blue-400 mb-1">Strategy Insight</h4>
+                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
                                 {getInsightText()}
                              </p>
                          </div>
@@ -1547,32 +1655,23 @@ export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMet
 
 // --- 5. Single vs Multi-Agent Lab ---
 export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics }) => {
-    // 6x6 Grid for MARL to keep state space manageable if using tabular
     const MA_W = 6;
     const MA_H = 6;
     const MA_STATES = MA_W * MA_H;
     
-    // Modes: 'single' (Reach Goal), 'coop' (Rendezvous), 'comp' (Tag/Predator-Prey)
     const [mode, setMode] = useState<'single' | 'coop' | 'comp'>('single');
-    
     const [agentAPos, setAgentAPos] = useState(0);
-    const [agentBPos, setAgentBPos] = useState(MA_STATES - 1); // Only for multi
-    
-    // Goals
+    const [agentBPos, setAgentBPos] = useState(MA_STATES - 1); 
     const [goalA, setGoalA] = useState(MA_STATES - 1);
-    const [goalB, setGoalB] = useState(0); // For coop
-    
-    // Q-Tables. Key is complicated. "PosA,PosB"
-    // For single mode, just "PosA"
+    const [goalB, setGoalB] = useState(0); 
     const [qTableA, setQTableA] = useState<Record<string, number[]>>({});
-    const [qTableB, setQTableB] = useState<Record<string, number[]>>({}); // Only for multi
+    const [qTableB, setQTableB] = useState<Record<string, number[]>>({});
+    const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-    // Sim State
     const [isPlaying, setIsPlaying] = useState(false);
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
     const [speed, setSpeed] = useState(100);
-    
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
     const [epsilon, setEpsilon] = useState(0.1);
@@ -1584,7 +1683,6 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     const fromCoord = (x: number, y: number) => y * MA_W + x;
 
     const getKey = (pA: number, pB: number) => mode === 'single' ? `${pA}` : `${pA},${pB}`;
-    
     const getQA = (pA: number, pB: number) => qTableA[getKey(pA, pB)] || [0,0,0,0];
     const getQB = (pA: number, pB: number) => qTableB[getKey(pA, pB)] || [0,0,0,0];
 
@@ -1595,6 +1693,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
         setEpisode(0);
         setSteps(0);
         episodeRewardRef.current = 0;
+        setLastLog(null);
         if (clearMemory) {
             setQTableA({});
             setQTableB({});
@@ -1613,14 +1712,16 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     };
 
     const step = useCallback(() => {
-        // Current State
         const key = getKey(agentAPos, agentBPos);
         const qA = getQA(agentAPos, agentBPos);
         const qB = getQB(agentAPos, agentBPos);
         
-        // 1. SELECT ACTIONS
         let actionA = 0;
-        if (Math.random() < epsilon) actionA = Math.floor(Math.random() * 4);
+        let isExplorationA = false;
+        if (Math.random() < epsilon) {
+            actionA = Math.floor(Math.random() * 4);
+            isExplorationA = true;
+        }
         else {
             const max = Math.max(...qA);
             const opts = qA.map((v, i) => v === max ? i : -1).filter(i => i !== -1);
@@ -1637,13 +1738,10 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             }
         }
 
-        // 2. MOVE
-        // Simultaneous move? Or sequential? Simultaneous is standard for Grid Games.
         const nextA = move(agentAPos, actionA);
         let nextB = agentBPos;
         if (mode !== 'single') nextB = move(agentBPos, actionB);
 
-        // 3. CALCULATE REWARDS
         let rA = -0.1;
         let rB = -0.1;
         let done = false;
@@ -1653,28 +1751,23 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             if (nextA === goalA) { rA = 10; done = true; logDesc = "Goal Reached"; }
         } 
         else if (mode === 'coop') {
-            // Rendezvous: Both must be on their goals
             if (nextA === goalA && nextB === goalB) {
                 rA = 10; rB = 10; done = true; logDesc = "Coop Success!";
             } else {
-                // Shaping?
                 rA = -0.1; rB = -0.1;
             }
         }
         else if (mode === 'comp') {
-            // Tag: A catches B
             if (nextA === nextB) {
                 rA = 10; rB = -10; done = true; logDesc = "Captured!";
             } else {
-                // Shaping to encourage chase?
-                rA = -0.1; rB = 0.1; // B survives another step
+                rA = -0.1; rB = 0.1; 
             }
         }
 
-        episodeRewardRef.current += rA; // Graph tracks Agent A
+        episodeRewardRef.current += rA;
 
-        // 4. LEARN
-        const nextQA = getQA(nextA, nextB); // Bootstrap from next joint state
+        const nextQA = getQA(nextA, nextB); 
         const maxNextQA = done ? 0 : Math.max(...nextQA);
         const currentQA = qA[actionA];
         const newQA = currentQA + alpha * (rA + gamma * maxNextQA - currentQA);
@@ -1696,19 +1789,33 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             setQTableB(newTableB);
         }
 
-        // Logging
         if (onLogUpdate && Math.random() < 0.3) {
-            onLogUpdate({
+            const log = {
                 algorithm: `MARL (${mode})`,
                 stepDescription: logDesc || "Agents Acting",
-                formula: 'Q(s,a) ← Q + α δ',
+                formula: 'Q(s,a) += α * δ',
                 variables: {
                     'State': mode === 'single' ? nextA : `(${nextA},${nextB})`,
-                    'Reward A': rA,
-                    'Reward B': mode === 'single' ? 'N/A' : rB
+                    'Rew A': rA,
+                    'Rew B': mode === 'single' ? 'N/A' : rB
                 },
-                result: 'Joint Update'
-            });
+                result: 'Joint Update',
+                mathDetails: {
+                    params: [
+                        { label: 'Q(s,a)', info: 'Quality Score (Expected Reward).' },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate. Update speed.` },
+                        { label: 'Gamma (γ)', info: `${gamma}. Discount Factor.` },
+                        { label: 'Epsilon (ε)', info: isExplorationA ? `Active (${epsilon}). Agent A explored randomly.` : `Inactive (${epsilon}). Agent A acted greedily.` },
+                        { label: 'State', info: mode === 'single' ? 'Agent Pos' : 'Joint (PosA, PosB)' },
+                        { label: 'Reward', info: 'Dependent on joint configuration.' }
+                    ],
+                    implication: mode === 'single'
+                        ? 'Standard stationary update.'
+                        : 'The reward depends on what the OTHER agent did. This makes the environment "non-stationary" (moving target).'
+                }
+            };
+            onLogUpdate(log);
+            setLastLog(log);
         }
 
         setAgentAPos(nextA);
@@ -1726,9 +1833,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
                 });
             }
             episodeRewardRef.current = 0;
-            // Respawn
             if (mode !== 'single') {
-                 // Random respawn for robust learning
                  setAgentAPos(Math.floor(Math.random() * MA_STATES));
                  let b = Math.floor(Math.random() * MA_STATES);
                  while(b === nextA) b = Math.floor(Math.random() * MA_STATES);
@@ -1738,7 +1843,6 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             }
         } else {
             setSteps(s => s + 1);
-            // Max steps
             if (steps > 50) {
                  setEpisode(e => e + 1);
                  setSteps(0);
@@ -1771,10 +1875,10 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
             <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="flex flex-col gap-2">
-                        <div className="flex bg-gray-800 rounded p-1 self-start">
-                            <button onClick={() => { setMode('single'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'single' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Single (Nav)</button>
-                            <button onClick={() => { setMode('coop'); setGoalA(MA_STATES-1); setGoalB(0); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Coop (Meet)</button>
-                            <button onClick={() => { setMode('comp'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'comp' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Comp (Tag)</button>
+                         <div className="flex bg-gray-800 rounded p-1 self-start">
+                            <button onClick={() => { setMode('single'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'single' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Single Agent</button>
+                            <button onClick={() => { setMode('coop'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Cooperative (Rendezvous)</button>
+                            <button onClick={() => { setMode('comp'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'comp' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Competitive (Tag)</button>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1788,42 +1892,49 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 <div className="lg:col-span-9 flex flex-col gap-4">
-                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
+                        
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${MA_W}, min-content)` }}>
                              {Array.from({ length: MA_STATES }).map((_, idx) => {
                                 const isAgentA = agentAPos === idx;
-                                const isAgentB = mode !== 'single' && agentBPos === idx;
-                                const isGoalA = (mode === 'single' || mode === 'coop') && goalA === idx;
-                                const isGoalB = mode === 'coop' && goalB === idx;
+                                const isAgentB = agentBPos === idx && mode !== 'single';
+                                const isGoalA = idx === goalA;
+                                const isGoalB = idx === goalB && mode !== 'single';
+                                
+                                let bgColor = 'rgba(31, 41, 55, 0.5)';
                                 
                                 return (
-                                    <div key={idx} className={`w-10 h-10 md:w-12 md:h-12 border border-gray-700 rounded-sm flex items-center justify-center relative bg-gray-900/50`}>
-                                        {isGoalA && <div className="absolute inset-0 bg-blue-500/20 border-2 border-blue-500/50 rounded-sm flex items-end justify-center pb-0.5"><span className="text-[8px] font-bold text-blue-300">{mode === 'single' ? 'GOAL' : 'GOAL A'}</span></div>}
-                                        {isGoalB && <div className="absolute inset-0 bg-red-500/20 border-2 border-red-500/50 rounded-sm flex items-end justify-center pb-0.5"><span className="text-[8px] font-bold text-red-300">GOAL B</span></div>}
+                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200`} style={{ backgroundColor: bgColor }}>
+                                        {isGoalA && <div className="absolute inset-0 bg-blue-500/10 flex items-center justify-center"><Target size={14} className="text-blue-500" /></div>}
+                                        {isGoalB && <div className="absolute inset-0 bg-red-500/10 flex items-center justify-center"><Target size={14} className="text-red-500" /></div>}
                                         
-                                        {isAgentA && <div className="w-6 h-6 md:w-8 md:h-8 bg-blue-500 rounded-full shadow-lg border-2 border-white z-20 animate-pulse flex items-center justify-center text-[10px] font-bold text-white">A</div>}
-                                        {isAgentB && <div className="w-6 h-6 md:w-8 md:h-8 bg-red-500 rounded-full shadow-lg border-2 border-white z-20 animate-pulse flex items-center justify-center text-[10px] font-bold text-white">B</div>}
+                                        {isAgentA && <div className="w-5 h-5 rounded-full bg-blue-500 shadow-lg z-10 border-2 border-white" />}
+                                        {isAgentB && <div className="w-5 h-5 rounded-full bg-red-500 shadow-lg z-10 border-2 border-white" />}
                                     </div>
                                 );
                              })}
                         </div>
-                    </div>
-                    <div className="bg-blue-900/20 border border-blue-800 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-400 flex-shrink-0 mt-1" size={20} />
+                     </div>
+                     
+                     <LiveMathOverlay update={lastLog} />
+                     
+                     <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
+                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
                          <div>
-                             <h4 className="text-sm font-bold text-blue-300 mb-1">Concept Insight</h4>
-                             <p className="text-xs text-gray-300 leading-relaxed font-mono whitespace-pre-wrap">
+                             <h4 className="text-xs font-bold text-blue-400 mb-1">Multi-Agent Insight</h4>
+                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
                                 {getInsightText()}
                              </p>
                          </div>
                      </div>
                 </div>
+
                 <div className="lg:col-span-3 flex flex-col gap-4 bg-gray-800/50 p-4 rounded-xl border border-gray-700 h-full">
-                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> MARL Config</div>
+                     <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2"><Settings size={14} /> MARL Settings</div>
                      <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 custom-scrollbar flex-1">
                          <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         <div className="pt-2 border-t border-gray-700"></div>
-                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(2)})</span></div><input type="range" min="0" max="0.5" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
+                         <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
                      </div>
                 </div>
             </div>

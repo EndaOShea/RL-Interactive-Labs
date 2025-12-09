@@ -96,6 +96,25 @@ const LifecyclePanel: React.FC<LifecyclePanelProps> = ({
                              {liveUpdate.result}
                          </div>
                      </div>
+
+                     {liveUpdate.mathDetails && (
+                        <div className="mt-4 pt-4 border-t border-gray-800">
+                             <h4 className="text-xs text-blue-300 font-bold mb-2 uppercase">Analysis</h4>
+                             <div className="space-y-2">
+                                {liveUpdate.mathDetails.params.map((p, idx) => (
+                                    <div key={idx} className="text-xs">
+                                        <span className="text-gray-300 font-bold">{p.label}:</span> <span className="text-gray-400">{p.info}</span>
+                                    </div>
+                                ))}
+                             </div>
+                             <div className="mt-3 bg-blue-900/20 p-2 rounded border border-blue-900/50">
+                                 <p className="text-xs text-blue-200 italic">
+                                     <span className="font-bold not-italic mr-1">Implication:</span>
+                                     {liveUpdate.mathDetails.implication}
+                                 </p>
+                             </div>
+                        </div>
+                     )}
                  </div>
                  <p className="text-xs text-center text-gray-500">Live data streaming from simulation engine...</p>
              </div>
