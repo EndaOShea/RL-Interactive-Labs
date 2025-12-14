@@ -15,10 +15,7 @@ RUN npm install
 COPY . .
 
 # Build the application
-# Note: GEMINI_API_KEY can be provided at build time or runtime
-ARG GEMINI_API_KEY
-ENV GEMINI_API_KEY=$GEMINI_API_KEY
-
+# Note: API keys should ONLY be provided at runtime, not build time
 RUN npm run build
 
 # Stage 2: Serve with nginx
@@ -30,12 +27,19 @@ COPY --from=builder /app/dist /usr/share/nginx/html
 # Copy custom nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+# Copy entrypoint script for runtime config injection
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Expose port 80
 EXPOSE 80
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+
+# Use entrypoint to inject runtime config
+ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Start nginx
 CMD ["nginx", "-g", "daemon off;"]

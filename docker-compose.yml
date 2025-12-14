@@ -3,17 +3,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        GEMINI_API_KEY: ${GEMINI_API_KEY}
     image: rl-interactive-labs:latest
     container_name: rl-interactive-labs
     ports:
-      - "2100:80"
+      - "2100:2100"
     environment:
       - NODE_ENV=production
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2100/health"]
       interval: 30s
       timeout: 10s
       retries: 3

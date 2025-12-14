@@ -54,7 +54,7 @@ Navigate the full ML development lifecycle with insights across:
 ### For Docker Deployment
 - **Docker** (v20.10 or higher)
 - **Docker Compose** (v2.0 or higher) - Optional but recommended
-- **Google Gemini API Key** (for AI tutoring features)
+- **Google Gemini API Key** (optional - see API Key Strategy below)
 
 ## Installation
 
@@ -102,51 +102,54 @@ Navigate the full ML development lifecycle with insights across:
    docker-compose down
    ```
 
-### Using Docker CLI
-
-1. Build the image:
-   ```bash
-   docker build --build-arg GEMINI_API_KEY=your_api_key_here -t rl-interactive-labs .
-   ```
-
-2. Run the container:
-   ```bash
-   docker run -d -p 2100:80 --name rl-labs rl-interactive-labs
-   ```
-
-3. Access the application at `http://localhost:2100`
-
-4. View logs:
-   ```bash
-   docker logs rl-labs
-   ```
-
-5. Stop and remove the container:
-   ```bash
-   docker stop rl-labs && docker rm rl-labs
-   ```
-
 ### Production Deployment
 
-For production environments:
+**For production deployment with nginx reverse proxy, see [DEPLOYMENT.md](./DEPLOYMENT.md)**
 
-1. **Environment Variables**: Pass the API key securely using Docker secrets or environment variables
-   ```bash
-   docker run -d -p 2100:80 -e GEMINI_API_KEY=$GEMINI_API_KEY rl-interactive-labs
-   ```
+Key production features:
+- ✅ **Flexible API Key Strategy**: Optional env key with user fallback
+- ✅ **Security Headers**: CSP, X-Frame-Options, HSTS, etc.
+- ✅ **Rate Limiting**: 12 RPM limit for API calls
+- ✅ **Retry Logic**: Exponential backoff for failed requests
+- ✅ **Error Boundaries**: Graceful failure handling
+- ✅ **Health Checks**: Container and nginx health endpoints
+- ✅ **TypeScript Strict Mode**: Enhanced type safety
 
-2. **Health Checks**: The container includes health checks at `/health` endpoint
+Quick production start:
+```bash
+# 1. Copy environment template
+cp .env.example .env
 
-3. **Reverse Proxy**: Consider placing behind nginx or Traefik for SSL/TLS termination
+# 2. (Optional) Add your API key
+nano .env
 
-4. **Resource Limits**: Set memory and CPU limits in production
-   ```yaml
-   deploy:
-     resources:
-       limits:
-         cpus: '0.5'
-         memory: 512M
-   ```
+# 3. Build and deploy
+docker compose up -d --build
+
+# 4. Configure nginx reverse proxy (see DEPLOYMENT.md)
+```
+
+## API Key Strategy
+
+The application supports three API key modes:
+
+1. **Environment Key (Recommended for PoC)**
+   - Add `GEMINI_API_KEY` to `.env` file
+   - Users access AI features immediately
+   - When quota exhausted, users prompted for their own key
+   - Perfect for "try before you buy" experience
+
+2. **User-Provided Keys**
+   - No env key needed
+   - Users enter their own keys via UI
+   - More scalable but higher barrier to entry
+
+3. **Hybrid (Default)**
+   - Provide env key for initial access
+   - Automatic fallback to user keys when exhausted
+   - Best user experience + scalability
+
+**Note**: API keys are never baked into Docker images. They're loaded at runtime only.
 
 ## Usage
 

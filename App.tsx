@@ -41,8 +41,19 @@ const App: React.FC = () => {
   // Derived State for API Key
   const currentApiKey = manualKey.length > 0 ? manualKey : undefined;
 
-  // Check if env key exists (defined in vite.config.ts)
-  const hasEnvKey = !!(process.env.API_KEY || process.env.GEMINI_API_KEY);
+  // Helper to check runtime config
+  const getRuntimeApiKey = (): string | undefined => {
+    if (typeof window !== 'undefined' && (window as any).__APP_CONFIG__) {
+      const key = (window as any).__APP_CONFIG__.GEMINI_API_KEY;
+      if (key && key !== '__GEMINI_API_KEY__' && key.trim().length > 0) {
+        return key;
+      }
+    }
+    return undefined;
+  };
+
+  // Check if env key exists (runtime config or build-time env)
+  const hasEnvKey = !!(getRuntimeApiKey() || process.env.API_KEY || process.env.GEMINI_API_KEY);
 
   // Check for API Key
   useEffect(() => {
