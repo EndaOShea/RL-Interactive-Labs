@@ -1,33 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
 import { HyperParameters } from "../types";
-import { safeApiCall, isQuotaError, isSystemKeyExhausted } from "../utils/apiHelpers";
+import { safeApiCall, isQuotaError } from "../utils/apiHelpers";
 
 const modelId = "gemini-2.5-flash";
 
-// Helper to get runtime config from window (injected by Docker entrypoint)
-const getRuntimeApiKey = (): string | undefined => {
-  if (typeof window !== 'undefined' && (window as any).__APP_CONFIG__) {
-    const key = (window as any).__APP_CONFIG__.GEMINI_API_KEY;
-    // Check if it's not a placeholder
-    if (key && key !== '__GEMINI_API_KEY__' && key.trim().length > 0) {
-      return key;
-    }
-  }
-  return undefined;
-};
-
-// Helper to instantiate the client.
-// Priority: 1) User-provided key, 2) Runtime config, 3) Build-time env
+// Helper to instantiate the client with user-provided API key
 const getAI = (apiKey?: string) => {
-  const finalKey = (apiKey && apiKey.trim().length > 0)
-    ? apiKey
-    : (getRuntimeApiKey() || process.env.API_KEY);
-
-  if (!finalKey) {
-     // This might happen if env key is missing and user hasn't provided one
-     throw new Error("No API Key available");
+  if (!apiKey || apiKey.trim().length === 0) {
+    throw new Error("No API Key available. Please enter your Gemini API key.");
   }
-  return new GoogleGenAI({ apiKey: finalKey });
+  return new GoogleGenAI({ apiKey: apiKey.trim() });
 };
 
 export const generateExplanation = async (
@@ -62,17 +44,13 @@ export const generateExplanation = async (
   } catch (error: unknown) {
     console.error("Gemini API Error:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    const keySource = (apiKey && apiKey.trim().length > 0) ? "Custom Key" : "System Key";
 
     // Check for quota errors
     if (isQuotaError(error)) {
-      if (isSystemKeyExhausted(error)) {
-        return `AI Tutor temporarily unavailable. Please enter your own API key to continue.`;
-      }
-      return `AI Tutor Error (${keySource}): Rate limit reached. Please wait a moment and try again.`;
+      return `AI Tutor: Rate limit reached. Please wait a moment and try again.`;
     }
 
-    return `AI Tutor Error (${keySource}): ${errorMessage}`;
+    return `AI Tutor Error: ${errorMessage}`;
   }
 };
 
@@ -96,13 +74,12 @@ export const generatePythonCode = async (params: HyperParameters, apiKey?: strin
     return text.replace(/```python/g, '').replace(/```/g, '').trim();
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    const keySource = (apiKey && apiKey.trim().length > 0) ? "Custom Key" : "System Key";
 
     if (isQuotaError(error)) {
       return `# Rate limit reached. Please wait a moment and try again.`;
     }
 
-    return `# Error generating code (${keySource}): ${errorMessage}`;
+    return `# Error generating code: ${errorMessage}`;
   }
 };
 
@@ -129,12 +106,11 @@ export const analyzeRewardFunction = async (rewardDescription: string, apiKey?: 
     return response.text || "Analysis failed.";
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    const keySource = (apiKey && apiKey.trim().length > 0) ? "Custom Key" : "System Key";
 
     if (isQuotaError(error)) {
       return `Rate limit reached. Please wait a moment and try again.`;
     }
 
-    return `Unable to analyze reward safety (${keySource}). Error: ${errorMessage}`;
+    return `Unable to analyze reward safety. Error: ${errorMessage}`;
   }
 };

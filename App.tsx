@@ -17,6 +17,7 @@ import {
   HyperParameters, ModuleId, SimulationStatus, TrainingMetrics, SimulationUpdate, ChatMessage
 } from './types';
 import { generateExplanation } from './services/geminiService';
+import { saveEncryptedKey, loadEncryptedKey, clearEncryptedKey, hasStoredKey } from './utils/keyEncryption';
 
 const App: React.FC = () => {
   // State
@@ -31,60 +32,41 @@ const App: React.FC = () => {
   
   // API Key State
   const [keyInput, setKeyInput] = useState('');     // What the user types
-  const [manualKey, setManualKey] = useState('');   // What is actually used (Active Standard Key)
-  const [usageLimitReached, setUsageLimitReached] = useState(false);
+  const [manualKey, setManualKey] = useState('');   // What is actually used (Active Key)
+  const [keyLoading, setKeyLoading] = useState(true); // Loading state for encrypted key
 
   // AI Interaction State
   const [aiThinking, setAiThinking] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  
+
   // Derived State for API Key
   const currentApiKey = manualKey.length > 0 ? manualKey : undefined;
 
-  // Helper to check runtime config
-  const getRuntimeApiKey = (): string | undefined => {
-    if (typeof window !== 'undefined' && (window as any).__APP_CONFIG__) {
-      const key = (window as any).__APP_CONFIG__.GEMINI_API_KEY;
-      if (key && key !== '__GEMINI_API_KEY__' && key.trim().length > 0) {
-        return key;
+  // Load encrypted API key on startup
+  useEffect(() => {
+    const loadStoredKey = async () => {
+      try {
+        const storedKey = await loadEncryptedKey();
+        if (storedKey) {
+          setManualKey(storedKey);
+          setKeyInput(storedKey);
+        }
+      } catch (error) {
+        console.error('Failed to load stored key:', error);
+      } finally {
+        setKeyLoading(false);
       }
-    }
-    return undefined;
-  };
+    };
 
-  // Check if env key exists (runtime config or build-time env)
-  const hasEnvKey = !!(getRuntimeApiKey() || process.env.API_KEY || process.env.GEMINI_API_KEY);
+    loadStoredKey();
+  }, []);
 
-  // Check for API Key
+  // Check for AI Studio API Key (Google's platform integration)
   useEffect(() => {
     if ((window as any).aistudio?.hasSelectedApiKey) {
       (window as any).aistudio.hasSelectedApiKey().then((has: boolean) => setHasKey(has));
     }
   }, []);
-
-  // Test env key on load if no custom key is set
-  useEffect(() => {
-    const testEnvKey = async () => {
-      if (!manualKey && hasEnvKey) {
-        try {
-          const testExplanation = await generateExplanation(
-            "Test connection",
-            DEFAULT_HYPERPARAMS,
-            undefined // Use env key
-          );
-
-          // Check if the response indicates quota exceeded
-          if (testExplanation.includes("Quota Exceeded") && testExplanation.includes("System Key")) {
-            setUsageLimitReached(true);
-          }
-        } catch (error) {
-          console.log("Env key test failed:", error);
-        }
-      }
-    };
-
-    testEnvKey();
-  }, [hasEnvKey, manualKey]);
 
   // Auto-switch Lifecycle Tab & Clear Metrics on Module Change
   useEffect(() => {
@@ -114,11 +96,17 @@ const App: React.FC = () => {
     }
   };
 
-  const activateManualKey = () => {
+  const activateManualKey = async () => {
     const trimmedKey = keyInput.trim();
     setManualKey(trimmedKey);
     setKeyInput(trimmedKey);
-    setUsageLimitReached(false); // Reset usage limit when user provides their own key
+
+    // Save encrypted key to localStorage
+    try {
+      await saveEncryptedKey(trimmedKey);
+    } catch (error) {
+      console.error('Failed to save encrypted key:', error);
+    }
   };
 
   const askAITutor = async (question: string, contextParams: any) => {
@@ -141,11 +129,6 @@ const App: React.FC = () => {
     const tempParams: HyperParameters = { ...DEFAULT_HYPERPARAMS, ...contextParams };
 
     const explanation = await generateExplanation(finalContext, tempParams, currentApiKey);
-
-    // Check if the env key has hit usage limits
-    if (!currentApiKey && explanation.includes("Quota Exceeded") && explanation.includes("System Key")) {
-        setUsageLimitReached(true);
-    }
 
     setChatHistory(prev => [...prev, { role: 'ai', content: explanation }]);
     setAiThinking(false);
@@ -226,38 +209,45 @@ const App: React.FC = () => {
           <div className="pt-4 mt-4 border-t border-gray-800">
              <div className="px-3 mb-3">
                  <div className="flex justify-between items-center text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">
-                     <span>Status</span>
-                     <span className={manualKey || ((hasKey || hasEnvKey) && !usageLimitReached) ? 'text-green-400' : 'text-red-400'}>
-                         {manualKey || ((hasKey || hasEnvKey) && !usageLimitReached) ? 'ONLINE' : 'OFFLINE'}
+                     <span>AI Tutor</span>
+                     <span className={keyLoading ? 'text-gray-400' : (manualKey || hasKey ? 'text-green-400' : 'text-yellow-400')}>
+                         {keyLoading ? 'LOADING...' : (manualKey || hasKey ? 'READY' : 'KEY REQUIRED')}
                      </span>
                  </div>
                  <div className="h-1 w-full bg-gray-800 rounded-full overflow-hidden">
-                     <div className={`h-full ${manualKey || ((hasKey || hasEnvKey) && !usageLimitReached) ? 'bg-green-500' : 'bg-red-500'} w-full`}></div>
+                     <div className={`h-full ${keyLoading ? 'bg-gray-500' : (manualKey || hasKey ? 'bg-green-500' : 'bg-yellow-500')} w-full`}></div>
                  </div>
-                 {(manualKey || hasKey || hasEnvKey) && (
-                     <div className="mt-1.5 text-[9px] text-gray-500 flex items-center gap-1">
-                         <div className={`w-1.5 h-1.5 rounded-full ${manualKey ? 'bg-green-400' : 'bg-blue-400'}`}></div>
-                         <span>Using {manualKey ? 'Custom' : 'Env'} Key</span>
-                     </div>
-                 )}
-                 {usageLimitReached && !manualKey && (
-                     <div className="mt-2 text-[9px] text-yellow-400 bg-yellow-900/20 border border-yellow-700/30 rounded p-2">
-                         ⚠️ Usage limit reached. Please enter your own API key to continue.
+                 {manualKey && (
+                     <div className="mt-1.5 text-[9px] text-gray-500 flex items-center justify-between">
+                         <div className="flex items-center gap-1">
+                             <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
+                             <span>Key Saved (Encrypted)</span>
+                         </div>
+                         <button
+                             onClick={() => {
+                                 clearEncryptedKey();
+                                 setManualKey('');
+                                 setKeyInput('');
+                             }}
+                             className="text-red-400 hover:text-red-300 text-[8px]"
+                         >
+                             Clear
+                         </button>
                      </div>
                  )}
              </div>
 
              <div className="px-3 space-y-2">
                  {(window as any).aistudio?.openSelectKey && (
-                     <button 
+                     <button
                         onClick={handleApiKeySelect}
-                        className={`w-full text-left px-2 py-1.5 text-[10px] hover:bg-gray-800 rounded transition-colors flex items-center gap-2 border border-dashed ${!manualKey && hasKey ? 'border-blue-500 text-blue-400 bg-blue-900/20' : 'border-gray-700 text-gray-500'}`}
+                        className={`w-full text-left px-2 py-1.5 text-[10px] hover:bg-gray-800 rounded transition-colors flex items-center gap-2 border border-dashed ${hasKey ? 'border-blue-500 text-blue-400 bg-blue-900/20' : 'border-gray-700 text-gray-500'}`}
                      >
                         <Key size={10} />
-                        {hasKey ? 'Env Key Loaded' : 'Select Env Key'}
+                        {hasKey ? 'AI Studio Key Active' : 'Select AI Studio Key'}
                      </button>
                  )}
-                 
+
                  <div className="relative">
                     <div className={`flex items-center bg-gray-800 border rounded overflow-hidden transition-colors ${manualKey ? 'border-green-600 ring-1 ring-green-600/30' : 'border-gray-700'}`}>
                         <div className="pl-2">
@@ -265,14 +255,14 @@ const App: React.FC = () => {
                         </div>
                         <input
                             type="password"
-                            placeholder="Custom Key..."
+                            placeholder="Enter Gemini API Key..."
                             className="w-full bg-transparent border-none text-[10px] text-gray-300 px-2 py-1.5 pr-2 focus:ring-0 focus:outline-none"
                             value={keyInput}
                             onChange={(e) => setKeyInput(e.target.value)}
                         />
                     </div>
                     {(keyInput.trim() !== manualKey) && keyInput.length > 0 && (
-                        <button 
+                        <button
                             onClick={activateManualKey}
                             className="absolute right-0 top-0 h-full bg-green-700 hover:bg-green-600 text-white px-2 text-[10px] font-bold transition-colors"
                         >
@@ -283,10 +273,10 @@ const App: React.FC = () => {
 
                  <div className="text-[8px] text-gray-600 leading-relaxed px-1">
                      <p className="mb-1">
-                         💡 <span className="text-gray-500">Use a Gemini API key</span>
+                         💡 <span className="text-gray-500">Your key is encrypted and stored locally</span>
                      </p>
                      <p className="text-gray-700">
-                         Get yours at{' '}
+                         Get a free key at{' '}
                          <a
                              href="https://aistudio.google.com/app/apikey"
                              target="_blank"
@@ -295,6 +285,9 @@ const App: React.FC = () => {
                          >
                              aistudio.google.com/apikey
                          </a>
+                     </p>
+                     <p className="text-gray-700 mt-1">
+                         Limits: 5 req/min, 20 req/day
                      </p>
                  </div>
              </div>

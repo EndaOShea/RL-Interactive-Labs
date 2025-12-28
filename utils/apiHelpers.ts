@@ -126,27 +126,104 @@ export async function retryWithBackoff<T>(
 
 /**
  * Global rate limiter for AI API calls
- * Gemini Free tier: 15 RPM (requests per minute)
- * We use 12 RPM to be conservative
+ * Gemini 2.5 Flash Free tier: 5 RPM, 20 RPD
  */
 export const aiRateLimiter = new RateLimiter({
-  maxRequests: 12,
+  maxRequests: 5,
   windowMs: 60 * 1000 // 1 minute
 });
 
 /**
- * Wrapper for rate-limited API calls
+ * Daily request limiter (resets at midnight)
+ */
+class DailyLimiter {
+  private count: number = 0;
+  private lastReset: string = '';
+  private maxDaily: number;
+
+  constructor(maxDaily: number) {
+    this.maxDaily = maxDaily;
+    this.loadFromStorage();
+  }
+
+  private getTodayKey(): string {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  private loadFromStorage(): void {
+    try {
+      const stored = localStorage.getItem('rl_daily_limit');
+      if (stored) {
+        const { date, count } = JSON.parse(stored);
+        if (date === this.getTodayKey()) {
+          this.count = count;
+          this.lastReset = date;
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  private saveToStorage(): void {
+    try {
+      localStorage.setItem('rl_daily_limit', JSON.stringify({
+        date: this.getTodayKey(),
+        count: this.count
+      }));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  checkLimit(): boolean {
+    const today = this.getTodayKey();
+    if (this.lastReset !== today) {
+      this.count = 0;
+      this.lastReset = today;
+    }
+
+    if (this.count >= this.maxDaily) {
+      return false;
+    }
+
+    this.count++;
+    this.saveToStorage();
+    return true;
+  }
+
+  getRemainingRequests(): number {
+    const today = this.getTodayKey();
+    if (this.lastReset !== today) {
+      return this.maxDaily;
+    }
+    return Math.max(0, this.maxDaily - this.count);
+  }
+}
+
+export const dailyLimiter = new DailyLimiter(20);
+
+/**
+ * Wrapper for rate-limited API calls (checks both RPM and RPD)
  */
 export async function rateLimitedApiCall<T>(
   apiCall: () => Promise<T>,
   limiter: RateLimiter = aiRateLimiter
 ): Promise<T> {
-  const canProceed = await limiter.checkLimit();
+  // Check daily limit first
+  if (!dailyLimiter.checkLimit()) {
+    const remaining = dailyLimiter.getRemainingRequests();
+    throw new Error(
+      `Daily limit reached (20 requests/day). ${remaining} requests remaining. Resets at midnight.`
+    );
+  }
 
+  // Check per-minute limit
+  const canProceed = await limiter.checkLimit();
   if (!canProceed) {
     const waitTime = limiter.getTimeUntilNextSlot();
     throw new Error(
-      `Rate limit exceeded. Please wait ${Math.ceil(waitTime / 1000)} seconds before trying again.`
+      `Rate limit exceeded (5 RPM). Please wait ${Math.ceil(waitTime / 1000)} seconds.`
     );
   }
 
@@ -184,15 +261,3 @@ export function isQuotaError(error: unknown): boolean {
   );
 }
 
-/**
- * Check if error indicates usage limit reached on system key
- */
-export function isSystemKeyExhausted(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-
-  const message = error.message.toLowerCase();
-  return (
-    message.includes('quota exceeded') &&
-    message.includes('system key')
-  );
-}

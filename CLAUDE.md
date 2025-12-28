@@ -17,13 +17,11 @@ This is an interactive Reinforcement Learning educational platform built with Re
 ### Docker Deployment
 - `docker compose up -d --build` - Build and start container (exposes port 2100)
 - `docker compose down` - Stop and remove container
-- Requires `GEMINI_API_KEY` in `.env` file
 
-### Environment Setup
-- Set `GEMINI_API_KEY` in `.env.local` (local dev) or `.env` (Docker)
-- The app supports both environment-based and user-provided API keys
-- Env key is tested on page load to check for usage limits
-- Users can enter custom keys via the UI if env key is exhausted
+### API Key Setup
+- Users provide their own Gemini API key via the UI
+- Keys are obtained free at https://aistudio.google.com/app/apikey
+- No server-side API key required - keeps deployment simple and secure
 
 ## Architecture
 
@@ -79,25 +77,29 @@ State flows unidirectionally:
 - `analyzeRewardFunction()` - Safety analysis for reward hacking risks
 - All functions accept optional `apiKey` parameter for user-provided keys
 
-### API Key Management System
+### API Key Management
 
-The app implements a sophisticated key management system:
+Users provide their own Gemini API key via the sidebar UI:
+- Keys are encrypted using AES-256-GCM and stored in localStorage
+- Encryption uses device fingerprint + PBKDF2 key derivation (100,000 iterations)
+- Keys persist across sessions but are device-specific
+- Status indicator shows "READY" (green) when key is set, "KEY REQUIRED" (yellow) otherwise
+- "Clear" button allows users to remove stored encrypted key
+- AI Studio platform integration available if running in Google's AI Studio environment
 
-**Key Sources (priority order):**
-1. **Custom Key** - User-provided key entered via UI (green dot indicator)
-2. **Env Key** - From `.env` file (blue dot indicator)
-3. **AI Studio Key** - Platform-provided key (if running in AI Studio)
+**Encryption Implementation** (`utils/keyEncryption.ts`):
+- `encryptApiKey()` / `decryptApiKey()` - AES-GCM encryption
+- `saveEncryptedKey()` / `loadEncryptedKey()` - Persistent storage
+- Device fingerprint derived from browser/hardware properties
+- Salt stored separately and randomly generated per device
 
-**Usage Limit Detection:**
-- Env key is tested on page load with a minimal API call
-- If response contains "Quota Exceeded" + "System Key", `usageLimitReached` is set to true
-- Status switches to OFFLINE with warning: "⚠️ Usage limit reached. Please enter your own API key to continue."
-- During AI Tutor usage, errors are checked and limits flagged in real-time
+### Rate Limiting
 
-**Key Activation:**
-- Custom keys reset `usageLimitReached` flag when activated
-- Keys are stored in `manualKey` state (not persisted across sessions)
-- Input is always `type="password"` (no show/hide toggle)
+Gemini 2.5 Flash free tier limits (enforced in `utils/apiHelpers.ts`):
+- **5 RPM** (requests per minute) - `aiRateLimiter`
+- **20 RPD** (requests per day) - `dailyLimiter` with localStorage persistence
+- Daily limit resets at midnight (based on ISO date)
+- Both limits are checked before each API call
 
 ### Data Flow for AI Tutoring
 
@@ -111,8 +113,7 @@ The app implements a sophisticated key management system:
 1. `App.tsx` collects context: current module, hyperparameters, recent metrics
 2. Calls `askAITutor(question, contextParams)` with lab-specific state
 3. `geminiService.generateExplanation()` receives combined context
-4. Response checked for quota errors
-5. Response added to `chatHistory` and displayed in tutor component
+4. Response added to `chatHistory` and displayed in tutor component
 
 ### Type System Highlights
 
@@ -185,10 +186,9 @@ When switching modules (`activeModule` changes):
 ## Important Implementation Details
 
 ### API Key Handling
-- Two sources: environment variable (`GEMINI_API_KEY`) and user input (`manualKey`)
-- Manual key takes precedence if non-empty
-- All AI service functions have optional `apiKey` parameter
-- Error messages explicitly indicate which key source failed
+- Users provide their own API key via the UI (`manualKey` state)
+- All AI service functions require `apiKey` parameter
+- No server-side or build-time API keys - fully client-side
 
 ### Component Communication
 - Labs pass `contextParams` (their own state) to AI tutor
@@ -197,9 +197,8 @@ When switching modules (`activeModule` changes):
 - Simulation status controlled via `SimulationStatus` enum
 
 ### Vite Configuration
-- Exposes `GEMINI_API_KEY` as both `process.env.API_KEY` and `process.env.GEMINI_API_KEY`
 - Path alias: `@` → project root
-- Dev server runs on `0.0.0.0:3000` for network accessibility
+- Dev server runs on `0.0.0.0:2100` for network accessibility
 
 ## Development Notes
 

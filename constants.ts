@@ -50,6 +50,30 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         title: 'Hallucinated Safety',
         description: 'A Model-Based agent might "plan" a path it thinks is safe, but because its internal model is wrong, the plan is actually dangerous in the real world.',
         recommendation: 'Implement "Uncertainty-Aware Planning" where the agent is pessimistic about regions where its model is unsure.',
+    },
+    {
+        category: 'VERIFICATION',
+        title: 'Q-Value Convergence Testing',
+        description: 'Model-Free agents (Q-Learning, SARSA) rely on Q-values converging to their true values. If exploration is insufficient or the learning rate schedule is wrong, Q-values may be incorrect even after training completes.',
+        recommendation: 'Plot Q-value trends over time. Values should stabilize. Oscillating or diverging Q-values indicate hyperparameter issues.',
+    },
+    {
+        category: 'ETHICS',
+        title: 'Reward Hacking in Value Methods',
+        description: 'Value-based methods aggressively maximize learned Q-values. If the reward function has loopholes, the agent will find and exploit them (e.g., a cleaning robot pushing dirt under furniture).',
+        recommendation: 'Perform adversarial reward auditing: ask "What is the laziest/cheapest way to get this reward?" and patch those loopholes.',
+    },
+    {
+        category: 'DEPLOYMENT',
+        title: 'Model Staleness (Online vs Offline)',
+        description: 'Model-Based agents rely on learned dynamics. In deployment, if the real environment changes (new obstacles, different physics), the internal model becomes "stale" and planning fails.',
+        recommendation: 'Implement continuous model updates or "model health checks" that compare predicted vs actual transitions and trigger retraining.',
+    },
+    {
+        category: 'DEPLOYMENT',
+        title: 'Policy Rollback Strategy',
+        description: 'When deploying updated policies (Model-Free or Model-Based), the new policy may perform worse than the old one due to overfitting or distribution shift.',
+        recommendation: 'Always maintain a "shadow" deployment with the previous policy. Use A/B testing and automatic rollback if KPIs degrade.',
     }
   ],
   [ModuleId.DET_STOCHASTIC]: [
@@ -82,6 +106,24 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         title: 'Drift Detection',
         description: 'Real-world stochasticity changes over time (e.g., robot joints wearing down, weather changing). A deployed deterministic policy cannot adapt to these changing dynamics without retraining.',
         recommendation: 'Monitor "Prediction Error" (difference between expected and actual state) to trigger retraining or fallback safe modes.',
+    },
+    {
+        category: 'VERIFICATION',
+        title: 'Variance in Performance Metrics',
+        description: 'Stochastic environments produce variable results. A policy that averages 90% success might occasionally have runs with 50% success. Single-run evaluation is misleading.',
+        recommendation: 'Run at least 100 evaluation episodes. Report mean, standard deviation, and worst-case performance (5th percentile).',
+    },
+    {
+        category: 'ETHICS',
+        title: 'Fairness Under Uncertainty',
+        description: 'Stochastic policies may inadvertently discriminate. If slip probability differs by region (e.g., icy vs dry floor), the agent may avoid serving certain areas entirely.',
+        recommendation: 'Audit policy behavior across all environmental conditions. Ensure equitable service even in high-uncertainty zones.',
+    },
+    {
+        category: 'DEPLOYMENT',
+        title: 'Safe Fallback Modes',
+        description: 'In high-stochasticity situations (sensor failure, extreme weather), the policy may become unreliable. Production systems need graceful degradation.',
+        recommendation: 'Implement uncertainty thresholds: if entropy of action distribution exceeds a limit, hand control to a safe fallback (stop, call human).',
     }
   ],
   [ModuleId.TABULAR_DEEP]: [
@@ -114,6 +156,36 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         title: 'Catastrophic Forgetting',
         description: 'When a Neural Network learns new tasks, it often overwrites the weights used for old tasks. A robot might learn to run but forget how to walk.',
         recommendation: 'Use "Experience Replay" buffers to keep reminding the agent of past lessons during training.',
+    },
+    {
+        category: 'VERIFICATION',
+        title: 'Out-of-Distribution Detection',
+        description: 'Deep RL policies behave unpredictably when encountering states not seen during training. Unlike tabular methods (which return "unknown"), neural networks confidently output nonsense.',
+        recommendation: 'Train an ensemble of networks. High disagreement between ensemble members signals an unfamiliar state requiring caution.',
+    },
+    {
+        category: 'ETHICS',
+        title: 'Algorithmic Discrimination',
+        description: 'Deep networks learn features automatically. If training data is biased (e.g., more examples of one demographic), the policy may systematically underperform for underrepresented groups.',
+        recommendation: 'Stratify evaluation by subgroups. If performance varies significantly, augment training data or apply fairness constraints.',
+    },
+    {
+        category: 'ETHICS',
+        title: 'Accountability Gap',
+        description: 'When a tabular policy fails, you can trace exactly which Q-value caused the bad decision. Deep policies offer no such traceability, making accountability difficult.',
+        recommendation: 'Log all inputs, actions, and intermediate activations. Use attention visualization to create post-hoc explanations.',
+    },
+    {
+        category: 'DEPLOYMENT',
+        title: 'Inference Latency',
+        description: 'Neural network inference is slower than table lookup. For real-time control (robotics, trading), deep policies may miss timing deadlines that tabular methods would meet.',
+        recommendation: 'Profile inference time. Consider model compression (pruning, quantization) or distillation to smaller networks.',
+    },
+    {
+        category: 'VERIFICATION',
+        title: 'Reproducibility Challenges',
+        description: 'Deep RL is notoriously sensitive to random seeds. The same algorithm can succeed or fail based on initialization. Tabular methods are deterministic given the same data.',
+        recommendation: 'Always report results across multiple seeds (5+). Use statistical tests to claim improvement over baselines.',
     }
   ],
   [ModuleId.EXPLORE_EXPLOIT]: [
@@ -140,6 +212,42 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
           title: 'Bandits vs A/B Testing',
           description: 'A/B testing is pure exploration (50/50 split) followed by pure exploitation. Multi-Armed Bandits dynamically shift traffic to the winning variation during the test, saving money/conversions.',
           recommendation: 'Replace static A/B tests with Contextual Bandits for website optimization.',
+      },
+      {
+          category: 'VERIFICATION',
+          title: 'Non-Stationary Reward Validation',
+          description: 'Bandits assume arm rewards are stationary. In practice, user preferences change (seasonality, trends). An arm validated as "best" last month may underperform now.',
+          recommendation: 'Implement sliding-window estimates or decaying averages. Periodically re-validate arm rankings.',
+      },
+      {
+          category: 'ETHICS',
+          title: 'Filter Bubbles & Echo Chambers',
+          description: 'Excessive exploitation in recommendation systems creates filter bubbles. Users only see content similar to what they clicked before, limiting exposure to diverse perspectives.',
+          recommendation: 'Inject deliberate exploration of diverse content. Use "serendipity" metrics alongside engagement metrics.',
+      },
+      {
+          category: 'ETHICS',
+          title: 'Vulnerable Population Exploitation',
+          description: 'Bandit algorithms optimizing for engagement may exploit psychological vulnerabilities (e.g., gambling addiction, compulsive shopping) by serving addictive content.',
+          recommendation: 'Implement guardrails: max daily interactions, cool-down periods, explicit opt-out options for personalization.',
+      },
+      {
+          category: 'DEPLOYMENT',
+          title: 'Cold Start Problem',
+          description: 'New arms (products, content) have no data and high uncertainty. Pure exploitation ignores them forever. New items need guaranteed initial exposure.',
+          recommendation: 'Reserve a fixed exploration budget for new arms. Use "explore-then-commit" or forced exploration windows.',
+      },
+      {
+          category: 'VERIFICATION',
+          title: 'Reward Attribution Accuracy',
+          description: 'Bandits assume immediate, accurate reward signals. In practice, rewards may be delayed (subscription after 30-day trial) or noisy (accidental clicks).',
+          recommendation: 'Validate reward attribution windows. Filter obvious noise (sub-second clicks). Use delayed reward models if needed.',
+      },
+      {
+          category: 'DEPLOYMENT',
+          title: 'Multi-Objective Trade-offs',
+          description: 'Production systems balance competing objectives: engagement vs revenue vs user satisfaction. A single-reward bandit may over-optimize one dimension.',
+          recommendation: 'Use multi-objective bandits or constrained optimization. Define acceptable ranges for each metric.',
       }
   ],
   [ModuleId.SINGLE_MULTI]: [
@@ -166,6 +274,48 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
           title: 'Tragedy of the Commons',
           description: 'Independent agents maximizing their own reward often destroy shared resources (e.g., traffic congestion).',
           recommendation: 'Design the Reward Function to align individual incentives with social welfare (Nash Equilibrium).',
+      },
+      {
+          category: 'VERIFICATION',
+          title: 'Equilibrium Stability Testing',
+          description: 'Multi-agent systems can converge to multiple equilibria, some good (cooperation), some bad (mutual defection). Standard tests may only find one.',
+          recommendation: 'Test from diverse initial conditions. Use game-theoretic analysis to identify all possible equilibria and their basins of attraction.',
+      },
+      {
+          category: 'ETHICS',
+          title: 'Collusion & Market Manipulation',
+          description: 'Agents may independently discover collusion strategies (price-fixing, bid-rigging) without explicit programming. This is illegal in many jurisdictions.',
+          recommendation: 'Monitor for collusion patterns. Inject "probe" agents to detect coordinated manipulation. Implement algorithmic antitrust checks.',
+      },
+      {
+          category: 'ETHICS',
+          title: 'Asymmetric Power Dynamics',
+          description: 'In competitive MARL, one agent may dominate others unfairly (e.g., larger company crushing smaller competitors through algorithmic warfare).',
+          recommendation: 'Evaluate welfare distribution across agents. Consider handicapping or resource constraints to ensure fair competition.',
+      },
+      {
+          category: 'DEPLOYMENT',
+          title: 'Coordination Protocol Failures',
+          description: 'In cooperative multi-agent deployment, communication protocols may fail. Agents trained together may not work with replacement agents or updated versions.',
+          recommendation: 'Define explicit communication APIs. Test with agent dropout/replacement. Build redundancy into coordination mechanisms.',
+      },
+      {
+          category: 'DEPLOYMENT',
+          title: 'Cascading Failures',
+          description: 'In interconnected multi-agent systems, one agent\'s failure can trigger cascading failures (e.g., flash crashes in algorithmic trading).',
+          recommendation: 'Implement circuit breakers that halt the system when anomalies are detected. Test with simulated agent failures.',
+      },
+      {
+          category: 'VERIFICATION',
+          title: 'Adversarial Robustness',
+          description: 'In competitive settings, opponent agents may be adversarial or exploit weaknesses. A policy optimal against training opponents may fail against novel attackers.',
+          recommendation: 'Test against diverse adversary types: random, optimal, adversarially-trained. Use population-based training for robustness.',
+      },
+      {
+          category: 'DEPLOYMENT',
+          title: 'Version Compatibility',
+          description: 'When updating one agent in a multi-agent system, the new policy may not be compatible with the old policies of other agents, causing system-wide degradation.',
+          recommendation: 'Implement staged rollouts. Test new agents against existing fleet before deployment. Maintain backward compatibility or coordinate updates.',
       }
   ],
   // Generic fallback for others
