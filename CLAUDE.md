@@ -71,25 +71,40 @@ State flows unidirectionally:
 - Dynamically shows/hides tabs based on available content
 - Insights are module-specific and defined in `LIFECYCLE_CONTEXTS`
 
-**AI Services** (`services/geminiService.ts`)
+**AI Services** (`services/llmService.ts`)
 - `generateExplanation()` - Contextual tutoring based on parameters and performance
 - `generatePythonCode()` - Generates Python implementations of current config
 - `analyzeRewardFunction()` - Safety analysis for reward hacking risks
-- All functions accept optional `apiKey` parameter for user-provided keys
+- All functions take `(…, provider, model, apiKey?)` and dispatch via `services/llmClient.ts`
+
+**Multi-provider LLM support** (`services/providers.ts` + `services/llmClient.ts`)
+- Provider registry (`PROVIDERS`) sourced from the llm-api-search MCP server:
+  Google Gemini (default, free tier), OpenAI, Anthropic Claude, DeepSeek
+- Inception Labs (Mercury) is intentionally excluded — it is server-only
+- `llmClient.callLlm(provider, model, prompt, apiKey)` dispatches by call style:
+  `google` (@google/genai SDK), `openai-chat` (OpenAI + DeepSeek `/chat/completions`),
+  `anthropic` (`/v1/messages` with the browser-access header)
+- Every provider's `apiHost` is mirrored in the CSP `connect-src` in `security-headers.conf`
+- The user picks provider + model in the sidebar; each provider keeps its own stored key
 
 ### API Key Management
 
-Users provide their own Gemini API key via the sidebar UI:
-- Keys are encrypted using AES-256-GCM and stored in localStorage
+Users provide their own API key (for the selected provider) via the sidebar UI:
+- Keys are encrypted using AES-256-GCM before being stored in the browser
+- By default the encrypted key lives in `sessionStorage` (cleared when the tab closes)
+- A "Remember on this device" checkbox opts in to `localStorage`; toggling migrates the
+  key to the chosen store and clears the other (exactly one copy ever exists)
 - Encryption uses device fingerprint + PBKDF2 key derivation (100,000 iterations)
-- Keys persist across sessions but are device-specific
 - Status indicator shows "READY" (green) when key is set, "KEY REQUIRED" (yellow) otherwise
-- "Clear" button allows users to remove stored encrypted key
+- "Clear" button allows users to remove the stored encrypted key from both stores
 - AI Studio platform integration available if running in Google's AI Studio environment
 
 **Encryption Implementation** (`utils/keyEncryption.ts`):
 - `encryptApiKey()` / `decryptApiKey()` - AES-GCM encryption
-- `saveEncryptedKey()` / `loadEncryptedKey()` - Persistent storage
+- `saveEncryptedKey(provider, key, remember)` - session-only by default, `localStorage` when `remember`
+- `loadEncryptedKey(provider)` - reads the session copy first, then any remembered copy
+- `isKeyRemembered(provider)` - whether the provider's key is persisted across sessions
+- Storage is namespaced per provider (`rl_encrypted_api_key_<provider>`)
 - Device fingerprint derived from browser/hardware properties
 - Salt stored separately and randomly generated per device
 

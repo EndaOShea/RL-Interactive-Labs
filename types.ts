@@ -75,3 +75,33 @@ export interface AITutorProps {
   onClear: () => void;
   isThinking: boolean;
 }
+
+// ============================================
+// LLM Providers (multi-provider AI tutoring)
+// ============================================
+
+export type LlmProviderId = 'google' | 'openai' | 'anthropic' | 'deepseek';
+
+// How the unified client talks to the provider:
+// - 'google'      : @google/genai SDK (generateContent)
+// - 'openai-chat' : OpenAI-compatible POST /chat/completions (also DeepSeek)
+// - 'anthropic'   : Anthropic POST /v1/messages
+export type LlmCallStyle = 'google' | 'openai-chat' | 'anthropic';
+
+export interface LlmModelOption {
+  id: string;       // model id sent to the API
+  label: string;    // human-friendly name shown in the dropdown
+  note?: string;    // e.g. pricing or "free tier"
+}
+
+export interface LlmProviderConfig {
+  id: LlmProviderId;
+  label: string;
+  style: LlmCallStyle;
+  apiHost: string;        // origin only — must be listed in the CSP connect-src
+  endpoint: string;       // full chat endpoint URL (unused for the 'google' style)
+  defaultModel: string;
+  models: LlmModelOption[];
+  keysUrl: string;        // where the user creates an API key
+  freeTier: boolean;      // whether a no-card free tier exists
+}

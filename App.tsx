@@ -13,11 +13,12 @@ import {
 import { 
   DEFAULT_HYPERPARAMS, LIFECYCLE_CONTEXTS, MODULE_CONTENT
 } from './constants';
-import { 
-  HyperParameters, ModuleId, SimulationStatus, TrainingMetrics, SimulationUpdate, ChatMessage
+import {
+  HyperParameters, ModuleId, SimulationStatus, TrainingMetrics, SimulationUpdate, ChatMessage, LlmProviderId
 } from './types';
-import { generateExplanation } from './services/geminiService';
-import { saveEncryptedKey, loadEncryptedKey, clearEncryptedKey, hasStoredKey } from './utils/keyEncryption';
+import { generateExplanation } from './services/llmService';
+import { PROVIDERS, PROVIDER_ORDER, DEFAULT_PROVIDER, getProvider } from './services/providers';
+import { saveEncryptedKey, loadEncryptedKey, clearEncryptedKey, isKeyRemembered } from './utils/keyEncryption';
 
 const App: React.FC = () => {
   // State
@@ -30,10 +31,16 @@ const App: React.FC = () => {
   // Live Analysis State
   const [liveUpdate, setLiveUpdate] = useState<SimulationUpdate | null>(null);
   
-  // API Key State
+  // LLM Provider State
+  const [provider, setProvider] = useState<LlmProviderId>(DEFAULT_PROVIDER);
+  const [model, setModel] = useState<string>(PROVIDERS[DEFAULT_PROVIDER].defaultModel);
+  const providerConfig = getProvider(provider);
+
+  // API Key State (per-provider)
   const [keyInput, setKeyInput] = useState('');     // What the user types
   const [manualKey, setManualKey] = useState('');   // What is actually used (Active Key)
   const [keyLoading, setKeyLoading] = useState(true); // Loading state for encrypted key
+  const [rememberKey, setRememberKey] = useState(false); // Persist across sessions (localStorage) vs session-only
 
   // AI Interaction State
   const [aiThinking, setAiThinking] = useState(false);
@@ -42,14 +49,15 @@ const App: React.FC = () => {
   // Derived State for API Key
   const currentApiKey = manualKey.length > 0 ? manualKey : undefined;
 
-  // Load encrypted API key on startup
+  // Load the default provider's encrypted API key on startup
   useEffect(() => {
     const loadStoredKey = async () => {
       try {
-        const storedKey = await loadEncryptedKey();
+        const storedKey = await loadEncryptedKey(DEFAULT_PROVIDER);
         if (storedKey) {
           setManualKey(storedKey);
           setKeyInput(storedKey);
+          setRememberKey(isKeyRemembered(DEFAULT_PROVIDER));
         }
       } catch (error) {
         console.error('Failed to load stored key:', error);
@@ -60,6 +68,27 @@ const App: React.FC = () => {
 
     loadStoredKey();
   }, []);
+
+  // Switch provider: reset model to the provider default and load that
+  // provider's stored key (each provider keeps its own key).
+  const handleProviderChange = async (next: LlmProviderId) => {
+    setProvider(next);
+    setModel(getProvider(next).defaultModel);
+    setKeyLoading(true);
+    try {
+      const storedKey = await loadEncryptedKey(next);
+      setManualKey(storedKey || '');
+      setKeyInput(storedKey || '');
+      setRememberKey(isKeyRemembered(next));
+    } catch (error) {
+      console.error('Failed to load stored key:', error);
+      setManualKey('');
+      setKeyInput('');
+      setRememberKey(false);
+    } finally {
+      setKeyLoading(false);
+    }
+  };
 
   // Check for AI Studio API Key (Google's platform integration)
   useEffect(() => {
@@ -101,11 +130,26 @@ const App: React.FC = () => {
     setManualKey(trimmedKey);
     setKeyInput(trimmedKey);
 
-    // Save encrypted key to localStorage
+    // Persist the encrypted key for the active provider — sessionStorage by
+    // default, localStorage only when "remember on this device" is opted in.
     try {
-      await saveEncryptedKey(trimmedKey);
+      await saveEncryptedKey(provider, trimmedKey, rememberKey);
     } catch (error) {
       console.error('Failed to save encrypted key:', error);
+    }
+  };
+
+  // Toggle "remember on this device". If a key is already active, migrate it to
+  // the chosen store immediately (session-only <-> persisted).
+  const toggleRemember = async () => {
+    const next = !rememberKey;
+    setRememberKey(next);
+    if (manualKey) {
+      try {
+        await saveEncryptedKey(provider, manualKey, next);
+      } catch (error) {
+        console.error('Failed to migrate stored key:', error);
+      }
     }
   };
 
@@ -128,7 +172,7 @@ const App: React.FC = () => {
     // Use a temporary HyperParameters object for the service call, merging contextParams
     const tempParams: HyperParameters = { ...DEFAULT_HYPERPARAMS, ...contextParams };
 
-    const explanation = await generateExplanation(finalContext, tempParams, currentApiKey);
+    const explanation = await generateExplanation(finalContext, tempParams, provider, model, currentApiKey);
 
     setChatHistory(prev => [...prev, { role: 'ai', content: explanation }]);
     setAiThinking(false);
@@ -221,11 +265,11 @@ const App: React.FC = () => {
                      <div className="mt-1.5 text-[9px] text-gray-500 flex items-center justify-between">
                          <div className="flex items-center gap-1">
                              <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
-                             <span>Key Saved (Encrypted)</span>
+                             <span>{rememberKey ? 'Key Saved (Encrypted)' : 'Key Active (This Session)'}</span>
                          </div>
                          <button
                              onClick={() => {
-                                 clearEncryptedKey();
+                                 clearEncryptedKey(provider);
                                  setManualKey('');
                                  setKeyInput('');
                              }}
@@ -238,7 +282,39 @@ const App: React.FC = () => {
              </div>
 
              <div className="px-3 space-y-2">
-                 {(window as any).aistudio?.openSelectKey && (
+                 {/* Provider + model selection */}
+                 <div className="grid grid-cols-1 gap-2">
+                     <div>
+                         <label className="block text-[8px] text-gray-500 uppercase font-bold tracking-wider mb-1">Provider</label>
+                         <select
+                             value={provider}
+                             onChange={(e) => handleProviderChange(e.target.value as LlmProviderId)}
+                             className="w-full bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300 px-2 py-1.5 focus:outline-none focus:border-green-600"
+                         >
+                             {PROVIDER_ORDER.map((id) => (
+                                 <option key={id} value={id}>
+                                     {PROVIDERS[id].label}{PROVIDERS[id].freeTier ? ' (free tier)' : ''}
+                                 </option>
+                             ))}
+                         </select>
+                     </div>
+                     <div>
+                         <label className="block text-[8px] text-gray-500 uppercase font-bold tracking-wider mb-1">Model</label>
+                         <select
+                             value={model}
+                             onChange={(e) => setModel(e.target.value)}
+                             className="w-full bg-gray-800 border border-gray-700 rounded text-[10px] text-gray-300 px-2 py-1.5 focus:outline-none focus:border-green-600"
+                         >
+                             {providerConfig.models.map((m) => (
+                                 <option key={m.id} value={m.id} title={m.note}>
+                                     {m.label}
+                                 </option>
+                             ))}
+                         </select>
+                     </div>
+                 </div>
+
+                 {provider === 'google' && (window as any).aistudio?.openSelectKey && (
                      <button
                         onClick={handleApiKeySelect}
                         className={`w-full text-left px-2 py-1.5 text-[10px] hover:bg-gray-800 rounded transition-colors flex items-center gap-2 border border-dashed ${hasKey ? 'border-blue-500 text-blue-400 bg-blue-900/20' : 'border-gray-700 text-gray-500'}`}
@@ -255,7 +331,7 @@ const App: React.FC = () => {
                         </div>
                         <input
                             type="password"
-                            placeholder="Enter Gemini API Key..."
+                            placeholder={`Enter ${providerConfig.label} API Key...`}
                             className="w-full bg-transparent border-none text-[10px] text-gray-300 px-2 py-1.5 pr-2 focus:ring-0 focus:outline-none"
                             value={keyInput}
                             onChange={(e) => setKeyInput(e.target.value)}
@@ -271,23 +347,37 @@ const App: React.FC = () => {
                     )}
                  </div>
 
+                 <label className="flex items-center gap-1.5 px-1 cursor-pointer select-none">
+                     <input
+                         type="checkbox"
+                         checked={rememberKey}
+                         onChange={toggleRemember}
+                         className="w-3 h-3 accent-green-600 cursor-pointer"
+                     />
+                     <span className="text-[9px] text-gray-500">Remember on this device</span>
+                 </label>
+
                  <div className="text-[8px] text-gray-600 leading-relaxed px-1">
                      <p className="mb-1">
-                         💡 <span className="text-gray-500">Your key is encrypted and stored locally</span>
+                         💡 <span className="text-gray-500">
+                             {rememberKey
+                                 ? 'Your key is encrypted and persisted on this device'
+                                 : 'Your key is encrypted and kept only for this browser session'}
+                         </span>
                      </p>
                      <p className="text-gray-700">
-                         Get a free key at{' '}
+                         Get {providerConfig.freeTier ? 'a free' : 'an'} API key at{' '}
                          <a
-                             href="https://aistudio.google.com/app/apikey"
+                             href={providerConfig.keysUrl}
                              target="_blank"
                              rel="noopener noreferrer"
-                             className="text-blue-500 hover:text-blue-400 underline"
+                             className="text-blue-500 hover:text-blue-400 underline break-all"
                          >
-                             aistudio.google.com/apikey
+                             {providerConfig.keysUrl.replace(/^https?:\/\//, '')}
                          </a>
                      </p>
                      <p className="text-gray-700 mt-1">
-                         Limits: 5 req/min, 20 req/day
+                         Client throttle: 5 req/min, 20 req/day
                      </p>
                  </div>
              </div>

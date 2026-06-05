@@ -6,12 +6,16 @@ services:
     image: rl-interactive-labs:latest
     container_name: rl-interactive-labs
     ports:
-      - "2100:2100"
+      # localhost ONLY — the host reverse proxy (nginx on 443) is the sole
+      # public-facing thing and reaches the container here. Never bind 0.0.0.0.
+      - "127.0.0.1:2100:2100"
     environment:
       - NODE_ENV=production
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2100/health"]
+      # 127.0.0.1 (not localhost) — nginx binds IPv4 only; inside the container
+      # localhost resolves to ::1 first and the probe would get "connection refused".
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:2100/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -27,7 +31,7 @@ services:
   #     target: builder
   #   container_name: rl-interactive-labs-dev
   #   ports:
-  #     - "2100:2100"
+  #     - "127.0.0.1:2100:2100"
   #   volumes:
   #     - ./src:/app/src
   #     - ./public:/app/public

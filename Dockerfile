@@ -24,22 +24,19 @@ FROM nginx:alpine
 # Copy built assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Copy custom nginx configuration
+# Copy custom nginx configuration + the shared security-headers include
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy entrypoint script for runtime config injection
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+COPY security-headers.conf /etc/nginx/security-headers.conf
 
 # Expose port 2100
 EXPOSE 2100
 
 # Health check
+# 127.0.0.1 (not localhost): nginx binds IPv4 only, but localhost resolves to
+# ::1 first inside the container, which would fail the probe.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --quiet --tries=1 --spider http://localhost:2100/ || exit 1
+  CMD wget --quiet --tries=1 --spider http://127.0.0.1:2100/health || exit 1
 
-# Use entrypoint to inject runtime config
-ENTRYPOINT ["/docker-entrypoint.sh"]
-
-# Start nginx
+# The official nginx image already provides an entrypoint that launches the
+# server with this CMD — no custom wrapper needed.
 CMD ["nginx", "-g", "daemon off;"]

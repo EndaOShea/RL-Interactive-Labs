@@ -215,7 +215,9 @@ The app supports multiple API key sources:
 │   ├── LifecyclePanel.tsx    # Lifecycle guidance UI
 │   └── TheoryLabs.tsx        # 5 interactive lab modules
 ├── services/
-│   └── geminiService.ts      # AI tutoring and code generation
+│   ├── llmService.ts         # AI tutoring and code generation (provider-agnostic)
+│   ├── llmClient.ts          # Unified multi-provider call dispatch
+│   └── providers.ts          # LLM provider registry (Google/OpenAI/Anthropic/DeepSeek)
 ├── constants.ts              # Hyperparameters and lifecycle content
 ├── types.ts                  # TypeScript type definitions
 └── vite.config.ts            # Build configuration
