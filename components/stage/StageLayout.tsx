@@ -272,7 +272,7 @@ const StageLayout: React.FC<StageLayoutProps> = (p) => {
     <div className="scope" style={{ width: '100vw', height: '100vh', background: 'var(--bg1)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* global telemetry bar */}
       <header style={{ height: 48, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16, background: 'var(--bg0)', flexShrink: 0 }}>
-        <span style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14, color: 'var(--t0)' }}>RL Lifecycle</span>
+        <span style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14, color: 'var(--t0)' }}>Policy Playground</span>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--acc)', letterSpacing: '.04em', border: '1px solid color-mix(in srgb,var(--acc) 35%,transparent)', borderRadius: 6, padding: '2px 8px' }}>
           LAB {String(p.labNumber).padStart(2, '0')}
         </span>

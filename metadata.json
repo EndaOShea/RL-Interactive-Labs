@@ -1,5 +1,5 @@
 {
-  "name": "RL Lifecycle Architect",
-  "description": "A comprehensive, interactive educational platform for Reinforcement Learning that integrates the full AI development lifecycle, from methodology to ethics.",
+  "name": "Policy Playground",
+  "description": "An interactive playground for learning Reinforcement Learning by doing — live grid-world simulations, real-time math, and AI tutoring across model-free, stochastic, deep, exploration, and multi-agent settings.",
   "requestFramePermissions": []
 }
