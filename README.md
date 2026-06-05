@@ -4,274 +4,166 @@
 
 # Policy Playground
 
-An interactive educational platform for learning Reinforcement Learning concepts through hands-on simulations and AI-powered tutoring.
+An interactive playground for learning Reinforcement Learning **by doing** — live grid-world
+simulations, real-time math, and AI tutoring, wrapped in a full-screen "Cinematic Stage" UI.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
+View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
+
+## What it looks like
+
+The whole app is one full-viewport stage:
+
+- **Telemetry header** — app name, `LAB 0X` badge, the active module, and live
+  `EPISODE / REWARD / ε / STEPS` readouts with a `RUNNING / IDLE` status light.
+- **Left icon rail** — switch between the five modules.
+- **Centre stage** — the animated grid-world (or bandit bars) under a cinematic vignette,
+  ringed by floating glass cards: a 🐍 Python-download badge, a reward sparkline, an
+  algorithm/architecture dock, run controls, a value legend, and a **live-math ticker**
+  streaming the current update along the floor.
+- **Right instrument column** — three tabs (**Parameters / Math / Context**) over a
+  **docked AI tutor**.
 
 ## Features
 
-### Interactive Labs
-Explore core RL concepts through 5 interactive modules:
+### Five interactive labs
+Each lab is a real, in-browser RL simulation you can tune live:
 
-- **Model-Based vs Model-Free** - Compare planning-based and experience-based learning approaches
-- **Deterministic vs Stochastic** - Understand environmental uncertainty and its impact on learning
-- **Tabular vs Deep RL** - Contrast Q-tables with neural network function approximators
-- **Exploration vs Exploitation** - Balance discovering new strategies with leveraging known rewards
-- **Single-Agent vs Multi-Agent** - Learn coordination, competition, and emergent behaviors
+- **Model-Free vs Model-Based** — Q-Learning, SARSA, REINFORCE, Actor-Critic, and Dyna-Q
+  (with visible "planning" / mental-replay flashes).
+- **Deterministic vs Stochastic** — greedy `argmax` vs softmax (temperature τ) policies,
+  plus an environment "slip" probability.
+- **Tabular vs Deep RL** — an exact Q-table vs a radial-basis function approximator whose
+  updates *generalize* to neighbouring states.
+- **Exploration vs Exploitation** — a multi-armed bandit with Greedy, ε-Greedy,
+  Optimistic-Init, and UCB strategies.
+- **Single vs Multi-Agent** — joint-state Q-learning in single, cooperative, and
+  competitive scenarios.
 
-### Real-Time Visualizations
-- Live GridWorld simulations with agent navigation
-- Dynamic reward charts tracking performance over episodes
-- Real-time mathematical analysis showing formulas and variable values
-- Q-table heatmaps visualizing learned policies
+### The instrument column
+- **Parameters** — live sliders for speed, α (learning rate), γ (discount), ε (exploration),
+  decay, and lab-specific knobs (planning steps, slip, temperature, generalization radius,
+  UCB confidence).
+- **Math** — a real-time breakdown of the current update: algorithm, formula, substituted
+  variable values, the result, and a plain-English read on how each parameter influenced it.
+- **Context** — the live algorithm context, the module's concept cards, and **Lifecycle
+  Considerations** (Methodology / Verification / Ethics / Deployment), including modern-RL
+  notes (world models, offline RL & Decision Transformers, RLHF-era bandits).
 
-### AI-Powered Tutoring
-- Context-aware explanations powered by Google Gemini
-- Analyzes your current hyperparameters and performance
-- Answers questions about RL concepts and observed behaviors
-- Provides safety analysis for reward function design
+### Multi-provider AI tutor
+A context-aware tutor docked in the instrument column. It sees your current parameters and
+recent performance and explains *why* the agent behaves the way it does. Pick a provider and
+model behind the ⚙ settings toggle:
 
-### Lifecycle Architecture Guidance
-Navigate the full ML development lifecycle with insights across:
-- **Concept** - Core theory and algorithms
-- **Methodology** - Algorithm selection and design patterns
-- **Verification** - Testing and validation strategies
-- **Ethics & Bias** - Safety considerations and reward hacking prevention
-- **Operations** - Deployment and monitoring best practices
+- **Google** (Gemini, free tier — the default), **OpenAI**, **Anthropic**, **DeepSeek**
+- Thinking-capable models automatically run at a **balanced** reasoning effort.
 
-### Hands-On Learning
-- Adjustable hyperparameters (learning rate, discount factor, exploration rate)
-- Configurable environment layouts (obstacles, goals, starting positions)
-- Multiple algorithm implementations (Q-Learning, SARSA, Policy Gradient, etc.)
-- Download Python implementations of current configurations
+### Hands-on extras
+- Adjustable hyperparameters and per-lab algorithm/scenario switches.
+- Randomized environment layouts (obstacles, start, goal) with a guaranteed-reachable check.
+- **Download Python** — export a runnable NumPy implementation of the exact configuration
+  on screen.
 
 ## Prerequisites
 
-### For Local Development
-- **Node.js** (v16 or higher)
-- **Google Gemini API Key** (for AI tutoring features)
+- **Node.js** v18+ (for local development), or **Docker** v20.10+ (for containerized runs).
+- An API key for your chosen LLM provider — entered in the UI, never required at build time.
+  A free Google Gemini key works out of the box: https://aistudio.google.com/app/apikey
 
-### For Docker Deployment
-- **Docker** (v20.10 or higher)
-- **Docker Compose** (v2.0 or higher) - Optional but recommended
-- **Google Gemini API Key** (optional - see API Key Strategy below)
+## Local development
 
-## Installation
-
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd RL-Interactive-Labs
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Create `.env.local` and add your Gemini API key:
-   ```
-   GEMINI_API_KEY=your_api_key_here
-   ```
-
-4. Start the development server:
-   ```bash
-   npm run dev
-   ```
-
-5. Open your browser to `http://localhost:2100`
-
-## Docker Deployment
-
-### Using Docker Compose (Recommended)
-
-1. Create a `.env` file in the project root:
-   ```bash
-   GEMINI_API_KEY=your_api_key_here
-   ```
-
-2. Build and start the container:
-   ```bash
-   docker-compose up -d
-   ```
-
-3. Access the application at `http://localhost:2100`
-
-4. Stop the container:
-   ```bash
-   docker-compose down
-   ```
-
-### Production Deployment
-
-**For production deployment with nginx reverse proxy, see [DEPLOYMENT.md](./DEPLOYMENT.md)**
-
-Key production features:
-- ✅ **Flexible API Key Strategy**: Optional env key with user fallback
-- ✅ **Security Headers**: CSP, X-Frame-Options, HSTS, etc.
-- ✅ **Rate Limiting**: 12 RPM limit for API calls
-- ✅ **Retry Logic**: Exponential backoff for failed requests
-- ✅ **Error Boundaries**: Graceful failure handling
-- ✅ **Health Checks**: Container and nginx health endpoints
-- ✅ **TypeScript Strict Mode**: Enhanced type safety
-
-Quick production start:
 ```bash
-# 1. Copy environment template
-cp .env.example .env
-
-# 2. (Optional) Add your API key
-nano .env
-
-# 3. Build and deploy
-docker compose up -d --build
-
-# 4. Configure nginx reverse proxy (see DEPLOYMENT.md)
+git clone <repository-url>
+cd RL-Interactive-Labs
+npm install
+npm run dev          # http://localhost:2100
 ```
 
-## API Key Strategy
+No `.env` key is needed — open the app, click the ⚙ in the AI Tutor, pick a provider, and
+paste your key. It is encrypted and stored only in your browser.
 
-The application supports three API key modes:
+## Docker
 
-1. **Environment Key (Recommended for PoC)**
-   - Add `GEMINI_API_KEY` to `.env` file
-   - Users access AI features immediately
-   - When quota exhausted, users prompted for their own key
-   - Perfect for "try before you buy" experience
+```bash
+docker compose up -d --build     # build + run on 127.0.0.1:2100
+docker compose down              # stop + remove
+```
 
-2. **User-Provided Keys**
-   - No env key needed
-   - Users enter their own keys via UI
-   - More scalable but higher barrier to entry
+The image is a static nginx build — **no API keys are ever baked in**; keys are provided by
+each user at runtime in the browser. For production behind a reverse proxy, see
+[`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and [`docs/PRODUCTION_CHECKLIST.md`](./docs/PRODUCTION_CHECKLIST.md).
 
-3. **Hybrid (Default)**
-   - Provide env key for initial access
-   - Automatic fallback to user keys when exhausted
-   - Best user experience + scalability
+## API keys & privacy
 
-**Note**: API keys are never baked into Docker images. They're loaded at runtime only.
+- **Bring your own key, per provider.** You enter a key for whichever provider you select.
+- **Client-side only.** Keys are encrypted with AES-256-GCM (device-fingerprint + PBKDF2)
+  and stored in the browser — in `sessionStorage` by default, or `localStorage` if you tick
+  *"Remember on this device."* Exactly one copy ever exists, namespaced per provider.
+- **No server key.** Nothing is sent to a backend; each request goes straight from your
+  browser to the provider you chose (every provider host is allow-listed in the CSP).
+- **AI Studio.** When running inside Google AI Studio, the platform's key picker is offered.
+- **Throttling.** A client-side limiter enforces the Gemini free-tier budget: **5 req/min,
+  20 req/day** (`utils/apiHelpers.ts`).
 
-## Usage
+## Tech stack
 
-### Running Simulations
+- **Frontend:** React 19 + TypeScript, built with Vite
+- **Styling:** a CSS-variable design system (`index.css`) with inline-styled "stage"
+  components; Tailwind for the base layer; Space Grotesk + IBM Plex fonts
+- **Icons:** Lucide React (error boundary)
+- **AI:** `@google/genai` SDK for Gemini; `fetch` for OpenAI / Anthropic / DeepSeek, behind a
+  unified client
+- **Deployment:** Docker (multi-stage) + nginx
 
-1. **Select a Module** - Choose from the 5 interactive labs in the top navigation
-2. **Configure Parameters** - Adjust hyperparameters using the controls panel
-3. **Customize Environment** - Set grid layout, obstacles, and goals
-4. **Run Simulation** - Click Play to start training
-5. **Observe Results** - Watch live metrics, math analysis, and visualizations
-
-### AI Tutor
-
-- Click the chat icon to open the AI Tutor
-- Ask questions about RL concepts or observed behaviors
-- The tutor analyzes your current configuration and performance
-- Get explanations for why your agent is succeeding or struggling
-- **Clear conversation** - Click the trash icon to reset the chat
-- **No auto-scroll** - Page stays where you are; manually scroll to see new messages
-- **Usage monitoring** - Automatically detects when API quota is exceeded
-
-### API Key Management
-
-The app supports multiple API key sources:
-
-1. **Environment Key** (Blue dot 🔵)
-   - Set `GEMINI_API_KEY` in `.env` or `.env.local`
-   - Automatically tested on page load for usage limits
-   - Shows as OFFLINE if quota exceeded
-
-2. **Custom Key** (Green dot 🟢)
-   - Enter your own Gemini API key in the sidebar
-   - Get your key at [aistudio.google.com/apikey](https://aistudio.google.com/app/apikey)
-   - Overrides environment key when active
-
-**Status Indicators:**
-- **ONLINE** - Key is active and has usage available
-- **OFFLINE** - No key or usage limits reached
-- Dot color shows which key source is active
-
-### Exporting Code
-
-- Click "Download Python" to export the current algorithm implementation
-- Includes your configured hyperparameters
-- Ready to run in your own Python environment
-
-## Technology Stack
-
-- **Frontend**: React 19, TypeScript
-- **Build Tool**: Vite
-- **Styling**: Tailwind CSS
-- **Charting**: Recharts
-- **Icons**: Lucide React
-- **AI**: Google Gemini API (@google/genai)
-- **Deployment**: Docker with nginx
-
-## Project Structure
+## Project structure
 
 ```
-├── App.tsx                    # Main application component
+├── App.tsx                       # Thin shell: module selection, metrics/chat, provider+key state
 ├── components/
-│   ├── GridWorld.tsx         # Q-Learning grid simulation
-│   ├── LifecyclePanel.tsx    # Lifecycle guidance UI
-│   └── TheoryLabs.tsx        # 5 interactive lab modules
+│   ├── ErrorBoundary.tsx
+│   ├── TheoryLabs.tsx            # The 5 lab components; each feeds slots into StageLayout
+│   └── stage/
+│       ├── StageLayout.tsx       # Cinematic Stage shell: header, icon nav, stage, tabs, tutor dock
+│       ├── StageGrid.tsx         # Cinematic grid-world renderer (heat tiles, agent orb, arrows)
+│       ├── ApiKeyPanel.tsx       # Provider / model / key controls (in the tutor dock)
+│       └── primitives.tsx        # Glass panels, tabs, LED, sparkline, sliders, pills, math ticker
 ├── services/
-│   ├── llmService.ts         # AI tutoring and code generation (provider-agnostic)
-│   ├── llmClient.ts          # Unified multi-provider call dispatch
-│   └── providers.ts          # LLM provider registry (Google/OpenAI/Anthropic/DeepSeek)
-├── constants.ts              # Hyperparameters and lifecycle content
-├── types.ts                  # TypeScript type definitions
-└── vite.config.ts            # Build configuration
+│   ├── llmService.ts            # generateExplanation() tutoring prompt (+ helper generators)
+│   ├── llmClient.ts             # Unified provider dispatch + balanced "thinking" config
+│   └── providers.ts             # Provider registry (Google / OpenAI / Anthropic / DeepSeek)
+├── utils/
+│   ├── keyEncryption.ts         # AES-GCM, per-provider encrypted key storage
+│   └── apiHelpers.ts            # Rate limiting (5 RPM / 20 RPD) + retry/backoff
+├── constants.ts                 # Defaults, MODULE_CONTENT, LIFECYCLE_CONTEXTS
+├── types.ts                     # ModuleId, SimulationUpdate, provider + reasoning types
+├── index.css                    # Design tokens, fonts, themed range inputs/scrollbars
+├── security-headers.conf        # CSP (provider hosts + Google Fonts), shared nginx headers
+└── vite.config.ts
 ```
 
 ## Development
 
-### Available Commands
-
 ```bash
-npm run dev       # Start development server
-npm run build     # Build for production
-npm run preview   # Preview production build
+npm run dev       # dev server on :2100
+npm run build     # production build (vite/esbuild)
+npm run preview   # preview the production build
 ```
 
-### Key Concepts
+**Hyperparameters**
+- `alpha` (α) — learning rate: how much each Q-update moves the estimate
+- `gamma` (γ) — discount factor: how much future reward counts
+- `epsilon` (ε) — exploration rate: probability of a random action
+- `epsilonDecay` — multiplicative decay applied to ε each episode (`ε ← max(0.01, ε·decay)`)
 
-**Hyperparameters:**
-- `alpha` (Learning Rate): How much to update Q-values each step (0.0-1.0)
-- `gamma` (Discount Factor): Importance of future rewards (0.0-1.0)
-- `epsilon` (Exploration Rate): Probability of random action (0.0-1.0)
-- `epsilonDecay`: Multiplicative decay per episode (0.9-1.0)
-
-**Simulation States:**
-- `IDLE` - Ready to start
-- `RUNNING` - Training in progress
-- `PAUSED` - Temporarily stopped
-- `COMPLETED` - Finished all episodes
-
-## Configuration
-
-### API Key Options
-
-The app supports two methods for providing your Gemini API key:
-
-1. **Environment Variable** (recommended for local development)
-   - Set `GEMINI_API_KEY` in `.env.local`
-
-2. **Manual Input** (for deployed environments)
-   - Enter key directly in the app's settings panel
-
-### AI Studio Integration
-
-When running in Google AI Studio, the app automatically detects and uses the platform's API key management system.
+Notes: TypeScript strict mode is on; there is no test/lint setup yet. The production build is
+`vite build` (esbuild) — it transpiles without a separate `tsc` type-check pass.
 
 ## Contributing
 
-Contributions are welcome! Areas for improvement:
-
-- Additional RL algorithms (PPO, A3C, etc.)
-- More environment types (continuous spaces, partial observability)
-- Enhanced visualizations (policy arrows, value surfaces)
-- Expanded lifecycle guidance content
-- Unit tests and integration tests
+Ideas welcome:
+- More algorithms (PPO, A3C, SAC) and environments (continuous control, partial observability)
+- Richer visualizations (value surfaces, policy fields)
+- Expanded lifecycle / modern-RL context
+- A test suite
 
 ## License
 
@@ -279,7 +171,6 @@ Contributions are welcome! Areas for improvement:
 
 ## Acknowledgments
 
-Built with educational resources from:
-- Sutton & Barto's "Reinforcement Learning: An Introduction"
-- OpenAI Spinning Up in Deep RL
-- DeepMind's RL course materials
+- Sutton & Barto, *Reinforcement Learning: An Introduction*
+- OpenAI *Spinning Up in Deep RL*
+- DeepMind RL lecture series

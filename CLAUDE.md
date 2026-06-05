@@ -4,221 +4,176 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an interactive Reinforcement Learning educational platform built with React, TypeScript, and Vite. The app teaches RL concepts through interactive visualizations and simulations, with AI-powered tutoring using Google's Gemini API.
+**Policy Playground** is an interactive Reinforcement Learning educational platform built with
+React, TypeScript, and Vite. It teaches RL by doing: live grid-world / bandit simulations,
+real-time math breakdowns, and multi-provider AI tutoring — all inside a single full-viewport
+"Cinematic Stage" UI.
 
 ## Development Commands
 
-### Core Development
-- `npm install` - Install dependencies
-- `npm run dev` - Start development server on port 2100
-- `npm run build` - Build for production
-- `npm run preview` - Preview production build
+### Core
+- `npm install` — install dependencies
+- `npm run dev` — dev server on port 2100
+- `npm run build` — production build (`vite build`; esbuild — no separate `tsc` type-check)
+- `npm run preview` — preview the production build
 
-### Docker Deployment
-- `docker compose up -d --build` - Build and start container (exposes port 2100)
-- `docker compose down` - Stop and remove container
+### Docker (preferred way to test a build)
+- `docker compose up -d --build` — build + run the nginx image on `127.0.0.1:2100`
+- `docker compose down` — stop + remove
+- Health: `docker inspect --format '{{.State.Health.Status}}' rl-interactive-labs`
 
-### API Key Setup
-- Users provide their own Gemini API key via the UI
-- Keys are obtained free at https://aistudio.google.com/app/apikey
-- No server-side API key required - keeps deployment simple and secure
+### API keys
+- Each user supplies their own key, per provider, in the UI (⚙ in the AI Tutor dock).
+- No server-side or build-time key — fully client-side. A free Google Gemini key works:
+  https://aistudio.google.com/app/apikey
 
 ## Architecture
 
-### Module System
-The app is organized around educational modules (`ModuleId` enum in `types.ts`):
-- `MODEL_VS_FREE` - Model-based vs Model-free RL
-- `DET_STOCHASTIC` - Deterministic vs Stochastic environments
-- `TABULAR_DEEP` - Tabular vs Deep RL
-- `EXPLORE_EXPLOIT` - Exploration-Exploitation tradeoffs
-- `SINGLE_MULTI` - Single-agent vs Multi-agent systems
+### Module system
+Five educational modules (`ModuleId` enum in `types.ts`):
+- `MODEL_VS_FREE` — Model-free vs Model-based RL (Q-Learning, SARSA, REINFORCE, Actor-Critic, Dyna-Q)
+- `DET_STOCHASTIC` — Deterministic vs Stochastic policies + environment slip
+- `TABULAR_DEEP` — Tabular (exact) vs Deep (RBF generalization) value learning
+- `EXPLORE_EXPLOIT` — Multi-armed bandits (Greedy, ε-Greedy, Optimistic, UCB)
+- `SINGLE_MULTI` — Single vs Multi-agent (joint-state Q-learning; coop / competitive)
 
-Each module consists of:
-1. **Interactive Lab** - Interactive simulation component in `components/TheoryLabs.tsx`
-2. **Lifecycle Insights** - Contextual guidance defined in `constants.ts` under `LIFECYCLE_CONTEXTS`
-3. **Live Math Analysis** - Real-time mathematical breakdowns via `SimulationUpdate` type
+### UI shell — the "Cinematic Stage" (`components/stage/`)
+Every lab renders one `StageLayout`, feeding it slots. `StageLayout` (`StageLayout.tsx`) is the
+whole screen:
+- **Header** — brand, `LAB 0X` badge, module subtitle, live telemetry (episode / reward / ε /
+  steps) and a `RUNNING|IDLE` LED.
+- **Left icon-rail nav** — module switching (`onSelectModule`).
+- **Centre stage** — the simulation, centred under a vignette + grid texture, surrounded by
+  floating glass cards (code/Python badge, reward sparkline, algorithm dock, run controls,
+  legend) and a **live-math ticker** showing the latest `SimulationUpdate`.
+- **Right instrument column (384px)** — tabs **Parameters / Math / Context** over a docked
+  **AI tutor** (`AITutorDock`, with the collapsible `ApiKeyPanel`).
+  - **Math** tab → `LiveMath` renders the current `SimulationUpdate`.
+  - **Context** tab → `ModuleContext` renders the live algorithm insight + `MODULE_CONTENT`
+    concept cards + `LIFECYCLE_CONTEXTS` "Lifecycle Considerations".
 
-### State Management Pattern
-The app uses a centralized state pattern in `App.tsx`:
-- **Hyperparameters** (`HyperParameters`) - Alpha, Gamma, Epsilon, EpsilonDecay, Episodes
-- **Metrics** (`TrainingMetrics[]`) - Episode rewards, epsilon decay, steps
-- **Simulation Updates** (`SimulationUpdate`) - Live mathematical analysis with formulas and variable breakdowns
-- **Chat History** (`ChatMessage[]`) - AI tutor conversation state
+Supporting pieces: `StageGrid.tsx` (the cinematic grid renderer — heat tiles, glowing agent
+orb, accent goal ring, policy arrows, planning flashes), `primitives.tsx` (glass panels, tabs,
+LED, sparkline, sliders, algorithm pills, run controls, math ticker), `ApiKeyPanel.tsx`.
 
-State flows unidirectionally:
-1. User adjusts hyperparameters
-2. Simulation runs using those parameters
-3. Metrics are pushed back up via `onUpdateMetrics` callback
-4. Live updates are set via `setLiveUpdate`
-5. AI tutor analyzes context from current state
+### State management
+`App.tsx` is a **thin shell**. It owns module selection, the metrics stream, the chat history,
+and the multi-provider key state, then renders the active lab. Each lab owns its own simulation
+state and parameters and renders `StageLayout`.
 
-### Key Components
+Flow per step:
+1. User adjusts a parameter (right column) or an algorithm pill (left dock).
+2. The lab's `step()` runs and pushes a `TrainingMetrics` up via `onUpdateMetrics`.
+3. The lab sets its `lastLog` (`SimulationUpdate`) and also calls `onLogUpdate` (App's
+   `setLiveUpdate`). `StageLayout` renders `lastLog` in the Math tab + ticker.
+4. The docked AI tutor reads the lab's `currentParams` + recent metrics for context.
 
-**GridWorld** (`components/GridWorld.tsx`)
-- Q-Learning simulation on a 5x5 grid
-- Implements epsilon-greedy exploration with multiplicative decay
-- Uses Q-table with string keys: `"x,y"` → `[up, right, down, left]` action values
-- Emits `TrainingMetrics` on each episode completion
+### Key components
 
 **TheoryLabs** (`components/TheoryLabs.tsx`)
-- Contains 5 separate lab components, each with their own simulation logic
-- Each lab exports Python code for download via `downloadPython` helper
-- Uses 8x6 grid (`GRID_W` × `GRID_H`) with different algorithms per lab
-- All labs follow pattern: Controls → Visualization → Live Math → AI Tutor
+- Five self-contained lab components: `ModelVsFreeLab`, `DetStochLab`, `TabularDeepLab`,
+  `ExploreExploitLab`, `MultiAgentLab`.
+- Grid-world labs use an 8×6 grid (`GRID_W`×`GRID_H`); MARL uses 6×6; bandits render bars.
+- Each lab builds slot nodes (grid, algoDock, controls, legend, params, telemetry, context
+  insight) and passes them to `StageLayout`.
+- Each lab exports a runnable NumPy implementation of the current config via the local
+  `downloadPython()` helper (template strings — **not** LLM-generated).
 
-**LifecyclePanel** (`components/LifecyclePanel.tsx`)
-- Displays lifecycle insights across categories: CONCEPT, LIVE, METHODOLOGY, VERIFICATION, ETHICS, DEPLOYMENT
-- Dynamically shows/hides tabs based on available content
-- Insights are module-specific and defined in `LIFECYCLE_CONTEXTS`
-
-**AI Services** (`services/llmService.ts`)
-- `generateExplanation()` - Contextual tutoring based on parameters and performance
-- `generatePythonCode()` - Generates Python implementations of current config
-- `analyzeRewardFunction()` - Safety analysis for reward hacking risks
-- All functions take `(…, provider, model, apiKey?)` and dispatch via `services/llmClient.ts`
+**AI services** (`services/llmService.ts`)
+- `generateExplanation()` — the tutoring call used by `App.tsx`.
+- `generatePythonCode()` / `analyzeRewardFunction()` — provider-agnostic helpers that exist but
+  are not currently wired into the UI.
+- All take `(…, provider, model, apiKey?)` and route through `services/llmClient.ts`.
 
 **Multi-provider LLM support** (`services/providers.ts` + `services/llmClient.ts`)
-- Provider registry (`PROVIDERS`) sourced from the llm-api-search MCP server:
-  Google Gemini (default, free tier), OpenAI, Anthropic Claude, DeepSeek
-- Inception Labs (Mercury) is intentionally excluded — it is server-only
-- `llmClient.callLlm(provider, model, prompt, apiKey)` dispatches by call style:
-  `google` (@google/genai SDK), `openai-chat` (OpenAI + DeepSeek `/chat/completions`),
-  `anthropic` (`/v1/messages` with the browser-access header)
-- Every provider's `apiHost` is mirrored in the CSP `connect-src` in `security-headers.conf`
-- The user picks provider + model in the sidebar; each provider keeps its own stored key
+- `PROVIDERS` registry: Google (default, free tier), OpenAI, Anthropic, DeepSeek. (Inception /
+  Mercury is intentionally excluded — server-only.)
+- `callLlm(provider, model, prompt, apiKey)` dispatches by call style: `google`
+  (`@google/genai` SDK), `openai-chat` (OpenAI + DeepSeek `/chat/completions`), `anthropic`
+  (`/v1/messages` with the browser-access header; reads the first `text` content block).
+- **Balanced thinking:** every thinking-capable model runs at a balanced reasoning effort —
+  Gemini 2.5 `thinkingBudget: -1`, Gemini 3 `thinkingLevel: "low"`, OpenAI/DeepSeek
+  `reasoning_effort: "medium"`, Anthropic `thinking { budget_tokens }`. Capability is declared
+  per model via `LlmModelOption.reasoning` (`ReasoningCapability` in `types.ts`).
+- Every provider's `apiHost` is mirrored in the CSP `connect-src` in `security-headers.conf`.
 
-### API Key Management
+### API key management
+Per-provider, user-supplied, encrypted in the browser (`utils/keyEncryption.ts`):
+- AES-256-GCM, device-fingerprint + PBKDF2 (100,000 iterations); per-device random salt.
+- `sessionStorage` by default; `localStorage` when "Remember on this device" is ticked
+  (toggling migrates the key and clears the other store — exactly one copy ever exists).
+- Namespaced `rl_encrypted_api_key_<provider>`. `ApiKeyPanel` shows `● READY` / `○ KEY REQUIRED`
+  and a Clear button. AI Studio's key picker is offered when running in that environment.
 
-Users provide their own API key (for the selected provider) via the sidebar UI:
-- Keys are encrypted using AES-256-GCM before being stored in the browser
-- By default the encrypted key lives in `sessionStorage` (cleared when the tab closes)
-- A "Remember on this device" checkbox opts in to `localStorage`; toggling migrates the
-  key to the chosen store and clears the other (exactly one copy ever exists)
-- Encryption uses device fingerprint + PBKDF2 key derivation (100,000 iterations)
-- Status indicator shows "READY" (green) when key is set, "KEY REQUIRED" (yellow) otherwise
-- "Clear" button allows users to remove the stored encrypted key from both stores
-- AI Studio platform integration available if running in Google's AI Studio environment
+### Rate limiting (`utils/apiHelpers.ts`)
+Gemini free-tier budget, checked before every call:
+- **5 RPM** (`aiRateLimiter`) and **20 RPD** (`dailyLimiter`, `localStorage`-persisted, resets
+  at midnight ISO date).
 
-**Encryption Implementation** (`utils/keyEncryption.ts`):
-- `encryptApiKey()` / `decryptApiKey()` - AES-GCM encryption
-- `saveEncryptedKey(provider, key, remember)` - session-only by default, `localStorage` when `remember`
-- `loadEncryptedKey(provider)` - reads the session copy first, then any remembered copy
-- `isKeyRemembered(provider)` - whether the provider's key is persisted across sessions
-- Storage is namespaced per provider (`rl_encrypted_api_key_<provider>`)
-- Device fingerprint derived from browser/hardware properties
-- Salt stored separately and randomly generated per device
-
-### Rate Limiting
-
-Gemini 2.5 Flash free tier limits (enforced in `utils/apiHelpers.ts`):
-- **5 RPM** (requests per minute) - `aiRateLimiter`
-- **20 RPD** (requests per day) - `dailyLimiter` with localStorage persistence
-- Daily limit resets at midnight (based on ISO date)
-- Both limits are checked before each API call
-
-### Data Flow for AI Tutoring
-
-**Chat Interface Features:**
-- Clear button (trash icon) to reset conversation (only visible when chat history exists)
-- Auto-scroll disabled - user's page position is preserved
-- Max height of 600px with internal scrolling
-- Shows "Thinking..." indicator during API calls
-
-**Question Flow:**
-1. `App.tsx` collects context: current module, hyperparameters, recent metrics
-2. Calls `askAITutor(question, contextParams)` with lab-specific state
-3. `geminiService.generateExplanation()` receives combined context
-4. Response added to `chatHistory` and displayed in tutor component
-
-### Type System Highlights
-
-**SimulationUpdate** - Core type for live mathematical analysis:
+### Type system highlights
+**SimulationUpdate** — the live-math payload rendered in the Math tab + ticker:
 ```typescript
 {
-  algorithm: string;          // e.g., "Q-Learning"
-  stepDescription: string;    // Human-readable step
-  formula: string;            // LaTeX-style formula
-  variables: Record<string, number | string>;  // Variable values
-  result: string;             // Outcome
-  mathDetails?: {             // Optional deeper analysis
-    params: MathDetail[];
-    implication: string;
-  };
+  algorithm: string;          // e.g. "Q-Learning"
+  stepDescription: string;
+  formula: string;            // e.g. "Q(s,a) += α[R + γ max Q(s') - Q]"
+  variables: Record<string, number | string>;
+  result: string;
+  mathDetails?: { params: MathDetail[]; implication: string };
 }
 ```
+Also: `LlmProviderConfig` / `LlmModelOption` (+ `ReasoningCapability`) describe each provider and
+its thinking capability; `HyperParameters` (α, γ, ε, epsilonDecay, episodes) is the tutor-context
+shape.
 
-**HyperParameters** - Shared across all modules:
-- `alpha` (Learning Rate) - Step size for value updates
-- `gamma` (Discount Factor) - Future reward importance
-- `epsilon` (Exploration Rate) - Probability of random action
-- `epsilonDecay` - Multiplicative decay rate per episode
-- `episodes` - Total training episodes
+## Code patterns
 
-### AI Studio Integration
+### Epsilon decay
+Multiplicative per episode: `epsilon = max(0.01, epsilon * epsilonDecay)` (value-based labs).
 
-The app includes special integration with AI Studio (Google's platform):
-- `window.aistudio.hasSelectedApiKey()` - Check if platform key exists
-- `window.aistudio.openSelectKey()` - Trigger key selection dialog
-- Falls back to manual key input if not running in AI Studio
+### Q-table representation
+- Grid-world labs key the Q-table by **numeric state index** → `[up, right, down, left]`,
+  created lazily on first visit.
+- MARL keys by **joint state**: `"${posA},${posB}"` (or `"${posA}"` in single-agent mode).
 
-### Constants and Configuration
+### Policy-gradient updates (Model Types lab)
+REINFORCE and Actor-Critic update preferences along the true softmax score function
+`∇ln π(a|s) = 1{k=a} − π(k|s)` over all action preferences — matching both the on-screen formula
+and the exported Python. `getPolicyProbs` uses a numerically-stable softmax (`exp(p − max)`).
 
-**Default Hyperparameters** (`constants.ts`):
-- Alpha: 0.1, Gamma: 0.9, Epsilon: 1.0 (full exploration initially)
-- Epsilon Decay: 0.995 (gradual reduction)
-- Episodes: 100
+### Metric windowing
+`metrics` is capped at 50 entries (`App.tsx`).
 
-**Module Content** - Each module has associated:
-- Title, description, key concepts
-- Category-specific lifecycle insights (Methodology, Verification, Ethics, etc.)
-- Educational explanations for common questions
+### Module switching
+On `activeModule` change, `App.tsx` clears `liveUpdate` and `metrics` to prevent cross-module
+pollution. (The active lab component unmounts/remounts, so its sim state and the instrument
+tab reset naturally.)
 
-## Code Patterns
+## Important implementation details
 
-### Epsilon Decay Implementation
-All simulations use multiplicative epsilon decay:
-```
-current_epsilon = max(0.01, initial_epsilon * (decay_rate ^ episode_count))
-```
+### API key handling
+- Users provide their own key per provider; all AI service functions require an `apiKey` arg.
+- No server-side or build-time keys — requests go browser → provider directly.
 
-### Q-Table Management
-- Keys are position strings: `"x,y"`
-- Values are 4-element arrays: `[up, right, down, left]`
-- Initialized lazily (created on first visit to state)
+### Component communication
+- Labs build `StageLayout` slots and pass their `currentParams` to the docked tutor.
+- `App.tsx` receives metrics via `onUpdateMetrics(metric: TrainingMetrics)` and the live update
+  via `onLogUpdate(update)`.
 
-### Metric Windowing
-Metrics arrays are capped at 50 entries:
-```typescript
-if (newMetrics.length > 50) return newMetrics.slice(newMetrics.length - 50);
-```
+### Vite configuration
+- Path alias `@` → project root; dev server on `0.0.0.0:2100`.
 
-### Module Switching Behavior
-When switching modules (`activeModule` changes):
-- Lifecycle tab resets to 'CONCEPT'
-- Live updates cleared (`setLiveUpdate(null)`)
-- Metrics cleared to prevent cross-module pollution
+### Styling
+- Design tokens, fonts (Space Grotesk / IBM Plex via Google Fonts), and themed range
+  inputs/scrollbars live in `index.css`. Stage components are inline-styled with CSS variables;
+  Tailwind remains for the base layer + `ErrorBoundary`. The CSP in `security-headers.conf`
+  allows the provider hosts plus `fonts.googleapis.com` / `fonts.gstatic.com`.
 
-## Important Implementation Details
-
-### API Key Handling
-- Users provide their own API key via the UI (`manualKey` state)
-- All AI service functions require `apiKey` parameter
-- No server-side or build-time API keys - fully client-side
-
-### Component Communication
-- Labs pass `contextParams` (their own state) to AI tutor
-- Parent `App.tsx` receives metrics via callback: `onUpdateMetrics(metric: TrainingMetrics)`
-- Live updates are set imperatively: `setLiveUpdate(update)`
-- Simulation status controlled via `SimulationStatus` enum
-
-### Vite Configuration
-- Path alias: `@` → project root
-- Dev server runs on `0.0.0.0:2100` for network accessibility
-
-## Development Notes
-
-- Each Interactive Lab in `TheoryLabs.tsx` is ~250-350 lines and self-contained
-- Labs share helper functions at top of file: `downloadPython()`, grid constants
-- TypeScript strict mode enabled (`tsconfig.json`)
-- No testing framework currently configured
-- No linting configuration present
+## Development notes
+- Each lab in `TheoryLabs.tsx` is self-contained; shared helpers (`downloadPython`, grid
+  constants, `subtitleFor`, params wrappers) sit at the top of the file.
+- TypeScript strict mode is enabled. `npm run build` is esbuild-only, so type-only errors
+  (unused locals, etc.) won't fail the build — but syntax errors will.
+- No testing or linting framework is configured yet.
+- Removed in the redesign: the old `GridWorld.tsx` and `LifecyclePanel.tsx` components and the
+  `recharts` dependency.
