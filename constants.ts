@@ -40,6 +40,12 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         recommendation: 'Use Value methods for discrete games. Use Policy methods for continuous physical control.',
     },
     {
+        category: 'METHODOLOGY',
+        title: 'Modern Model-Based RL: World Models',
+        description: 'Dyna-Q\'s "dreaming" scales up in modern deep RL. World-model agents (Dreamer V3) learn a compact latent simulator and train almost entirely inside it, while MuZero learns a model and plans with Monte-Carlo Tree Search — the same planning idea this lab shows, at Atari and continuous-control scale.',
+        recommendation: 'When real interaction is expensive or unsafe, reach for a learned world model (Dreamer) or latent-planning agent (MuZero) over model-free methods — the sample-efficiency win Dyna-Q demonstrates here.',
+    },
+    {
         category: 'VERIFICATION',
         title: 'Verifying Learned Models',
         description: 'In Model-Based RL, the agent relies on its internal model. You must verify that this internal model accurately reflects the laws of physics or environment rules.',
@@ -140,6 +146,12 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         recommendation: 'Visualize the "Feature Activations" to understand what the network is actually seeing.',
     },
     {
+        category: 'METHODOLOGY',
+        title: 'Beyond DQN: Offline RL & Decision Transformers',
+        description: 'DQN (this lab\'s deep mode) learns online by chasing a moving target. Two modern variants relax that: offline RL (CQL, IQL) learns a strong policy from a fixed, pre-collected dataset with no new exploration, and Decision Transformers reframe RL as sequence modeling — predict the next action conditioned on a desired return-to-go.',
+        recommendation: 'If you have logged data but can\'t safely explore (clinical, industrial, or recommender logs), use offline RL or a Decision Transformer instead of online DQN to avoid unsafe trial-and-error.',
+    },
+    {
         category: 'VERIFICATION',
         title: 'The Black Box Problem',
         description: 'Tabular policies are readable (you can inspect Q[s]). Deep policies are opaque matrices of weights. It is extremely difficult to formally verify a Neural Network.',
@@ -194,6 +206,12 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
           title: 'Regret Minimization',
           description: 'The goal of bandits is to minimize "Regret"—the difference between the total reward you actually got and the reward you WOULD have gotten if you knew the best arm from the start.',
           recommendation: 'UCB (Upper Confidence Bound) algorithms mathematically guarantee logarithmic regret bounds.',
+      },
+      {
+          category: 'METHODOLOGY',
+          title: 'Bandits in the LLM Era (RLHF)',
+          description: 'The explore/exploit tradeoff now sits under modern AI alignment. RLHF and preference optimization (PPO, DPO) explore candidate responses and then exploit a learned reward model — essentially a contextual/dueling bandit over text. Recommender and ad systems likewise run contextual bandits that condition each pull on user features.',
+          recommendation: 'Treat preference collection as exploration: sample diverse responses before committing to the reward model\'s favorite, or the policy mode-collapses onto a narrow style — the same "stuck on one arm" failure Greedy shows here.',
       },
       {
           category: 'VERIFICATION',

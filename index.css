@@ -1,22 +1,123 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Custom scrollbar for dark theme */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* ────────────────────────────────────────────────────────────
+   Cinematic Stage design tokens (ported from design/lib).
+   Used across the redesigned App shell, StageLayout and labs.
+   ──────────────────────────────────────────────────────────── */
+:root {
+  --bg0: #080b14;
+  --bg1: #0d1220;
+  --bg2: #131a2c;
+  --bg3: #1a2238;
+  --border: #232c45;
+  --t0: #eef1fa;
+  --t1: #aab2cc;
+  --t2: #6b7494;
+  --acc: #a855f7;
+  --good: #34d399;
+  --bad: #f87171;
+  --warn: #fbbf24;
+  --disp: 'Space Grotesk', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --body: 'IBM Plex Sans', system-ui, sans-serif;
 }
 
-::-webkit-scrollbar-track {
-  background: #1f2937;
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
 }
 
-::-webkit-scrollbar-thumb {
-  background: #4b5563;
-  border-radius: 4px;
+body {
+  font-family: var(--body);
+  background: var(--bg0);
+  color: var(--t0);
+  overflow: hidden;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+#root {
+  height: 100%;
 }
+
+.scope sub { font-size: .7em; }
+
+/* status LED pulse */
+@keyframes ledPulse {
+  0%   { transform: scale(1);   opacity: .6; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+.led-pulse { animation: ledPulse 1.6s ease-out infinite; }
+
+/* agent ping / planning flash */
+@keyframes stageFade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.stage-fade { animation: stageFade .3s ease both; }
+
+/* icon-nav tooltips */
+.sb-navitem .sb-tip {
+  position: absolute;
+  left: 52px;
+  white-space: nowrap;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--t0);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-4px);
+  transition: all .14s ease;
+  z-index: 30;
+  box-shadow: 0 6px 18px -6px rgba(0, 0, 0, .6);
+}
+.sb-navitem:hover .sb-tip { opacity: 1; transform: translateX(0); }
+
+.sb-btn { transition: filter .15s ease, transform .1s ease; }
+.sb-btn:hover { filter: brightness(1.15); }
+.sb-btn:active { transform: translateY(1px); }
+.sb-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+/* range sliders in the cinematic theme */
+input[type="range"].stage-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 3px;
+  background: var(--bg3);
+  cursor: pointer;
+  outline: none;
+}
+input[type="range"].stage-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg1);
+  border: 2px solid var(--acc);
+  box-shadow: 0 0 8px -1px var(--acc);
+}
+input[type="range"].stage-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bg1);
+  border: 2px solid var(--acc);
+  box-shadow: 0 0 8px -1px var(--acc);
+}
+
+/* scrollbars */
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: #2a3350; border-radius: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: #2a3350; border-radius: 6px; }

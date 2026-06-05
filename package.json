@@ -12,7 +12,6 @@
     "react": "^19.2.1",
     "@google/genai": "^1.31.0",
     "react-dom": "^19.2.1",
-    "recharts": "^3.5.1",
     "lucide-react": "^0.556.0"
   },
   "devDependencies": {

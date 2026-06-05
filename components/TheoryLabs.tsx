@@ -1,12 +1,26 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  Map, Navigation, Target, Activity, Zap,
-  BarChart2, Users, Layers, Shield, AlertTriangle,
-  Play, Pause, RotateCcw, FastForward, Settings, Sliders, ChevronRight, Info, BookOpen, Shuffle,
-  Wind, Thermometer, Brain, Database, Network, TrendingUp, HelpCircle, MessageSquare, FileCode, Trash2
-} from 'lucide-react';
-import { SimulationUpdate, TrainingMetrics, AITutorProps } from '../types';
+import { ModuleId, SimulationUpdate, TrainingMetrics, AITutorProps } from '../types';
+import { MODULE_CONTENT } from '../constants';
+import StageLayout from './stage/StageLayout';
+import StageGrid, { CellSpec } from './stage/StageGrid';
+import { AlgoPill, ParamSlider, RunControls, Legend, MonoLabel, ACC, GOOD, BAD } from './stage/primitives';
+
+const subtitleFor = (m: ModuleId) => ((MODULE_CONTENT as any)[m]?.title as string) || '';
+const lastReward = (metrics?: TrainingMetrics[]) =>
+  metrics && metrics.length ? metrics[metrics.length - 1].reward.toFixed(2) : '—';
+const rewardSeries = (metrics?: TrainingMetrics[]) => (metrics || []).map((m) => m.reward);
+
+// Parameters-tab heading + wrapper shared across labs.
+const ParamsHead: React.FC<{ title: string; hint: string }> = ({ title, hint }) => (
+  <div style={{ marginBottom: 22 }}>
+    <h3 style={{ fontFamily: 'var(--disp)', fontSize: 17, color: 'var(--t0)', margin: '0 0 4px' }}>{title}</h3>
+    <p style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', margin: 0, letterSpacing: '.03em' }}>{hint}</p>
+  </div>
+);
+const ParamsWrap: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>{children}</div>
+);
 
 // --- SHARED HELPER TYPES/CONSTANTS ---
 const GRID_W = 8;
@@ -34,167 +48,9 @@ const downloadPython = (filename: string, content: string) => {
 
 // --- SHARED COMPONENTS ---
 
-const PythonLogo = ({ size = 16 }: { size?: number }) => (
-    <svg width={size} height={size} viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
-        <path fill="#306998" d="M126.916.072c-64.832 0-60.784 28.115-60.784 28.115l.072 29.128h61.868v8.745H41.631S.113 62.246.113 126.91c0 64.656 36.41 63.097 36.41 63.097h21.606v-30.347c0-26.777 22.95-27.464 22.95-27.464h36.004c27.143 0 27.21-25.756 27.21-25.756V67.883c0-26.6-24.965-27.05-24.965-27.05h-15.707v22.256h22.256v15.707H90.875V15.707h16.273v21.53h22.256V.072h-2.488z"/>
-        <path fill="#FFD43B" d="M128.757 254.126c64.832 0 60.784-28.115 60.784-28.115l-.072-29.127H127.6v-8.745h86.441s41.518 3.812 41.518-60.85c0-64.656-36.41-63.097-36.41-63.097h-21.606v30.347c0 26.777-22.95 27.464-22.95 27.464h-36.004c-27.143 0-27.21 25.756-27.21 25.756v38.558c0 26.6 24.965 27.05 24.965 27.05h15.707v-22.256h-22.256v-15.707h35.803v63.086h-16.273v-21.53h-22.256v21.53h2.488z"/>
-        <circle cx="92.148" cy="27.458" r="11.834" fill="#fff"/>
-        <circle cx="163.785" cy="227.411" r="11.834" fill="#fff"/>
-    </svg>
-);
 
-const LiveMathOverlay: React.FC<{ update: SimulationUpdate | null }> = ({ update }) => {
-  if (!update) return (
-      <div className="bg-gray-900/50 border border-gray-800 p-6 rounded-xl text-center text-gray-500 text-sm font-mono min-h-[160px] flex flex-col items-center justify-center animate-in fade-in">
-        <Activity className="mb-2 opacity-20" size={32} />
-        <span className="font-bold mb-1">Live Math Analysis</span>
-        <span className="text-xs opacity-50">Press Play to see real-time mathematical breakdown</span>
-      </div>
-  );
-
-  return (
-    <div className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden shadow-lg flex flex-col md:flex-row animate-in fade-in duration-300">
-       {/* Left Column: Equation & State */}
-       <div className="flex-1 p-4 border-b md:border-b-0 md:border-r border-gray-800 bg-gray-900/50">
-          <div className="flex justify-between items-start mb-3">
-             <div className="flex flex-col">
-                <span className="text-xs font-bold text-blue-400 uppercase tracking-wider mb-1">{update.algorithm}</span>
-                <span className="text-sm text-gray-200 font-medium">{update.stepDescription}</span>
-             </div>
-             <span className="px-2 py-1 rounded bg-gray-800 border border-gray-700 text-xs font-mono text-green-400 font-bold whitespace-nowrap">
-                {update.result}
-             </span>
-          </div>
-          
-          <div className="bg-gray-950 rounded-lg p-3 border border-gray-800 mb-3 shadow-inner">
-             <div className="text-yellow-100 font-mono text-xs md:text-sm mb-3 text-center py-1 border-b border-gray-800/50 pb-2 break-all">
-                {update.formula}
-             </div>
-             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                {Object.entries(update.variables).map(([k,v]) => (
-                    <div key={k} className="flex justify-between items-center text-xs group">
-                        <span className="text-gray-500 group-hover:text-gray-300 transition-colors font-mono mr-2">{k}</span>
-                        <span className="text-blue-300 font-mono font-bold truncate">{typeof v === 'number' ? v.toFixed(3) : v}</span>
-                    </div>
-                ))}
-             </div>
-          </div>
-       </div>
-
-       {/* Right Column: Detailed Analysis */}
-       <div className="flex-[1.3] p-4 bg-gray-800/30 flex flex-col justify-center">
-            {update.mathDetails ? (
-                <div className="space-y-3">
-                    <div className="flex items-center gap-2 mb-1">
-                        <div className="p-1 bg-blue-500/10 rounded">
-                            <Info size={14} className="text-blue-400" />
-                        </div>
-                        <span className="text-xs font-bold text-gray-300 uppercase tracking-wide">Parameter Influence & Analysis</span>
-                    </div>
-                    
-                    <div className="space-y-2 pl-1">
-                        {update.mathDetails.params.map((p, i) => (
-                            <div key={i} className="text-xs grid grid-cols-[110px_1fr] gap-2 items-baseline">
-                                <span className="font-bold text-blue-300 text-right">{p.label}:</span>
-                                <span className="text-gray-400 leading-relaxed">{p.info}</span>
-                            </div>
-                        ))}
-                    </div>
-
-                    <div className="mt-3 pt-3 border-t border-gray-700/50">
-                        <div className="flex items-start gap-2 bg-blue-900/10 p-2.5 rounded border-l-2 border-blue-500/50">
-                             <TrendingUp size={14} className="text-blue-400 mt-0.5 flex-shrink-0" />
-                             <div className="text-xs text-blue-200 leading-relaxed">
-                                 <span className="font-bold text-blue-100 block mb-0.5 uppercase text-[10px] tracking-wider">Implication</span>
-                                 {update.mathDetails.implication}
-                             </div>
-                        </div>
-                    </div>
-                </div>
-            ) : (
-                <div className="text-center text-gray-500 text-xs">No detailed analysis available for this step.</div>
-            )}
-       </div>
-    </div>
-  );
-};
 
 // --- SHARED: AI TUTOR PANEL ---
-const AITutorPanel: React.FC<AITutorProps & { currentParams: any }> = ({ chatHistory, onAsk, onClear, isThinking, currentParams }) => {
-    const [question, setQuestion] = useState("");
-    const chatEndRef = useRef<HTMLDivElement>(null);
-
-    const handleSend = () => {
-        const q = question.trim();
-        if (!q) return;
-        onAsk(q, currentParams);
-        setQuestion("");
-    };
-
-    return (
-        <div className="flex flex-col h-full max-h-[600px] bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden shadow-inner">
-            <div className="flex items-center justify-between p-3 border-b border-gray-700 bg-gray-900/30 flex-shrink-0">
-                <div className="flex items-center gap-2">
-                    <Brain size={14} className="text-blue-400" />
-                    <span className="text-xs font-bold text-gray-300">AI Tutor</span>
-                </div>
-                {chatHistory.length > 0 && (
-                    <button
-                        onClick={onClear}
-                        className="text-gray-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-gray-800/50"
-                        title="Clear conversation"
-                    >
-                        <Trash2 size={12} />
-                    </button>
-                )}
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar min-h-0">
-                {chatHistory.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-600 space-y-2 opacity-50">
-                        <Brain size={24} />
-                        <p className="text-[10px] text-center max-w-[150px]">
-                            Ask me about the current simulation settings and results!
-                        </p>
-                    </div>
-                ) : (
-                    chatHistory.map((msg, idx) => (
-                        <div key={idx} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`
-                                rounded-lg p-2 text-[11px] max-w-[90%] leading-relaxed
-                                ${msg.role === 'user' 
-                                    ? 'bg-blue-600 text-white' 
-                                    : 'bg-gray-800 text-gray-300 border border-gray-700'}
-                            `}>
-                                {msg.content}
-                            </div>
-                        </div>
-                    ))
-                )}
-                {isThinking && <div className="text-[10px] text-gray-500 animate-pulse pl-1">Thinking...</div>}
-                <div ref={chatEndRef} />
-            </div>
-
-            <div className="p-2 border-t border-gray-700 bg-gray-900/30 flex gap-2 flex-shrink-0">
-                <input
-                    className="flex-1 bg-gray-900 border border-gray-700 rounded p-1.5 text-[11px] text-gray-300 focus:border-blue-500 focus:outline-none placeholder-gray-600"
-                    placeholder="Ask about Alpha, Gamma..."
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                    disabled={isThinking}
-                />
-                <button 
-                    onClick={handleSend} 
-                    disabled={isThinking}
-                    className="bg-blue-600 hover:bg-blue-500 text-white px-2 rounded flex items-center justify-center disabled:opacity-50"
-                >
-                    <MessageSquare size={14} />
-                </button>
-            </div>
-        </div>
-    );
-};
 
 
 // --- HELPER: PATHFINDING (BFS) ---
@@ -231,10 +87,14 @@ interface LabProps {
     onUpdateMetrics?: (metric: TrainingMetrics) => void;
     onClearMetrics?: () => void;
     aiTutor?: AITutorProps;
+    metrics?: TrainingMetrics[];
+    activeModule: ModuleId;
+    onSelectModule: (m: ModuleId) => void;
+    apiPanel?: React.ReactNode;
 }
 
 // --- 1. Model-Free vs Model-Based (Universal RL Lab) ---
-export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
+export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
   // --- Environment State ---
   const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
   const [startPos] = useState(START_DEFAULT);
@@ -281,9 +141,13 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
   const getPrefs = (s: number) => policyPrefs[s] || [0,0,0,0];
   const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
 
+  // Numerically-stable softmax (subtract the max before exp) so large policy
+  // preferences can't overflow to Infinity/NaN — matches the Python export's
+  // np.exp(x - np.max(x)).
   const getPolicyProbs = (s: number) => {
     const prefs = getPrefs(s);
-    const exps = prefs.map(p => Math.exp(p));
+    const mx = Math.max(...prefs);
+    const exps = prefs.map(p => Math.exp(p - mx));
     const sum = exps.reduce((a,b) => a+b, 0) || 1;
     return exps.map(e => e/sum);
   };
@@ -784,7 +648,14 @@ for episode in range(200):
         newVTable[currPos] = vCurr + alpha * tdError;
         
         if (!newPolicyPrefs[currPos]) newPolicyPrefs[currPos] = [0,0,0,0];
-        newPolicyPrefs[currPos][action] += alpha * tdError;
+        // Actor update along the true softmax score function:
+        //   ∇ln π(a|s) = 1{k=a} − π(k|s)   (per action preference k)
+        // This matches the policy-gradient theorem and the exported Python,
+        // rather than nudging only the chosen action's preference.
+        const acProbs = getPolicyProbs(currPos);
+        for (let k = 0; k < 4; k++) {
+            newPolicyPrefs[currPos][k] += alpha * tdError * ((k === action ? 1 : 0) - acProbs[k]);
+        }
 
         if (onLogUpdate && Math.random() < 0.3) {
             const log = {
@@ -869,7 +740,17 @@ for episode in range(200):
                 G = gamma * G + finalHist[i].r;
                 const { s, a } = finalHist[i];
                 if (!updatedPrefs[s]) updatedPrefs[s] = [0,0,0,0];
-                updatedPrefs[s][a] += alpha * G * 0.1; 
+                // ∇ln π(a|s) for a softmax policy = 1{k=a} − π(k|s). This is the
+                // real REINFORCE update (and exactly what the exported Python
+                // does) — no arbitrary 0.1 damping factor.
+                const prefs = updatedPrefs[s];
+                const mx = Math.max(...prefs);
+                const exps = prefs.map(p => Math.exp(p - mx));
+                const Z = exps.reduce((x, y) => x + y, 0) || 1;
+                const probs = exps.map(e => e / Z);
+                for (let k = 0; k < 4; k++) {
+                    updatedPrefs[s][k] += alpha * G * ((k === a ? 1 : 0) - probs[k]);
+                }
              }
              setPolicyPrefs(updatedPrefs);
              setHistory([]);
@@ -935,146 +816,97 @@ for episode in range(200):
     return text;
   };
 
+  const cellSpec = (idx: number): CellSpec => {
+    const isWall = obstacles.includes(idx);
+    if (isWall) return { wall: true };
+    const isGoal = idx === goalPos;
+    const isAgent = agentPos === idx;
+    const agentColor = subAlgo === 'reinforce' ? GOOD : subAlgo === 'ac' ? '#fb923c' : '#fff';
+    if (isGoal) return { goal: true, agent: isAgent, agentColor };
+
+    let heat = 0;
+    let label: string | undefined;
+    if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
+      const mq = getMaxQ(idx);
+      heat = mq > 0 ? Math.min(mq / 20, 1) : mq < 0 ? -Math.min(Math.abs(mq) / 20, 1) : 0;
+      if (Math.abs(mq) > 0.05) label = mq.toFixed(1);
+    } else if (subAlgo === 'ac') {
+      const v = getV(idx);
+      heat = v > 0 ? Math.min(v / 20, 1) : v < 0 ? -Math.min(Math.abs(v) / 20, 1) : 0;
+      if (Math.abs(v) > 0.05) label = v.toFixed(1);
+    }
+
+    let arrows: { rot: number; op: number }[] | undefined;
+    if (subAlgo === 'reinforce' || subAlgo === 'ac') {
+      const probs = getPolicyProbs(idx);
+      const maxP = Math.max(...probs);
+      const bestA = probs.indexOf(maxP);
+      if (maxP > 0.3) arrows = [{ rot: [0, 90, 180, 270][bestA], op: maxP - 0.2 }];
+    }
+    return { heat, label, arrows, planned: plannedCells.includes(idx), agent: isAgent, agentColor };
+  };
+
+  const valueBased = algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa';
+
   return (
-    <div className="flex flex-col gap-4 w-full">
-      <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-col gap-2">
-                <div className="flex bg-gray-800 rounded p-1 self-start">
-                    <button onClick={() => { setAlgoMode('free'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${algoMode === 'free' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Model-Free</button>
-                    <button onClick={() => { setAlgoMode('based'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${algoMode === 'based' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Model-Based (Dyna)</button>
-                </div>
-                {algoMode === 'free' && (
-                    <div className="flex bg-gray-800/50 rounded p-1 gap-1">
-                        <button onClick={() => { setSubAlgo('q'); resetSim(true); }} className={`px-2 py-1 rounded text-[10px] font-bold ${subAlgo === 'q' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}>Q-Learning</button>
-                        <button onClick={() => { setSubAlgo('sarsa'); resetSim(true); }} className={`px-2 py-1 rounded text-[10px] font-bold ${subAlgo === 'sarsa' ? 'bg-blue-500 text-white' : 'text-gray-500'}`}>SARSA</button>
-                        <button onClick={() => { setSubAlgo('reinforce'); resetSim(true); }} className={`px-2 py-1 rounded text-[10px] font-bold ${subAlgo === 'reinforce' ? 'bg-green-500 text-white' : 'text-gray-500'}`}>REINFORCE</button>
-                        <button onClick={() => { setSubAlgo('ac'); resetSim(true); }} className={`px-2 py-1 rounded text-[10px] font-bold ${subAlgo === 'ac' ? 'bg-orange-500 text-white' : 'text-gray-500'}`}>Actor-Critic</button>
-                    </div>
-                )}
-            </div>
-            <div className="flex items-center gap-2">
-                <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
-                    <Shuffle size={14} /> New Map
-                </button>
-                <div className="h-6 w-px bg-gray-700 mx-2"></div>
-                <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
-                    {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                </button>
-                <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
-            </div>
+    <StageLayout
+      activeModule={activeModule}
+      onSelectModule={onSelectModule}
+      labNumber={1}
+      moduleSubtitle={subtitleFor(activeModule)}
+      telemetry={{ episode, reward: lastReward(metrics), epsilon: valueBased ? epsilon.toFixed(3) : undefined, steps, running: isPlaying }}
+      codeFile="model_free.py"
+      onDownloadCode={handleDownload}
+      grid={<StageGrid cols={GRID_W} rows={GRID_H} cell={54} gap={8} spec={cellSpec} />}
+      algoDock={(
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Architecture</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 16 }}>
+            <AlgoPill active={algoMode === 'free'} onClick={() => { setAlgoMode('free'); resetSim(true); }}>Model-Free</AlgoPill>
+            <AlgoPill active={algoMode === 'based'} dim={algoMode !== 'based'} onClick={() => { setAlgoMode('based'); resetSim(true); }}>Model-Based · Dyna</AlgoPill>
           </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-9 flex flex-col gap-4">
-              <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
-                {/* DOWNLOAD CODE BUTTON */}
-                <button 
-                    onClick={handleDownload}
-                    className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
-                >
-                    <PythonLogo size={14} />
-                    <span>Python</span>
-                </button>
-                
-                {/* GRID MAP */}
-                <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
-                    {Array.from({ length: N_STATES }).map((_, idx) => {
-                    const isAgent = agentPos === idx;
-                    const isGoal = idx === goalPos;
-                    const isObstacle = obstacles.includes(idx);
-                    const isPlanned = plannedCells.includes(idx);
-                    let bgColor = 'rgba(31, 41, 55, 0.5)';
-                    let arrowRotate = 0;
-                    let arrowOpacity = 0;
-
-                    if (!isObstacle && !isGoal) {
-                        if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
-                            const qs = getQ(idx);
-                            const maxQ = Math.max(...qs);
-                            const intensity = Math.min(Math.abs(maxQ) / 20, 1);
-                            if (maxQ > 0) bgColor = `rgba(16, 185, 129, ${0.1 + intensity * 0.9})`; 
-                            else if (maxQ < 0) bgColor = `rgba(239, 68, 68, ${0.1 + intensity * 0.5})`; 
-                        } else if (subAlgo === 'ac') {
-                            const v = getV(idx);
-                            const intensity = Math.min(Math.abs(v) / 20, 1);
-                            if (v > 0) bgColor = `rgba(249, 115, 22, ${0.1 + intensity * 0.9})`; 
-                        }
-                        if (subAlgo === 'reinforce' || subAlgo === 'ac') {
-                            const probs = getPolicyProbs(idx);
-                            const maxP = Math.max(...probs);
-                            const bestA = probs.indexOf(maxP);
-                            arrowRotate = bestA === 0 ? 0 : bestA === 1 ? 90 : bestA === 2 ? 180 : 270;
-                            arrowOpacity = maxP > 0.3 ? (maxP - 0.2) : 0;
-                        }
-                    }
-
-                    return (
-                        <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200 ${isObstacle ? 'bg-gray-900' : ''} ${isGoal ? 'bg-yellow-900/30 ring-1 ring-yellow-500' : ''}`} style={{ backgroundColor: !isObstacle && !isGoal ? bgColor : undefined }}>
-                            {isObstacle && <div className="w-full h-full bg-gray-800 flex items-center justify-center"><div className="w-1/2 h-1/2 bg-gray-600 rounded-sm"/></div>}
-                            {isGoal && <Target size={18} className="text-yellow-400" />}
-                            {isAgent && <div className={`absolute inset-0 flex items-center justify-center z-20`}><div className={`w-4 h-4 md:w-6 md:h-6 rounded-full shadow-lg border-2 border-white animate-pulse ${subAlgo === 'reinforce' ? 'bg-green-500' : subAlgo === 'ac' ? 'bg-orange-500' : 'bg-blue-500'}`} /></div>}
-                            {isPlanned && <div className="absolute inset-0 bg-purple-500/50 animate-ping rounded-sm z-0 pointer-events-none" />}
-                            {arrowOpacity > 0 && !isObstacle && !isGoal && <Navigation size={12} className="text-white absolute z-10" style={{ transform: `rotate(${arrowRotate}deg)`, opacity: arrowOpacity }} />}
-                        </div>
-                    );
-                    })}
-                </div>
-                <div className="absolute top-2 right-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-[10px] space-y-1 z-30">
-                    <div className="font-bold text-gray-400 mb-1">VISUAL LEGEND</div>
-                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500/50 border border-gray-600"></div><span className="text-gray-300">High Value</span></div>
-                    <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500/50 border border-gray-600"></div><span className="text-gray-300">Low Value</span></div>
-                    {(subAlgo === 'reinforce' || subAlgo === 'ac') && <div className="flex items-center gap-2"><Navigation size={10} className="text-white" /><span className="text-gray-300">Policy Arrow</span></div>}
-                    {algoMode === 'based' && <div className="flex items-center gap-2"><div className="w-3 h-3 bg-purple-500 animate-pulse rounded-full"></div><span className="text-gray-300">Planning</span></div>}
-                </div>
-              </div>
-              
-              {/* LIVE MATH SECTION - BELOW MAP */}
-              <LiveMathOverlay update={lastLog} />
-              
-              <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
-                  <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
-                  <div><h4 className="text-xs font-bold text-blue-400 mb-1">Algorithm Context</h4><p className="text-[11px] text-gray-400 leading-relaxed font-mono">{getTrainingInsight()}</p></div>
-              </div>
+          <MonoLabel style={{ marginBottom: 11 }}>Algorithm</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={algoMode === 'free' && subAlgo === 'q'} onClick={() => { setAlgoMode('free'); setSubAlgo('q'); resetSim(true); }}>Q-Learning</AlgoPill>
+            <AlgoPill active={algoMode === 'free' && subAlgo === 'sarsa'} onClick={() => { setAlgoMode('free'); setSubAlgo('sarsa'); resetSim(true); }}>SARSA</AlgoPill>
+            <AlgoPill active={algoMode === 'free' && subAlgo === 'reinforce'} onClick={() => { setAlgoMode('free'); setSubAlgo('reinforce'); resetSim(true); }}>REINFORCE</AlgoPill>
+            <AlgoPill active={algoMode === 'free' && subAlgo === 'ac'} onClick={() => { setAlgoMode('free'); setSubAlgo('ac'); resetSim(true); }}>Actor-Critic</AlgoPill>
           </div>
-          <div className="lg:col-span-3 flex flex-col gap-4 h-full">
-              {/* SETTINGS TOP HALF */}
-              <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
-                  <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Training Parameters</div>
-                  <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
-                      <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                      <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                      <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Gamma ({gamma})</span></div><input type="range" min="0.1" max="0.99" step="0.01" value={gamma} onChange={(e) => setGamma(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                      {(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
-                      {(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
-                      {algoMode === 'based' && <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Planning Steps ({planningSteps})</span><Layers size={12} /></div><input type="range" min="0" max="50" step="5" value={planningSteps} onChange={(e) => setPlanningSteps(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>}
-                  </div>
-              </div>
-              
-              {/* AI TUTOR BOTTOM HALF */}
-              {aiTutor && (
-                <div className="flex-1 min-h-[300px]">
-                    <AITutorPanel 
-                        {...aiTutor} 
-                        currentParams={{
-                            alpha, 
-                            gamma, 
-                            epsilon, 
-                            decay: epsilonDecay,
-                            algorithm: algoMode === 'based' ? 'Dyna-Q' : subAlgo.toUpperCase()
-                        }} 
-                    />
-                </div>
-              )}
-          </div>
-      </div>
-    </div>
+        </>
+      )}
+      controls={<RunControls isPlaying={isPlaying} onPlay={() => setIsPlaying(!isPlaying)} onReset={() => resetSim(true)} onNewMap={randomizeEnvironment} />}
+      legend={(
+        <Legend title="STATE VALUE" items={[
+          { color: GOOD, label: 'High' },
+          { color: BAD, label: 'Low' },
+          ...(algoMode === 'based' ? [{ color: ACC, label: 'Planning' }] : []),
+          ...((subAlgo === 'reinforce' || subAlgo === 'ac') ? [{ node: <span style={{ color: '#fff', fontSize: 12 }}>↑</span>, label: 'Policy' }] : []),
+        ]} />
+      )}
+      rewardLabel="AVG REWARD"
+      rewardValue={lastReward(metrics)}
+      rewardSeries={rewardSeries(metrics)}
+      lastLog={lastLog}
+      contextInsight={getTrainingInsight()}
+      params={(
+        <ParamsWrap>
+          <ParamsHead title="Training Parameters" hint="Tune the agent, watch the heatmap respond." />
+          <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
+          <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — how fast Q updates" />
+          <ParamSlider name="Gamma · discount" value={gamma.toFixed(2)} min={0.1} max={0.99} step={0.01} current={gamma} onChange={setGamma} hint="γ — weight on future reward" />
+          {valueBased && <ParamSlider name="Epsilon · explore" value={epsilon.toFixed(3)} min={0} max={1} step={0.05} current={epsilon} onChange={setEpsilon} hint="ε — random action prob." />}
+          {valueBased && <ParamSlider name="Decay" value={epsilonDecay.toFixed(3)} min={0.9} max={1} step={0.001} current={epsilonDecay} onChange={setEpsilonDecay} hint="ε ← ε · decay each episode" />}
+          {algoMode === 'based' && <ParamSlider name="Planning Steps" value={String(planningSteps)} min={0} max={50} step={5} current={planningSteps} onChange={setPlanningSteps} hint="Dyna mental-replay updates / step" />}
+        </ParamsWrap>
+      )}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, decay: epsilonDecay, algorithm: algoMode === 'based' ? 'Dyna-Q' : subAlgo.toUpperCase() } }}
+      apiPanel={apiPanel}
+    />
   );
 };
 
 // --- 2. Deterministic vs Stochastic Lab ---
-export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
+export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
@@ -1404,128 +1236,68 @@ for episode in range(100):
         return text;
     };
 
-    return (
-        <div className="flex flex-col gap-4 w-full">
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-col gap-2">
-                         <div className="flex bg-gray-800 rounded p-1 self-start">
-                            <button onClick={() => { setPolicyType('deterministic'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${policyType === 'deterministic' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Deterministic Policy</button>
-                            <button onClick={() => { setPolicyType('stochastic'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${policyType === 'stochastic' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Stochastic Policy</button>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
-                            <Shuffle size={14} /> New Map
-                        </button>
-                        <div className="h-6 w-px bg-gray-700 mx-2"></div>
-                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
-                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                        </button>
-                        <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
-                    </div>
-                </div>
-            </div>
+  const cellSpec = (idx: number): CellSpec => {
+    if (obstacles.includes(idx)) return { wall: true };
+    const isGoal = idx === goalPos;
+    const isAgent = agentPos === idx;
+    if (isGoal) return { goal: true, agent: isAgent, agentColor: '#fff' };
+    const qs = getQ(idx);
+    const mq = Math.max(...qs);
+    const heat = mq > 0 ? Math.min(mq / 20, 1) : mq < 0 ? -Math.min(Math.abs(mq) / 20, 1) : 0;
+    const { arrows } = getRenderData(idx);
+    return { heat, label: Math.abs(mq) > 0.05 ? mq.toFixed(1) : undefined, arrows, agent: isAgent, agentColor: '#fff' };
+  };
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-9 flex flex-col gap-4">
-                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
-                        
-                        {/* DOWNLOAD CODE BUTTON */}
-                        <button 
-                            onClick={handleDownload}
-                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
-                        >
-                            <PythonLogo size={14} />
-                            <span>Python</span>
-                        </button>
-
-                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
-                             {Array.from({ length: N_STATES }).map((_, idx) => {
-                                const isAgent = agentPos === idx;
-                                const isGoal = idx === goalPos;
-                                const isObstacle = obstacles.includes(idx);
-                                const { bgColor, arrows } = getRenderData(idx);
-
-                                return (
-                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200 ${isObstacle ? 'bg-gray-900' : ''} ${isGoal ? 'bg-yellow-900/30 ring-1 ring-yellow-500' : ''}`} style={{ backgroundColor: !isObstacle && !isGoal ? bgColor : undefined }}>
-                                        {isObstacle && <div className="w-full h-full bg-gray-800 flex items-center justify-center"><div className="w-1/2 h-1/2 bg-gray-600 rounded-sm"/></div>}
-                                        {isGoal && <Target size={18} className="text-yellow-400" />}
-                                        {isAgent && <div className={`absolute inset-0 flex items-center justify-center z-20`}><div className={`w-4 h-4 md:w-6 md:h-6 rounded-full shadow-lg border-2 border-white animate-pulse bg-blue-500`} /></div>}
-                                        {!isObstacle && !isGoal && arrows.map((arrow, i) => (
-                                            <Navigation key={i} size={12} className="text-white absolute z-10" style={{ transform: `rotate(${arrow.rot}deg)`, opacity: arrow.op }} />
-                                        ))}
-                                    </div>
-                                );
-                             })}
-                        </div>
-                        <div className="absolute top-2 right-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-[10px] space-y-1 z-30">
-                            <div className="font-bold text-gray-400 mb-1">LEGEND</div>
-                            <div className="flex items-center gap-2"><Navigation size={10} className="text-white opacity-100" /><span>Deterministic</span></div>
-                            <div className="flex items-center gap-2"><Navigation size={10} className="text-white opacity-40" /><span>Probabilistic</span></div>
-                        </div>
-                     </div>
-                     
-                     <LiveMathOverlay update={lastLog} />
-
-                     <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
-                         <div>
-                             <h4 className="text-xs font-bold text-blue-400 mb-1">Lab Insight</h4>
-                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
-                                {getInsightText()}
-                             </p>
-                         </div>
-                     </div>
-                </div>
-                
-                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
-                     <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
-                         <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Environment & Policy</div>
-                         <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
-                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                             
-                             <div className="pt-2 border-t border-gray-700"></div>
-                             <div className="space-y-1">
-                                 <div className="flex justify-between text-xs text-gray-400"><span>Env Slip Chance ({(slipChance * 100).toFixed(0)}%)</span><Wind size={12} /></div>
-                                 <input type="range" min="0" max="0.5" step="0.05" value={slipChance} onChange={(e) => setSlipChance(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
-                                 <p className="text-[10px] text-gray-500">Prob. of moving in random direction</p>
-                             </div>
-
-                             {policyType === 'stochastic' && (
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs text-gray-400"><span>Policy Temp ({temperature})</span><Thermometer size={12} /></div>
-                                    <input type="range" min="0.1" max="5.0" step="0.1" value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
-                                    <p className="text-[10px] text-gray-500">Higher = More random (Softmax)</p>
-                                </div>
-                             )}
-
-                             <div className="pt-2 border-t border-gray-700"></div>
-                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         </div>
-                     </div>
-                     {aiTutor && (
-                        <div className="flex-1 min-h-[300px]">
-                            <AITutorPanel 
-                                {...aiTutor} 
-                                currentParams={{
-                                    alpha, 
-                                    gamma, 
-                                    policyType,
-                                    slipChance,
-                                    temperature
-                                }} 
-                            />
-                        </div>
-                     )}
-                </div>
-            </div>
-        </div>
-    );
+  return (
+    <StageLayout
+      activeModule={activeModule}
+      onSelectModule={onSelectModule}
+      labNumber={2}
+      moduleSubtitle={subtitleFor(activeModule)}
+      telemetry={{ episode, reward: lastReward(metrics), steps, running: isPlaying }}
+      codeFile="policy_types.py"
+      onDownloadCode={handleDownload}
+      grid={<StageGrid cols={GRID_W} rows={GRID_H} cell={54} gap={8} spec={cellSpec} />}
+      algoDock={(
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Policy</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={policyType === 'deterministic'} onClick={() => { setPolicyType('deterministic'); resetSim(true); }}>Deterministic</AlgoPill>
+            <AlgoPill active={policyType === 'stochastic'} onClick={() => { setPolicyType('stochastic'); resetSim(true); }}>Stochastic</AlgoPill>
+          </div>
+        </>
+      )}
+      controls={<RunControls isPlaying={isPlaying} onPlay={() => setIsPlaying(!isPlaying)} onReset={() => resetSim(true)} onNewMap={randomizeEnvironment} />}
+      legend={(
+        <Legend title="POLICY" items={[
+          { color: GOOD, label: 'High Q' },
+          { color: BAD, label: 'Low Q' },
+          { node: <span style={{ color: '#fff', fontSize: 12 }}>↑</span>, label: policyType === 'deterministic' ? 'Greedy' : 'Softmax' },
+        ]} />
+      )}
+      rewardLabel="AVG REWARD"
+      rewardValue={lastReward(metrics)}
+      rewardSeries={rewardSeries(metrics)}
+      lastLog={lastLog}
+      contextInsight={getInsightText()}
+      params={(
+        <ParamsWrap>
+          <ParamsHead title="Environment & Policy" hint="Add noise, see how a rigid policy copes." />
+          <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
+          <ParamSlider name="Env Slip Chance" value={`${(slipChance * 100).toFixed(0)}%`} min={0} max={0.5} step={0.05} current={slipChance} onChange={setSlipChance} hint="prob. the world ignores your action" accent="#60a5fa" />
+          {policyType === 'stochastic' && <ParamSlider name="Policy Temp · τ" value={temperature.toFixed(1)} min={0.1} max={5} step={0.1} current={temperature} onChange={setTemperature} hint="higher = more random (softmax)" />}
+          <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — low alpha averages out slips" />
+          <ParamSlider name="Gamma · discount" value={gamma.toFixed(2)} min={0.1} max={0.99} step={0.01} current={gamma} onChange={setGamma} hint="γ — future reward weight" />
+        </ParamsWrap>
+      )}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, policyType, slipChance, temperature } }}
+      apiPanel={apiPanel}
+    />
+  );
 };
 
 // --- 3. Tabular vs Deep RL Lab ---
-export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
+export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
@@ -1867,128 +1639,72 @@ for episode in range(200):
         return bgColor;
     };
 
-    return (
-        <div className="flex flex-col gap-4 w-full">
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-col gap-2">
-                        <div className="flex bg-gray-800 rounded p-1 self-start">
-                            <button onClick={() => { setMode('tabular'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'tabular' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
-                                <div className="flex items-center gap-2"><Database size={14}/> Tabular (Exact)</div>
-                            </button>
-                            <button onClick={() => { setMode('deep'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'deep' ? 'bg-indigo-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>
-                                <div className="flex items-center gap-2"><Network size={14}/> Deep RL (Approx)</div>
-                            </button>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={randomizeEnvironment} className="flex items-center gap-2 px-3 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 rounded-lg text-xs font-bold transition-colors text-blue-300">
-                            <Shuffle size={14} /> New Map
-                        </button>
-                        <div className="h-6 w-px bg-gray-700 mx-2"></div>
-                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
-                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                        </button>
-                        <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
-                    </div>
-                </div>
-            </div>
+  const cellSpec = (idx: number): CellSpec => {
+    if (obstacles.includes(idx)) return { wall: true };
+    const isGoal = idx === goalPos;
+    const isAgent = agentPos === idx;
+    const agentColor = mode === 'tabular' ? '#fff' : '#818cf8';
+    if (isGoal) return { goal: true, agent: isAgent, agentColor };
+    const qs = getQ(idx);
+    const mq = Math.max(...qs);
+    const heat = mq > 0 ? Math.min(mq / 20, 1) : mq < 0 ? -Math.min(Math.abs(mq) / 20, 1) : 0;
+    return { heat, label: Math.abs(mq) > 0.05 ? mq.toFixed(1) : undefined, agent: isAgent, agentColor };
+  };
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-9 flex flex-col gap-4">
-                    <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
-                        
-                        {/* DOWNLOAD CODE BUTTON */}
-                        <button 
-                            onClick={handleDownload}
-                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
-                        >
-                            <PythonLogo size={14} />
-                            <span>Python</span>
-                        </button>
+  const conceptText = mode === 'tabular'
+    ? 'Tabular RL keeps an exact value per state. Learning about one square tells it nothing about its neighbours — it must visit every cell. Slow, but precise.'
+    : 'Deep RL approximates with a function. Learning about one square bleeds into similar squares, so the map fills in fast — but fine detail can blur (catastrophic forgetting).';
 
-                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${GRID_W}, min-content)` }}>
-                             {Array.from({ length: N_STATES }).map((_, idx) => {
-                                const isAgent = agentPos === idx;
-                                const isGoal = idx === goalPos;
-                                const isObstacle = obstacles.includes(idx);
-                                const bgColor = !isObstacle && !isGoal ? getRenderData(idx) : undefined;
-                                
-                                return (
-                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200 ${isObstacle ? 'bg-gray-900' : ''} ${isGoal ? 'bg-yellow-900/30 ring-1 ring-yellow-500' : ''}`} style={{ backgroundColor: bgColor }}>
-                                        {isObstacle && <div className="w-full h-full bg-gray-800 flex items-center justify-center"><div className="w-1/2 h-1/2 bg-gray-600 rounded-sm"/></div>}
-                                        {isGoal && <Target size={18} className="text-yellow-400" />}
-                                        {isAgent && <div className={`absolute inset-0 flex items-center justify-center z-20`}><div className={`w-4 h-4 md:w-6 md:h-6 rounded-full shadow-lg border-2 border-white animate-pulse ${mode === 'tabular' ? 'bg-blue-500' : 'bg-indigo-500'}`} /></div>}
-                                    </div>
-                                );
-                             })}
-                        </div>
-                        {/* Legend */}
-                        <div className="absolute top-2 right-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-[10px] space-y-1 z-30">
-                            <div className="font-bold text-gray-400 mb-1">LEARNING SPREAD</div>
-                            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-blue-500 rounded-full"></div><span>Current State</span></div>
-                            {mode === 'deep' && <div className="flex items-center gap-2"><div className="w-3 h-3 bg-green-500/30 rounded-full blur-[2px]"></div><span>Generalization</span></div>}
-                        </div>
-                    </div>
-                    
-                    <LiveMathOverlay update={lastLog} />
-
-                    <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
-                         <div>
-                             <h4 className="text-xs font-bold text-blue-400 mb-1">Concept Insight</h4>
-                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
-                                {mode === 'tabular' 
-                                  ? "Tabular RL: The agent maintains an exact table of values. Learning about one square tells it NOTHING about its neighbors. It must visit every single square to learn the map. This is slow but precise."
-                                  : "Deep RL (Approximated): The agent uses a Function Approximator (simulated here). Learning about one square 'bleeds' into nearby squares because the network generalizes features. It learns the map much faster, but risks blurring fine details."}
-                             </p>
-                         </div>
-                     </div>
-                </div>
-
-                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
-                    <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
-                        <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Neural Network Config</div>
-                        <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
-                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                            
-                            {mode === 'deep' && (
-                                <div className="space-y-1 bg-indigo-900/20 p-2 rounded border border-indigo-500/30">
-                                    <div className="flex justify-between text-xs text-indigo-300"><span>Generalization Radius ({genRadius})</span><Network size={12} /></div>
-                                    <input type="range" min="0.5" max="3.0" step="0.1" value={genRadius} onChange={(e) => setGenRadius(Number(e.target.value))} className="w-full h-1 bg-indigo-500 rounded-lg cursor-pointer" />
-                                    <p className="text-[9px] text-gray-400 mt-1">How far learning spreads to neighbors. Higher = Faster but blurrier.</p>
-                                </div>
-                            )}
-                            <div className="pt-2 border-t border-gray-700"></div>
-                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                            
-                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Exploration ({epsilon.toFixed(3)})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                            <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Decay ({epsilonDecay})</span><Activity size={12} /></div><input type="range" min="0.90" max="1.0" step="0.001" value={epsilonDecay} onChange={(e) => setEpsilonDecay(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-
-                        </div>
-                    </div>
-                    {aiTutor && (
-                        <div className="flex-1 min-h-[300px]">
-                            <AITutorPanel 
-                                {...aiTutor} 
-                                currentParams={{
-                                    alpha, 
-                                    gamma, 
-                                    epsilon, 
-                                    decay: epsilonDecay,
-                                    mode
-                                }} 
-                            />
-                        </div>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
+  return (
+    <StageLayout
+      activeModule={activeModule}
+      onSelectModule={onSelectModule}
+      labNumber={3}
+      moduleSubtitle={subtitleFor(activeModule)}
+      telemetry={{ episode, reward: lastReward(metrics), epsilon: epsilon.toFixed(3), steps, running: isPlaying }}
+      codeFile={mode === 'deep' ? 'deep_rl.py' : 'tabular.py'}
+      onDownloadCode={handleDownload}
+      grid={<StageGrid cols={GRID_W} rows={GRID_H} cell={54} gap={8} spec={cellSpec} />}
+      algoDock={(
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Representation</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={mode === 'tabular'} onClick={() => { setMode('tabular'); resetSim(true); }}>Tabular · Exact</AlgoPill>
+            <AlgoPill active={mode === 'deep'} accent="#818cf8" onClick={() => { setMode('deep'); resetSim(true); }}>Deep RL · Approx</AlgoPill>
+          </div>
+        </>
+      )}
+      controls={<RunControls isPlaying={isPlaying} onPlay={() => setIsPlaying(!isPlaying)} onReset={() => resetSim(true)} onNewMap={randomizeEnvironment} />}
+      legend={(
+        <Legend title="LEARNING SPREAD" items={[
+          { color: GOOD, label: 'High Q' },
+          { color: BAD, label: 'Low Q' },
+          ...(mode === 'deep' ? [{ color: '#818cf8', label: 'Generalizes' }] : []),
+        ]} />
+      )}
+      rewardLabel="AVG REWARD"
+      rewardValue={lastReward(metrics)}
+      rewardSeries={rewardSeries(metrics)}
+      lastLog={lastLog}
+      contextInsight={conceptText}
+      params={(
+        <ParamsWrap>
+          <ParamsHead title={mode === 'deep' ? 'Neural Network Config' : 'Tabular Config'} hint="Watch how a single lesson spreads across states." />
+          <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
+          {mode === 'deep' && <ParamSlider name="Generalization Radius" value={genRadius.toFixed(1)} min={0.5} max={3} step={0.1} current={genRadius} onChange={setGenRadius} hint="how far a lesson bleeds to neighbours" accent="#818cf8" />}
+          <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — how fast Q updates" />
+          <ParamSlider name="Epsilon · explore" value={epsilon.toFixed(3)} min={0} max={1} step={0.05} current={epsilon} onChange={setEpsilon} hint="ε — random action prob." />
+          <ParamSlider name="Decay" value={epsilonDecay.toFixed(3)} min={0.9} max={1} step={0.001} current={epsilonDecay} onChange={setEpsilonDecay} hint="ε ← ε · decay each episode" />
+        </ParamsWrap>
+      )}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, decay: epsilonDecay, mode } }}
+      apiPanel={apiPanel}
+    />
+  );
 };
 
 // --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
-export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
+export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
     const N_ARMS = 5;
     const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
     
@@ -2257,146 +1973,87 @@ for t in range(1, 501):
         return "";
     };
 
-    return (
-        <div className="flex flex-col gap-4 w-full">
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-col gap-2">
-                         <div className="flex bg-gray-800 rounded p-1 self-start">
-                            <button onClick={() => { setStrategy('greedy'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'greedy' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Greedy</button>
-                            <button onClick={() => { setStrategy('epsilon'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'epsilon' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Epsilon-Greedy</button>
-                            <button onClick={() => { setStrategy('optimistic'); setInitQ(5.0); resetSim(5.0); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'optimistic' ? 'bg-green-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Optimistic Init</button>
-                            <button onClick={() => { setStrategy('ucb'); resetSim(); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${strategy === 'ucb' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>UCB</button>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
-                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                        </button>
-                        <button onClick={() => resetSim()} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
-                    </div>
-                </div>
+  const avgReward = totalSteps > 0 ? (totalReward / totalSteps).toFixed(2) : '—';
+
+  const bars = (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 18, height: 320, width: 540 }}>
+      {arms.map((arm, i) => {
+        const h = Math.min(arm.q, 1) * 100;
+        const tru = TRUE_MEANS[i] * 100;
+        const best = i === 3 && arm.q > 0.7;
+        return (
+          <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, height: '100%', justifyContent: 'flex-end' }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)' }}>{arm.count} plays</div>
+            <div style={{ position: 'relative', width: '100%', flex: 1, background: 'var(--bg0)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', bottom: `${tru}%`, left: 0, right: 0, borderTop: '2px dashed color-mix(in srgb, var(--good) 55%, transparent)' }} />
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${h}%`, background: best ? 'var(--acc)' : 'color-mix(in srgb, var(--acc) 55%, transparent)', transition: 'height .3s ease', boxShadow: best ? '0 0 18px -4px var(--acc)' : 'none' }} />
+              <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: '#fff' }}>{arm.q.toFixed(2)}</div>
             </div>
+            <div style={{ fontSize: 12, color: 'var(--t1)', fontWeight: 600 }}>Arm {i + 1}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-9 flex flex-col gap-4">
-                     <div className="bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-inner flex flex-col justify-center items-center relative min-h-[400px]">
-                        
-                        {/* DOWNLOAD CODE BUTTON */}
-                        <button 
-                            onClick={handleDownload}
-                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
-                        >
-                            <PythonLogo size={14} />
-                            <span>Python</span>
-                        </button>
-
-                        {/* BANDIT ARMS VISUALIZATION */}
-                        <div className="flex items-end justify-center gap-4 h-[250px] w-full max-w-2xl px-4">
-                            {arms.map((arm, i) => {
-                                const heightPct = Math.min(arm.q * 100, 100);
-                                const trueHeightPct = TRUE_MEANS[i] * 100;
-                                const isBest = i === 3; 
-                                
-                                return (
-                                    <div key={i} className="flex-1 flex flex-col items-center gap-2 h-full justify-end relative group">
-                                        <div className="bg-gray-700 text-xs px-2 py-0.5 rounded-full font-mono text-gray-300 mb-1">{arm.count} plays</div>
-                                        <div className="w-full bg-gray-900 rounded-t-lg relative border-b border-gray-600 h-full overflow-hidden">
-                                            <div className="absolute bottom-0 w-full bg-green-500/10 border-t-2 border-dashed border-green-500/30 transition-all duration-500" style={{ height: `${trueHeightPct}%` }}>
-                                                 <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] text-green-500/50 opacity-0 group-hover:opacity-100 whitespace-nowrap">True: {TRUE_MEANS[i]}</span>
-                                            </div>
-                                            <div 
-                                                className={`absolute bottom-0 w-full transition-all duration-300 ${isBest && arm.q > 0.7 ? 'bg-blue-500' : 'bg-blue-600/60'}`} 
-                                                style={{ height: `${heightPct}%` }}
-                                            ></div>
-                                            <div className="absolute bottom-2 w-full text-center text-xs font-bold text-white drop-shadow-md z-10">
-                                                {arm.q.toFixed(2)}
-                                            </div>
-                                        </div>
-                                        <div className="text-gray-400 font-bold text-sm mt-1">Arm {i+1}</div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-
-                     </div>
-
-                     <LiveMathOverlay update={lastLog} />
-
-                     <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
-                         <div>
-                             <h4 className="text-xs font-bold text-blue-400 mb-1">Strategy Insight</h4>
-                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
-                                {getInsightText()}
-                             </p>
-                         </div>
-                     </div>
-                </div>
-                
-                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
-                     <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
-                         <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> Bandit Controls</div>
-                         <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
-                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="1000" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                             
-                             <div className="pt-2 border-t border-gray-700"></div>
-
-                             {strategy === 'epsilon' && (
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon.toFixed(2)})</span><Map size={12} /></div>
-                                    <input type="range" min="0" max="0.5" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-blue-600 rounded-lg cursor-pointer" />
-                                </div>
-                             )}
-
-                             {strategy === 'ucb' && (
-                                <div className="space-y-1">
-                                    <div className="flex justify-between text-xs text-gray-400"><span>Confidence (c={ucbC})</span><HelpCircle size={12} /></div>
-                                    <input type="range" min="0.5" max="5.0" step="0.5" value={ucbC} onChange={(e) => setUcbC(Number(e.target.value))} className="w-full h-1 bg-purple-600 rounded-lg cursor-pointer" />
-                                    <p className="text-[10px] text-gray-500">Higher = More exploration</p>
-                                </div>
-                             )}
-                             
-                             {strategy === 'optimistic' && (
-                                <div className="space-y-1">
-                                    <p className="text-xs text-green-400">Initial Q: {initQ.toFixed(1)}</p>
-                                    <p className="text-[10px] text-gray-500">High initial value forces agent to try all arms to verify if they are actually that good.</p>
-                                </div>
-                             )}
-
-                             <div className="mt-4 bg-gray-800 p-2 rounded">
-                                <div className="flex justify-between text-xs mb-1">
-                                    <span className="text-gray-400">Total Steps:</span>
-                                    <span className="text-white font-mono">{totalSteps}</span>
-                                </div>
-                                <div className="flex justify-between text-xs">
-                                    <span className="text-gray-400">Total Reward:</span>
-                                    <span className="text-green-400 font-mono">{totalReward}</span>
-                                </div>
-                             </div>
-                         </div>
-                     </div>
-                     {aiTutor && (
-                        <div className="flex-1 min-h-[300px]">
-                            <AITutorPanel 
-                                {...aiTutor} 
-                                currentParams={{
-                                    strategy,
-                                    epsilon, 
-                                    ucbC,
-                                    initQ
-                                }} 
-                            />
-                        </div>
-                     )}
-                </div>
+  return (
+    <StageLayout
+      activeModule={activeModule}
+      onSelectModule={onSelectModule}
+      labNumber={4}
+      moduleSubtitle={subtitleFor(activeModule)}
+      telemetry={{ reward: avgReward, epsilon: strategy === 'epsilon' ? epsilon.toFixed(2) : undefined, steps: totalSteps, running: isPlaying }}
+      codeFile="bandits.py"
+      onDownloadCode={handleDownload}
+      grid={bars}
+      algoDock={(
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Strategy</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={strategy === 'greedy'} onClick={() => { setStrategy('greedy'); resetSim(); }}>Greedy</AlgoPill>
+            <AlgoPill active={strategy === 'epsilon'} onClick={() => { setStrategy('epsilon'); resetSim(); }}>ε-Greedy</AlgoPill>
+            <AlgoPill active={strategy === 'optimistic'} onClick={() => { setStrategy('optimistic'); setInitQ(5.0); resetSim(5.0); }}>Optimistic Init</AlgoPill>
+            <AlgoPill active={strategy === 'ucb'} onClick={() => { setStrategy('ucb'); resetSim(); }}>UCB</AlgoPill>
+          </div>
+        </>
+      )}
+      controls={<RunControls isPlaying={isPlaying} onPlay={() => setIsPlaying(!isPlaying)} onReset={() => resetSim()} />}
+      legend={(
+        <Legend title="ARMS" items={[
+          { color: ACC, label: 'Estimated Q' },
+          { node: <span style={{ width: 12, borderTop: `2px dashed ${GOOD}`, display: 'inline-block' }} />, label: 'True mean' },
+        ]} />
+      )}
+      rewardLabel="AVG REWARD"
+      rewardValue={avgReward}
+      rewardSeries={rewardSeries(metrics)}
+      lastLog={lastLog}
+      contextInsight={getInsightText()}
+      params={(
+        <ParamsWrap>
+          <ParamsHead title="Bandit Controls" hint="Balance trying new arms vs milking the best." />
+          <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={1000} step={10} current={speed} onChange={setSpeed} hint="pull interval" />
+          {strategy === 'epsilon' && <ParamSlider name="Epsilon · explore" value={epsilon.toFixed(2)} min={0} max={0.5} step={0.05} current={epsilon} onChange={setEpsilon} hint="ε — chance to pull a random arm" />}
+          {strategy === 'ucb' && <ParamSlider name="Confidence · c" value={ucbC.toFixed(1)} min={0.5} max={5} step={0.5} current={ucbC} onChange={setUcbC} hint="higher = more exploration" />}
+          {strategy === 'optimistic' && (
+            <div style={{ background: 'color-mix(in srgb, var(--good) 10%, var(--bg2))', border: '1px solid var(--border)', borderRadius: 9, padding: 12, fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.55 }}>
+              Initial Q seeded to <b style={{ color: GOOD }}>{initQ.toFixed(1)}</b> — every arm disappoints until proven, forcing early exploration.
             </div>
-        </div>
-    );
+          )}
+          <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 9, padding: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><span style={{ color: 'var(--t2)' }}>Total pulls</span><span style={{ fontFamily: 'var(--mono)', color: 'var(--t0)' }}>{totalSteps}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}><span style={{ color: 'var(--t2)' }}>Total reward</span><span style={{ fontFamily: 'var(--mono)', color: GOOD }}>{totalReward}</span></div>
+          </div>
+        </ParamsWrap>
+      )}
+      tutor={{ ...aiTutor!, currentParams: { strategy, epsilon, ucbC, initQ } }}
+      apiPanel={apiPanel}
+    />
+  );
 };
 
 // --- 5. Single vs Multi-Agent Lab ---
-export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor }) => {
+export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
     const MA_W = 6;
     const MA_H = 6;
     const MA_STATES = MA_W * MA_H;
@@ -2709,98 +2366,62 @@ for episode in range(100):
         return "";
     };
 
-    return (
-        <div className="flex flex-col gap-4 w-full">
-            <div className="bg-gray-900 p-4 rounded-xl border border-gray-700 shadow-lg space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex flex-col gap-2">
-                         <div className="flex bg-gray-800 rounded p-1 self-start">
-                            <button onClick={() => { setMode('single'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'single' ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Single Agent</button>
-                            <button onClick={() => { setMode('coop'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'coop' ? 'bg-purple-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Cooperative (Rendezvous)</button>
-                            <button onClick={() => { setMode('comp'); resetSim(true); }} className={`px-4 py-2 rounded text-xs font-bold transition-all ${mode === 'comp' ? 'bg-red-600 text-white shadow' : 'text-gray-400 hover:text-gray-200'}`}>Competitive (Tag)</button>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setIsPlaying(!isPlaying)} className={`p-3 rounded-full ${isPlaying ? 'bg-yellow-600 hover:bg-yellow-500' : 'bg-green-600 hover:bg-green-500'} text-white transition-colors shadow-lg`}>
-                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                        </button>
-                        <button onClick={() => resetSim(true)} className="p-3 bg-gray-700 hover:bg-gray-600 rounded-full text-white transition-colors shadow-lg"><RotateCcw size={18} /></button>
-                    </div>
-                </div>
-            </div>
+  const cellSpec = (idx: number): CellSpec => {
+    const isA = agentAPos === idx;
+    const isB = agentBPos === idx && mode !== 'single';
+    const isGA = idx === goalA;
+    const isGB = idx === goalB && mode !== 'single';
+    return {
+      goal: isGA, goalColor: '#60a5fa',
+      goalB: isGB, goalBColor: BAD,
+      agent: isA, agentColor: '#60a5fa',
+      agentB: isB, agentBColor: BAD,
+    };
+  };
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="lg:col-span-9 flex flex-col gap-4">
-                     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-inner flex justify-center items-center relative min-h-[400px]">
-                        
-                        {/* DOWNLOAD CODE BUTTON */}
-                        <button 
-                            onClick={handleDownload}
-                            className="absolute top-2 left-2 bg-gray-900/90 border border-gray-700 p-2 rounded shadow-lg backdrop-blur text-xs font-bold text-gray-300 hover:text-white flex items-center gap-2 z-30 transition-colors"
-                        >
-                            <PythonLogo size={14} />
-                            <span>Python</span>
-                        </button>
-
-                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${MA_W}, min-content)` }}>
-                             {Array.from({ length: MA_STATES }).map((_, idx) => {
-                                const isAgentA = agentAPos === idx;
-                                const isAgentB = agentBPos === idx && mode !== 'single';
-                                const isGoalA = idx === goalA;
-                                const isGoalB = idx === goalB && mode !== 'single';
-                                
-                                let bgColor = 'rgba(31, 41, 55, 0.5)';
-                                
-                                return (
-                                    <div key={idx} className={`w-8 h-8 md:w-10 md:h-10 border border-gray-700 rounded-sm flex items-center justify-center relative transition-colors duration-200`} style={{ backgroundColor: bgColor }}>
-                                        {isGoalA && <div className="absolute inset-0 bg-blue-500/10 flex items-center justify-center"><Target size={14} className="text-blue-500" /></div>}
-                                        {isGoalB && <div className="absolute inset-0 bg-red-500/10 flex items-center justify-center"><Target size={14} className="text-red-500" /></div>}
-                                        
-                                        {isAgentA && <div className="w-5 h-5 rounded-full bg-blue-500 shadow-lg z-10 border-2 border-white" />}
-                                        {isAgentB && <div className="w-5 h-5 rounded-full bg-red-500 shadow-lg z-10 border-2 border-white" />}
-                                    </div>
-                                );
-                             })}
-                        </div>
-                     </div>
-                     
-                     <LiveMathOverlay update={lastLog} />
-                     
-                     <div className="bg-blue-900/10 border border-blue-900 p-4 rounded-xl flex gap-3">
-                         <BookOpen className="text-blue-500 flex-shrink-0 mt-1" size={16} />
-                         <div>
-                             <h4 className="text-xs font-bold text-blue-400 mb-1">Multi-Agent Insight</h4>
-                             <p className="text-[11px] text-gray-400 leading-relaxed font-mono whitespace-pre-wrap">
-                                {getInsightText()}
-                             </p>
-                         </div>
-                     </div>
-                </div>
-
-                <div className="lg:col-span-3 flex flex-col gap-4 h-full">
-                     <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 shrink-0">
-                         <div className="flex items-center gap-2 text-sm font-bold text-gray-300 border-b border-gray-700 pb-2 mb-2"><Settings size={14} /> MARL Settings</div>
-                         <div className="space-y-4 overflow-y-auto max-h-[250px] pr-2 custom-scrollbar">
-                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Speed ({speed}ms)</span><FastForward size={12} /></div><input type="range" min="10" max="500" step="10" value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Alpha ({alpha})</span></div><input type="range" min="0.01" max="1" step="0.01" value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                             <div className="space-y-1"><div className="flex justify-between text-xs text-gray-400"><span>Epsilon ({epsilon})</span><Map size={12} /></div><input type="range" min="0" max="1" step="0.05" value={epsilon} onChange={(e) => setEpsilon(Number(e.target.value))} className="w-full h-1 bg-gray-600 rounded-lg cursor-pointer" /></div>
-                         </div>
-                     </div>
-                     {aiTutor && (
-                        <div className="flex-1 min-h-[300px]">
-                            <AITutorPanel 
-                                {...aiTutor} 
-                                currentParams={{
-                                    alpha, 
-                                    gamma, 
-                                    epsilon,
-                                    mode
-                                }} 
-                            />
-                        </div>
-                     )}
-                </div>
-            </div>
-        </div>
-    );
+  return (
+    <StageLayout
+      activeModule={activeModule}
+      onSelectModule={onSelectModule}
+      labNumber={5}
+      moduleSubtitle={subtitleFor(activeModule)}
+      telemetry={{ episode, reward: lastReward(metrics), epsilon: epsilon.toFixed(2), steps, running: isPlaying }}
+      codeFile="marl.py"
+      onDownloadCode={handleDownload}
+      grid={<StageGrid cols={MA_W} rows={MA_H} cell={58} gap={8} spec={cellSpec} />}
+      algoDock={(
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Scenario</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={mode === 'single'} onClick={() => { setMode('single'); resetSim(true); }}>Single Agent</AlgoPill>
+            <AlgoPill active={mode === 'coop'} onClick={() => { setMode('coop'); resetSim(true); }}>Cooperative</AlgoPill>
+            <AlgoPill active={mode === 'comp'} accent="#f87171" onClick={() => { setMode('comp'); resetSim(true); }}>Competitive</AlgoPill>
+          </div>
+        </>
+      )}
+      controls={<RunControls isPlaying={isPlaying} onPlay={() => setIsPlaying(!isPlaying)} onReset={() => resetSim(true)} />}
+      legend={(
+        <Legend title="AGENTS" items={[
+          { color: '#60a5fa', label: 'Agent A' },
+          ...(mode !== 'single' ? [{ color: BAD, label: 'Agent B' }] : []),
+        ]} />
+      )}
+      rewardLabel="AVG REWARD"
+      rewardValue={lastReward(metrics)}
+      rewardSeries={rewardSeries(metrics)}
+      lastLog={lastLog}
+      contextInsight={getInsightText()}
+      params={(
+        <ParamsWrap>
+          <ParamsHead title="MARL Settings" hint="A second learner makes the world non-stationary." />
+          <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
+          <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — how fast Q updates" />
+          <ParamSlider name="Gamma · discount" value={gamma.toFixed(2)} min={0.1} max={0.99} step={0.01} current={gamma} onChange={setGamma} hint="γ — future reward weight" />
+          <ParamSlider name="Epsilon · explore" value={epsilon.toFixed(2)} min={0} max={1} step={0.05} current={epsilon} onChange={setEpsilon} hint="ε — random action prob." />
+        </ParamsWrap>
+      )}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, mode } }}
+      apiPanel={apiPanel}
+    />
+  );
 };

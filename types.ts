@@ -15,16 +15,6 @@ export enum SimulationStatus {
   COMPLETED = 'COMPLETED',
 }
 
-export interface GridWorldState {
-  gridSize: number;
-  agentPos: { x: number; y: number };
-  goalPos: { x: number; y: number };
-  obstacles: { x: number; y: number }[];
-  qTable: Record<string, number[]>; // key: "x,y", val: [up, right, down, left]
-  episodes: number;
-  totalReward: number;
-}
-
 export interface TrainingMetrics {
   episode: number;
   reward: number;
@@ -88,10 +78,20 @@ export type LlmProviderId = 'google' | 'openai' | 'anthropic' | 'deepseek';
 // - 'anthropic'   : Anthropic POST /v1/messages
 export type LlmCallStyle = 'google' | 'openai-chat' | 'anthropic';
 
+// Reasoning / "thinking" capability of a model. When present, the unified
+// client (services/llmClient.ts) turns on a BALANCED reasoning effort for every
+// call to that model. The value names HOW the provider exposes it:
+//   'effort'           → OpenAI / DeepSeek  reasoning_effort: "medium"
+//   'gemini-budget'    → Gemini 2.5         thinkingConfig.thinkingBudget: -1 (dynamic)
+//   'gemini-level'     → Gemini 3           thinkingConfig.thinkingLevel: "low"
+//   'anthropic-budget' → Anthropic          thinking { type:"enabled", budget_tokens }
+export type ReasoningCapability = 'effort' | 'gemini-budget' | 'gemini-level' | 'anthropic-budget';
+
 export interface LlmModelOption {
   id: string;       // model id sent to the API
   label: string;    // human-friendly name shown in the dropdown
   note?: string;    // e.g. pricing or "free tier"
+  reasoning?: ReasoningCapability; // omitted = no thinking mode (e.g. GPT-4o, Gemini 2.0)
 }
 
 export interface LlmProviderConfig {
