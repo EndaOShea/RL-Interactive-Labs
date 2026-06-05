@@ -13,7 +13,7 @@ import { LlmProviderConfig, LlmProviderId } from "../types";
 export const PROVIDERS: Record<LlmProviderId, LlmProviderConfig> = {
   google: {
     id: "google",
-    label: "Google Gemini",
+    label: "Google",
     style: "google",
     apiHost: "https://generativelanguage.googleapis.com",
     endpoint: "https://generativelanguage.googleapis.com", // handled by the @google/genai SDK
@@ -54,7 +54,7 @@ export const PROVIDERS: Record<LlmProviderId, LlmProviderConfig> = {
 
   anthropic: {
     id: "anthropic",
-    label: "Anthropic Claude",
+    label: "Anthropic",
     style: "anthropic",
     apiHost: "https://api.anthropic.com",
     endpoint: "https://api.anthropic.com/v1/messages",
