@@ -9,6 +9,49 @@ React, TypeScript, and Vite. It teaches RL by doing: live grid-world / bandit si
 real-time math breakdowns, and multi-provider AI tutoring — all inside a single full-viewport
 "Cinematic Stage" UI.
 
+The platform is being expanded **one subject area at a time** beyond RL. Added areas so far:
+Classic ML, Search & Pathfinding, Unsupervised Learning, Supervised Learning, Logic & Reasoning,
+Neural Networks, Model Checking, Image Classification, Audio & Speech, Large Language Models,
+Diffusion Models, Math Foundations. See **Multi-area platform** below. The original RL app is deliberately left
+untouched and now lives at the `/rl` route; a catalog home (`/`) is the hub.
+
+## Multi-area platform (catalog + non-RL labs)
+
+The app is now a small multi-page platform under `react-router-dom`. **The RL code is frozen**:
+`App.tsx`, `components/TheoryLabs.tsx`, `components/stage/*`, `constants.ts`, and the RL parts of
+`types.ts` are never edited — new areas import their reusable, generic pieces (`primitives.tsx`,
+the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
+
+- **Routing** — `index.tsx` renders `AppRouter.tsx`: `/` → `catalog/HomeCatalog` (scrollable
+  catalog), `/rl` → the untouched `<App/>`, `/<category>/:labId?` → `components/labkit/AreaHost`
+  (e.g. `/classic-ml/knn`). nginx already has SPA fallback (`nginx.conf`), so deep links work in
+  the Docker build. `react-router-dom` is client-only — no CSP change.
+- **Registry** — `catalog/registry.ts` (+ `catalog/types.ts`) is the single source of truth:
+  `CATEGORIES`, `LABS`, lookups, `APP_NAME`. RL is a link-only category (cards → `/rl`). Each new
+  lab is a `LabDescriptor` with a `React.lazy` component (own chunk) and co-located `LabContent`.
+- **Generic kit** (`components/labkit/`) — `LabStage.tsx` is the non-RL twin of `StageLayout`:
+  same three-zone layout but generic **stat chips** (`StatChip[]`, not RL's EPISODE/REWARD/ε), a
+  prop-driven Context tab (`LabContext`), the reused `LiveMath` Math tab, a registry-driven
+  `LabNav` (Home + the area's labs), and `TutorDock`. Visualization primitives live in
+  `components/labkit/viz/` (`ScatterPlot`, `FunctionPlot`).
+- **Hooks** — `hooks/useSimLoop.ts` (interval play/pause/reset via a `stepRef`),
+  `hooks/useTutorState.ts` (per-area provider/key/chat; calls the provider-agnostic `callLlm`
+  with a topic-generic prompt — RL's `services/llmService.ts` has an RL-only prompt and is left
+  alone). Keys are in memory only, per area.
+- **Labs** — under `labs/<area>/` (`classic-ml`: kNN, linear/logistic regression, k-means, PCA;
+  `search`: Pathfinding, GraphSearch; `unsupervised`: DBSCAN, GMM/EM, Hierarchical; `supervised`:
+  DecisionTree, SVM, NaiveBayes; `logic`: TruthTable, DPLL). Each area has `content.ts`,
+  `python.ts`, `registry.ts` (+ area-specific helpers). Viz primitives in `components/labkit/viz/`:
+  `ScatterPlot` (points/field/circles/ellipses), `FunctionPlot`, `GridBoard`, `GraphCanvas`,
+  `Dendrogram`. A lab owns its sim state + `step()`, builds a `SimulationUpdate` for the live
+  math, and renders `<LabStage>` with its slots — mirroring how RL labs render `StageLayout`.
+  Sims are **analytic / client-side** (no TF.js/ONNX/servers). Exports runnable Python via
+  `utils/downloadCode.ts` + per-lab templates.
+
+**Add a lab**: create `labs/<area>/X.tsx` (render `<LabStage>`), add its `LabContent` +
+Python template, then append a `LabDescriptor` to that area's `registry.ts`. **Add an area**:
+also add a `CategoryMeta` to `catalog/registry.ts` and a route in `AppRouter.tsx`.
+
 ## Development Commands
 
 ### Core
