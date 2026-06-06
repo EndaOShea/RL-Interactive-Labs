@@ -9,11 +9,14 @@ import {
 } from './types';
 import { generateExplanation } from './services/llmService';
 import { PROVIDERS, DEFAULT_PROVIDER, getProvider } from './services/providers';
-import { saveEncryptedKey, loadEncryptedKey, clearEncryptedKey } from './utils/keyEncryption';
 
 // The whole UI is now the full-viewport "Cinematic Stage" — each lab renders its
 // own StageLayout. App stays thin: it owns module selection, the metrics/chat
 // stream, and the multi-provider key state, and feeds them into the active lab.
+//
+// API keys are held in memory only (per provider) — never written to any
+// storage, so they vanish on refresh and must be re-entered. This keeps the
+// user's secret out of localStorage/sessionStorage entirely.
 const App: React.FC = () => {
   const [activeModule, setActiveModule] = useState<ModuleId>(ModuleId.MODEL_VS_FREE);
   const [metrics, setMetrics] = useState<TrainingMetrics[]>([]);
@@ -26,46 +29,19 @@ const App: React.FC = () => {
   const providerConfig = getProvider(provider);
 
   const [keyInput, setKeyInput] = useState('');
-  const [manualKey, setManualKey] = useState('');
-  const [keyLoading, setKeyLoading] = useState(true);
+  // Per-provider keys, held in memory only — never persisted to any storage.
+  const [keysByProvider, setKeysByProvider] = useState<Partial<Record<LlmProviderId, string>>>({});
+  const manualKey = keysByProvider[provider] ?? '';
 
   const [aiThinking, setAiThinking] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
 
   const currentApiKey = manualKey.length > 0 ? manualKey : undefined;
 
-  // Load the default provider's encrypted key on startup.
-  useEffect(() => {
-    (async () => {
-      try {
-        const storedKey = await loadEncryptedKey(DEFAULT_PROVIDER);
-        if (storedKey) {
-          setManualKey(storedKey);
-          setKeyInput(storedKey);
-        }
-      } catch (error) {
-        console.error('Failed to load stored key:', error);
-      } finally {
-        setKeyLoading(false);
-      }
-    })();
-  }, []);
-
-  const handleProviderChange = async (next: LlmProviderId) => {
+  const handleProviderChange = (next: LlmProviderId) => {
     setProvider(next);
     setModel(getProvider(next).defaultModel);
-    setKeyLoading(true);
-    try {
-      const storedKey = await loadEncryptedKey(next);
-      setManualKey(storedKey || '');
-      setKeyInput(storedKey || '');
-    } catch (error) {
-      console.error('Failed to load stored key:', error);
-      setManualKey('');
-      setKeyInput('');
-    } finally {
-      setKeyLoading(false);
-    }
+    setKeyInput(keysByProvider[next] ?? '');
   };
 
   // AI Studio platform key (Google's environment).
@@ -96,15 +72,19 @@ const App: React.FC = () => {
     }
   };
 
-  const activateManualKey = async () => {
+  const activateManualKey = () => {
     const trimmed = keyInput.trim();
-    setManualKey(trimmed);
+    setKeysByProvider((prev) => ({ ...prev, [provider]: trimmed }));
     setKeyInput(trimmed);
-    try {
-      await saveEncryptedKey(provider, trimmed);
-    } catch (error) {
-      console.error('Failed to save encrypted key:', error);
-    }
+  };
+
+  const clearManualKey = () => {
+    setKeysByProvider((prev) => {
+      const next = { ...prev };
+      delete next[provider];
+      return next;
+    });
+    setKeyInput('');
   };
 
   const askAITutor = async (question: string, contextParams: any) => {
@@ -144,8 +124,7 @@ const App: React.FC = () => {
       setKeyInput={setKeyInput}
       manualKey={manualKey}
       onActivateKey={activateManualKey}
-      onClearKey={() => { clearEncryptedKey(provider); setManualKey(''); setKeyInput(''); }}
-      keyLoading={keyLoading}
+      onClearKey={clearManualKey}
       hasKey={hasKey}
       onAiStudioSelect={(window as any).aistudio?.openSelectKey ? handleApiKeySelect : undefined}
     />

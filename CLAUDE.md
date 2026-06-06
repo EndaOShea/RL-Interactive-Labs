@@ -98,12 +98,14 @@ Flow per step:
 - Every provider's `apiHost` is mirrored in the CSP `connect-src` in `security-headers.conf`.
 
 ### API key management
-Per-provider, user-supplied, encrypted in the browser (`utils/keyEncryption.ts`):
-- AES-256-GCM, device-fingerprint + PBKDF2 (100,000 iterations); per-device random salt.
-- `sessionStorage` only — keys are wiped when the tab closes and never persist across sessions
-  (no "remember on this device" option, to minimize the persisted-secret attack surface).
-- Namespaced `rl_encrypted_api_key_<provider>`. `ApiKeyPanel` shows `● READY` / `○ KEY REQUIRED`
-  and a Clear button. AI Studio's key picker is offered when running in that environment.
+Per-provider, user-supplied, held **in memory only** (no encryption, no storage):
+- `App.tsx` keeps a `keysByProvider` map in React state — keys are never written to
+  `localStorage`/`sessionStorage`, so they vanish on refresh and must be re-entered.
+- Client-side encryption was removed deliberately: it derived the key from a device
+  fingerprint + a salt stored alongside the ciphertext, so it added no real protection.
+  In-memory-only keeps the secret out of any persisted store entirely.
+- `ApiKeyPanel` shows `● READY` / `○ KEY REQUIRED` and a Clear button. AI Studio's key
+  picker is offered when running in that environment.
 
 ### Rate limiting (`utils/apiHelpers.ts`)
 Gemini free-tier budget, checked before every call:

@@ -95,9 +95,10 @@ each user at runtime in the browser. For production behind a reverse proxy, see
 ## API keys & privacy
 
 - **Bring your own key, per provider.** You enter a key for whichever provider you select.
-- **Client-side only.** Keys are encrypted with AES-256-GCM (device-fingerprint + PBKDF2)
-  and stored in the browser's `sessionStorage`, namespaced per provider — they are wiped when
-  the tab closes and never persist across sessions.
+- **In memory only.** Keys are held in the page's memory for the current tab and are **never
+  written to any storage** (no `localStorage`, no `sessionStorage`, no cookies). They vanish on
+  refresh or tab close, so you re-enter them each session — the trade-off for not persisting a
+  secret anywhere.
 - **No server key.** Nothing is sent to a backend; each request goes straight from your
   browser to the provider you chose (every provider host is allow-listed in the CSP).
 - **AI Studio.** When running inside Google AI Studio, the platform's key picker is offered.
@@ -131,7 +132,6 @@ each user at runtime in the browser. For production behind a reverse proxy, see
 │   ├── llmClient.ts             # Unified provider dispatch + balanced "thinking" config
 │   └── providers.ts             # Provider registry (Google / OpenAI / Anthropic / DeepSeek)
 ├── utils/
-│   ├── keyEncryption.ts         # AES-GCM, per-provider encrypted key storage
 │   └── apiHelpers.ts            # Rate limiting (5 RPM / 20 RPD) + retry/backoff
 ├── constants.ts                 # Defaults, MODULE_CONTENT, LIFECYCLE_CONTEXTS
 ├── types.ts                     # ModuleId, SimulationUpdate, provider + reasoning types

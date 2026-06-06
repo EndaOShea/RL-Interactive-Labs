@@ -17,7 +17,6 @@ export interface ApiKeyPanelProps {
   manualKey: string;
   onActivateKey: () => void;
   onClearKey: () => void;
-  keyLoading: boolean;
   hasKey: boolean;
   onAiStudioSelect?: () => void;
 }
@@ -36,8 +35,8 @@ const ApiKeyPanel: React.FC<ApiKeyPanelProps> = (p) => {
       {/* status row */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '.12em', color: 'var(--t2)' }}>API KEY</span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '.08em', color: p.keyLoading ? 'var(--t2)' : ready ? 'var(--good)' : 'var(--warn)' }}>
-          {p.keyLoading ? 'LOADING…' : ready ? '● READY' : '○ KEY REQUIRED'}
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '.08em', color: ready ? 'var(--good)' : 'var(--warn)' }}>
+          {ready ? '● READY' : '○ KEY REQUIRED'}
         </span>
       </div>
 
@@ -93,7 +92,7 @@ const ApiKeyPanel: React.FC<ApiKeyPanelProps> = (p) => {
       )}
 
       <p style={{ fontSize: 9.5, color: 'var(--t2)', lineHeight: 1.5, margin: 0 }}>
-        <b style={{ color: 'var(--warn)' }}>Tip:</b> Use a <b style={{ color: 'var(--t1)' }}>restricted</b> key with a low spend limit — it runs in your browser.
+        <b style={{ color: 'var(--warn)' }}>Tip:</b> Use a <b style={{ color: 'var(--t1)' }}>restricted</b> key with a low spend limit — it stays in memory for this tab only and is never stored.
       </p>
     </div>
   );
