@@ -8,7 +8,6 @@ import { LlmProviderId } from '../types';
 // Keys are namespaced per provider, so a user can hold a separate key for each
 // (Google, OpenAI, Anthropic, DeepSeek) without one clobbering another.
 const STORAGE_PREFIX = 'rl_encrypted_api_key';
-const LEGACY_STORAGE_KEY = 'rl_encrypted_api_key'; // pre-multi-provider, treated as Google
 const SALT_KEY = 'rl_key_salt';
 
 const storageKeyFor = (provider: LlmProviderId): string => `${STORAGE_PREFIX}_${provider}`;
@@ -141,17 +140,16 @@ export async function decryptApiKey(encryptedData: string): Promise<string> {
 /**
  * Save the encrypted API key for a provider.
  *
- * Per the deployment standard for browser-held keys: default to sessionStorage
- * (wiped when the tab closes) and only persist to localStorage when the user
- * explicitly opts in via `remember`. Toggling `remember` migrates the key to
- * the chosen store and clears it from the other, so exactly one copy exists.
+ * Keys live only in sessionStorage — wiped when the tab closes — so they are
+ * never persisted across sessions. Any stale localStorage copy (e.g. from the
+ * removed "remember on this device" option) is cleared on save.
  */
 export async function saveEncryptedKey(
   provider: LlmProviderId,
-  apiKey: string,
-  remember = false
+  apiKey: string
 ): Promise<void> {
   const storageKey = storageKeyFor(provider);
+  localStorage.removeItem(storageKey);
 
   if (!apiKey || apiKey.trim().length === 0) {
     clearEncryptedKey(provider);
@@ -159,33 +157,15 @@ export async function saveEncryptedKey(
   }
 
   const encrypted = await encryptApiKey(apiKey.trim());
-  if (remember) {
-    localStorage.setItem(storageKey, encrypted);
-    sessionStorage.removeItem(storageKey);
-  } else {
-    sessionStorage.setItem(storageKey, encrypted);
-    localStorage.removeItem(storageKey);
-  }
+  sessionStorage.setItem(storageKey, encrypted);
 }
 
 /**
- * Load and decrypt a provider's API key. Prefers the session copy, falling back
- * to a remembered (localStorage) copy. For Google, also migrates a legacy
- * pre-multi-provider key stored under the old un-namespaced name.
+ * Load and decrypt a provider's API key from the current session.
  */
 export async function loadEncryptedKey(provider: LlmProviderId): Promise<string | null> {
   const storageKey = storageKeyFor(provider);
-  let encrypted = sessionStorage.getItem(storageKey) ?? localStorage.getItem(storageKey);
-
-  // One-time migration: an old single-provider key counts as a Google key.
-  if (!encrypted && provider === 'google') {
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (legacy && LEGACY_STORAGE_KEY !== storageKey) {
-      localStorage.setItem(storageKey, legacy);
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
-      encrypted = legacy;
-    }
-  }
+  const encrypted = sessionStorage.getItem(storageKey);
 
   if (!encrypted) {
     return null;
@@ -210,18 +190,8 @@ export function clearEncryptedKey(provider: LlmProviderId): void {
 }
 
 /**
- * Check if an encrypted key exists for a provider in either store.
+ * Check if an encrypted key exists for a provider in the current session.
  */
 export function hasStoredKey(provider: LlmProviderId): boolean {
-  const storageKey = storageKeyFor(provider);
-  return sessionStorage.getItem(storageKey) !== null
-    || localStorage.getItem(storageKey) !== null;
-}
-
-/**
- * Whether a provider's key is persisted across sessions (localStorage), i.e.
- * the user opted in to "remember on this device".
- */
-export function isKeyRemembered(provider: LlmProviderId): boolean {
-  return localStorage.getItem(storageKeyFor(provider)) !== null;
+  return sessionStorage.getItem(storageKeyFor(provider)) !== null;
 }

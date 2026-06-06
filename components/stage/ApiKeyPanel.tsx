@@ -16,8 +16,6 @@ export interface ApiKeyPanelProps {
   setKeyInput: (v: string) => void;
   manualKey: string;
   onActivateKey: () => void;
-  rememberKey: boolean;
-  onToggleRemember: () => void;
   onClearKey: () => void;
   keyLoading: boolean;
   hasKey: boolean;
@@ -47,7 +45,7 @@ const ApiKeyPanel: React.FC<ApiKeyPanelProps> = (p) => {
       <div style={{ display: 'flex', gap: 8 }}>
         <select value={p.provider} onChange={(e) => p.onProviderChange(e.target.value as LlmProviderId)} style={field}>
           {PROVIDER_ORDER.map((id) => (
-            <option key={id} value={id}>{PROVIDERS[id].label}{PROVIDERS[id].freeTier ? ' · free' : ''}</option>
+            <option key={id} value={id}>{PROVIDERS[id].label}</option>
           ))}
         </select>
         <select value={p.model} onChange={(e) => p.onModelChange(e.target.value)} style={field}>
@@ -88,21 +86,14 @@ const ApiKeyPanel: React.FC<ApiKeyPanelProps> = (p) => {
         )}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none' }}>
-          <input type="checkbox" checked={p.rememberKey} onChange={p.onToggleRemember} style={{ width: 13, height: 13, accentColor: 'var(--acc)', cursor: 'pointer' }} />
-          <span style={{ fontSize: 9.5, color: 'var(--t2)' }}>Remember on this device</span>
-        </label>
-        {p.manualKey && (
+      {p.manualKey && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
           <button onClick={p.onClearKey} style={{ all: 'unset', cursor: 'pointer', fontSize: 9.5, color: 'var(--bad)' }}>Clear</button>
-        )}
-      </div>
+        </div>
+      )}
 
       <p style={{ fontSize: 9.5, color: 'var(--t2)', lineHeight: 1.5, margin: 0 }}>
-        Encrypted {p.rememberKey ? 'and persisted on this device' : 'for this browser session only'}. Get {p.providerConfig.freeTier ? 'a free' : 'an'} key at{' '}
-        <a href={p.providerConfig.keysUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--acc)' }}>
-          {p.providerConfig.keysUrl.replace(/^https?:\/\//, '')}
-        </a>. Throttle: 5/min · 20/day.
+        <b style={{ color: 'var(--warn)' }}>Tip:</b> Use a <b style={{ color: 'var(--t1)' }}>restricted</b> key with a low spend limit — it runs in your browser.
       </p>
     </div>
   );

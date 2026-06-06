@@ -100,8 +100,8 @@ Flow per step:
 ### API key management
 Per-provider, user-supplied, encrypted in the browser (`utils/keyEncryption.ts`):
 - AES-256-GCM, device-fingerprint + PBKDF2 (100,000 iterations); per-device random salt.
-- `sessionStorage` by default; `localStorage` when "Remember on this device" is ticked
-  (toggling migrates the key and clears the other store — exactly one copy ever exists).
+- `sessionStorage` only — keys are wiped when the tab closes and never persist across sessions
+  (no "remember on this device" option, to minimize the persisted-secret attack surface).
 - Namespaced `rl_encrypted_api_key_<provider>`. `ApiKeyPanel` shows `● READY` / `○ KEY REQUIRED`
   and a Clear button. AI Studio's key picker is offered when running in that environment.
 

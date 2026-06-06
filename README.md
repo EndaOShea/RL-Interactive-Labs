@@ -96,8 +96,8 @@ each user at runtime in the browser. For production behind a reverse proxy, see
 
 - **Bring your own key, per provider.** You enter a key for whichever provider you select.
 - **Client-side only.** Keys are encrypted with AES-256-GCM (device-fingerprint + PBKDF2)
-  and stored in the browser — in `sessionStorage` by default, or `localStorage` if you tick
-  *"Remember on this device."* Exactly one copy ever exists, namespaced per provider.
+  and stored in the browser's `sessionStorage`, namespaced per provider — they are wiped when
+  the tab closes and never persist across sessions.
 - **No server key.** Nothing is sent to a backend; each request goes straight from your
   browser to the provider you chose (every provider host is allow-listed in the CSP).
 - **AI Studio.** When running inside Google AI Studio, the platform's key picker is offered.

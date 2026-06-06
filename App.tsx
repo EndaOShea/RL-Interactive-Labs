@@ -9,7 +9,7 @@ import {
 } from './types';
 import { generateExplanation } from './services/llmService';
 import { PROVIDERS, DEFAULT_PROVIDER, getProvider } from './services/providers';
-import { saveEncryptedKey, loadEncryptedKey, clearEncryptedKey, isKeyRemembered } from './utils/keyEncryption';
+import { saveEncryptedKey, loadEncryptedKey, clearEncryptedKey } from './utils/keyEncryption';
 
 // The whole UI is now the full-viewport "Cinematic Stage" — each lab renders its
 // own StageLayout. App stays thin: it owns module selection, the metrics/chat
@@ -28,7 +28,6 @@ const App: React.FC = () => {
   const [keyInput, setKeyInput] = useState('');
   const [manualKey, setManualKey] = useState('');
   const [keyLoading, setKeyLoading] = useState(true);
-  const [rememberKey, setRememberKey] = useState(false);
 
   const [aiThinking, setAiThinking] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -43,7 +42,6 @@ const App: React.FC = () => {
         if (storedKey) {
           setManualKey(storedKey);
           setKeyInput(storedKey);
-          setRememberKey(isKeyRemembered(DEFAULT_PROVIDER));
         }
       } catch (error) {
         console.error('Failed to load stored key:', error);
@@ -61,12 +59,10 @@ const App: React.FC = () => {
       const storedKey = await loadEncryptedKey(next);
       setManualKey(storedKey || '');
       setKeyInput(storedKey || '');
-      setRememberKey(isKeyRemembered(next));
     } catch (error) {
       console.error('Failed to load stored key:', error);
       setManualKey('');
       setKeyInput('');
-      setRememberKey(false);
     } finally {
       setKeyLoading(false);
     }
@@ -105,21 +101,9 @@ const App: React.FC = () => {
     setManualKey(trimmed);
     setKeyInput(trimmed);
     try {
-      await saveEncryptedKey(provider, trimmed, rememberKey);
+      await saveEncryptedKey(provider, trimmed);
     } catch (error) {
       console.error('Failed to save encrypted key:', error);
-    }
-  };
-
-  const toggleRemember = async () => {
-    const next = !rememberKey;
-    setRememberKey(next);
-    if (manualKey) {
-      try {
-        await saveEncryptedKey(provider, manualKey, next);
-      } catch (error) {
-        console.error('Failed to migrate stored key:', error);
-      }
     }
   };
 
@@ -160,8 +144,6 @@ const App: React.FC = () => {
       setKeyInput={setKeyInput}
       manualKey={manualKey}
       onActivateKey={activateManualKey}
-      rememberKey={rememberKey}
-      onToggleRemember={toggleRemember}
       onClearKey={() => { clearEncryptedKey(provider); setManualKey(''); setKeyInput(''); }}
       keyLoading={keyLoading}
       hasKey={hasKey}
