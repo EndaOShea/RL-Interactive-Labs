@@ -40,7 +40,10 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
   alone). Keys are in memory only, per area.
 - **Labs** — under `labs/<area>/` (`classic-ml`: kNN, linear/logistic regression, k-means, PCA;
   `search`: Pathfinding, GraphSearch; `unsupervised`: DBSCAN, GMM/EM, Hierarchical; `supervised`:
-  DecisionTree, SVM, NaiveBayes; `logic`: TruthTable, DPLL). Each area has `content.ts`,
+  DecisionTree, SVM, NaiveBayes; `logic`: TruthTable, DPLL; `neural`: Perceptron, MLP, Activations;
+  `model-checking`: MutualExclusion, RiverCrossing; `image`: Convolution, FeatureMaps; `audio`:
+  Fourier, Spectrogram; `llm`: Tokenizer, Sampling, Attention; `diffusion`: ForwardReverse,
+  NoiseSchedule; `math`: GradientDescent, Taylor, LinearTransform). Each area has `content.ts`,
   `python.ts`, `registry.ts` (+ area-specific helpers). Viz primitives in `components/labkit/viz/`:
   `ScatterPlot` (points/field/circles/ellipses), `FunctionPlot`, `GridBoard`, `GraphCanvas`,
   `Dendrogram`. A lab owns its sim state + `step()`, builds a `SimulationUpdate` for the live

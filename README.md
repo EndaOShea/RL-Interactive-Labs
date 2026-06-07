@@ -2,66 +2,79 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Policy Playground
+# ML Interactive Labs
 
-An interactive playground for learning Reinforcement Learning **by doing** — live grid-world
-simulations, real-time math, and AI tutoring, wrapped in a full-screen "Cinematic Stage" UI.
+An interactive platform for learning machine learning **by doing** — live, client-side
+simulations with real-time math and multi-provider AI tutoring, wrapped in a full-screen
+"Cinematic Stage" UI. It began as **Policy Playground** (Reinforcement Learning) and now spans
+a dozen subject areas, each added without touching the original RL app.
 
 View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
 
-## What it looks like
+## Layout
 
-The whole app is one full-viewport stage:
+The platform is a small multi-page app (`react-router-dom`):
 
-- **Telemetry header** — app name, `LAB 0X` badge, the active module, and live
-  `EPISODE / REWARD / ε / STEPS` readouts with a `RUNNING / IDLE` status light.
-- **Left icon rail** — switch between the five modules.
-- **Centre stage** — the animated grid-world (or bandit bars) under a cinematic vignette,
-  ringed by floating glass cards: a 🐍 Python-download badge, a reward sparkline, an
-  algorithm/architecture dock, run controls, a value legend, and a **live-math ticker**
-  streaming the current update along the floor.
-- **Right instrument column** — three tabs (**Parameters / Math / Context**) over a
-  **docked AI tutor**.
+- **`/` — catalog home.** A scrollable hub of every subject area and its labs.
+- **`/rl` — the original Policy Playground.** The untouched RL app, with its own five-module
+  icon rail and the full Cinematic Stage.
+- **`/<area>/<lab>` — a new-area lab** (e.g. `/classic-ml/knn`), rendered through the generic
+  lab kit that mirrors the RL stage: a centred visualization, live-math, and a docked AI tutor.
 
-## Features
+## Subject areas
 
-### Five interactive labs
-Each lab is a real, in-browser RL simulation you can tune live:
+Every lab is a real, in-browser simulation you can tune live. Sims are **analytic and
+client-side** — no TF.js/ONNX and no servers.
 
-- **Model-Free vs Model-Based** — Q-Learning, SARSA, REINFORCE, Actor-Critic, and Dyna-Q
-  (with visible "planning" / mental-replay flashes).
-- **Deterministic vs Stochastic** — greedy `argmax` vs softmax (temperature τ) policies,
-  plus an environment "slip" probability.
-- **Tabular vs Deep RL** — an exact Q-table vs a radial-basis function approximator whose
-  updates *generalize* to neighbouring states.
-- **Exploration vs Exploitation** — a multi-armed bandit with Greedy, ε-Greedy,
-  Optimistic-Init, and UCB strategies.
-- **Single vs Multi-Agent** — joint-state Q-learning in single, cooperative, and
-  competitive scenarios.
+- **Reinforcement Learning** (`/rl`) — Model-free vs model-based (Q-Learning, SARSA, REINFORCE,
+  Actor-Critic, Dyna-Q), deterministic vs stochastic policies under slip, tabular vs deep (RBF)
+  value learning, multi-armed bandits (Greedy, ε-Greedy, Optimistic, UCB), and single vs
+  multi-agent joint-state Q-learning.
+- **Classic ML** — kNN, linear & logistic regression, k-means, PCA.
+- **Search & Pathfinding** — frontier/visited/path on grids and weighted graphs (BFS, DFS,
+  Dijkstra, A*).
+- **Unsupervised Learning** — DBSCAN density clustering, GMM/EM mixtures, hierarchical
+  dendrograms.
+- **Supervised Learning** — decision trees, max-margin SVMs, Gaussian Naive Bayes.
+- **Logic & Reasoning** — truth tables and a DPLL SAT-solver search tree.
+- **Neural Networks** — a single perceptron, a backprop-trained MLP, and activation functions.
+- **Model Checking** — exhaustive reachability with safety invariants and counterexamples
+  (mutual exclusion, river crossing).
+- **Image Classification** — convolution filters and CNN feature maps.
+- **Audio & Speech** — harmonic synthesis and live spectrograms (the Fourier front-end).
+- **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention.
+- **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
+- **Math Foundations** — gradient descent, Taylor series, linear transformations.
 
-### The instrument column
-- **Parameters** — live sliders for speed, α (learning rate), γ (discount), ε (exploration),
-  decay, and lab-specific knobs (planning steps, slip, temperature, generalization radius,
-  UCB confidence).
-- **Math** — a real-time breakdown of the current update: algorithm, formula, substituted
-  variable values, the result, and a plain-English read on how each parameter influenced it.
-- **Context** — the live algorithm context, the module's concept cards, and **Lifecycle
-  Considerations** (Methodology / Verification / Ethics / Deployment), including modern-RL
-  notes (world models, offline RL & Decision Transformers, RLHF-era bandits).
+## What a lab looks like
+
+Each lab fills the viewport as one cinematic stage:
+
+- **Telemetry header** — app/lab name, a `LAB 0X` badge, the active topic, and live stat
+  readouts with a `RUNNING / IDLE` status light.
+- **Left icon rail** — switch labs within the area (RL switches its five modules).
+- **Centre stage** — the animated simulation under a cinematic vignette, ringed by floating
+  glass cards: a 🐍 Python-download badge, controls, legends, and a **live-math ticker**
+  streaming the current update.
+- **Right instrument column** — tabs (**Parameters / Math / Context**) over a **docked AI
+  tutor**:
+  - **Parameters** — live sliders for the lab's hyperparameters.
+  - **Math** — a real-time breakdown of the current update: algorithm, formula, substituted
+    variable values, the result, and a plain-English read on each parameter's effect.
+  - **Context** — concept cards and lifecycle notes for the topic.
 
 ### Multi-provider AI tutor
-A context-aware tutor docked in the instrument column. It sees your current parameters and
-recent performance and explains *why* the agent behaves the way it does. Pick a provider and
-model behind the ⚙ settings toggle:
+A context-aware tutor docked in the instrument column sees your current parameters and recent
+behaviour and explains *why* the simulation does what it does. Pick a provider and model behind
+the ⚙ settings toggle:
 
-- **Google** (Gemini, free tier — the default), **OpenAI**, **Anthropic**, **DeepSeek**
+- **Google** (Gemini, free tier — the default), **OpenAI**, **Anthropic**, **DeepSeek**.
 - Thinking-capable models automatically run at a **balanced** reasoning effort.
 
 ### Hands-on extras
 - Adjustable hyperparameters and per-lab algorithm/scenario switches.
-- Randomized environment layouts (obstacles, start, goal) with a guaranteed-reachable check.
-- **Download Python** — export a runnable NumPy implementation of the exact configuration
-  on screen.
+- **Download Python** — export a runnable implementation of the exact configuration on screen
+  (template strings, not LLM-generated).
 
 ## Prerequisites
 
@@ -78,8 +91,8 @@ npm install
 npm run dev          # http://localhost:2100
 ```
 
-No `.env` key is needed — open the app, click the ⚙ in the AI Tutor, pick a provider, and
-paste your key. It is encrypted and stored only in your browser.
+No `.env` key is needed — open the app, click the ⚙ in the AI Tutor, pick a provider, and paste
+your key. It is held in memory for the tab only and never written to any storage.
 
 ## Docker
 
@@ -88,9 +101,10 @@ docker compose up -d --build     # build + run on 127.0.0.1:2100
 docker compose down              # stop + remove
 ```
 
-The image is a static nginx build — **no API keys are ever baked in**; keys are provided by
-each user at runtime in the browser. For production behind a reverse proxy, see
-[`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and [`docs/PRODUCTION_CHECKLIST.md`](./docs/PRODUCTION_CHECKLIST.md).
+The image is a static nginx build (with SPA fallback so deep links work) — **no API keys are
+ever baked in**; keys are provided by each user at runtime in the browser. For production behind
+a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
+[`docs/PRODUCTION_CHECKLIST.md`](./docs/PRODUCTION_CHECKLIST.md).
 
 ## API keys & privacy
 
@@ -99,15 +113,16 @@ each user at runtime in the browser. For production behind a reverse proxy, see
   written to any storage** (no `localStorage`, no `sessionStorage`, no cookies). They vanish on
   refresh or tab close, so you re-enter them each session — the trade-off for not persisting a
   secret anywhere.
-- **No server key.** Nothing is sent to a backend; each request goes straight from your
-  browser to the provider you chose (every provider host is allow-listed in the CSP).
+- **No server key.** Nothing is sent to a backend; each request goes straight from your browser
+  to the provider you chose (every provider host is allow-listed in the CSP).
 - **AI Studio.** When running inside Google AI Studio, the platform's key picker is offered.
 - **Throttling.** A client-side limiter enforces the Gemini free-tier budget: **5 req/min,
   20 req/day** (`utils/apiHelpers.ts`).
 
 ## Tech stack
 
-- **Frontend:** React 19 + TypeScript, built with Vite
+- **Frontend:** React 19 + TypeScript, built with Vite; `react-router-dom` for the catalog +
+  area routes
 - **Styling:** a CSS-variable design system (`index.css`) with inline-styled "stage"
   components; Tailwind for the base layer; Space Grotesk + IBM Plex fonts
 - **Icons:** Lucide React (error boundary)
@@ -118,25 +133,28 @@ each user at runtime in the browser. For production behind a reverse proxy, see
 ## Project structure
 
 ```
-├── App.tsx                       # Thin shell: module selection, metrics/chat, provider+key state
+├── AppRouter.tsx                 # Routes: / (catalog), /rl (the RL app), /<area>/:labId?
+├── App.tsx                       # RL shell (frozen): module selection, metrics/chat, key state
+├── catalog/
+│   ├── registry.ts               # Single source of truth: CATEGORIES, LABS, APP_NAME
+│   └── HomeCatalog.tsx           # Scrollable catalog home
 ├── components/
-│   ├── ErrorBoundary.tsx
-│   ├── TheoryLabs.tsx            # The 5 lab components; each feeds slots into StageLayout
-│   └── stage/
-│       ├── StageLayout.tsx       # Cinematic Stage shell: header, icon nav, stage, tabs, tutor dock
-│       ├── StageGrid.tsx         # Cinematic grid-world renderer (heat tiles, agent orb, arrows)
-│       ├── ApiKeyPanel.tsx       # Provider / model / key controls (in the tutor dock)
-│       └── primitives.tsx        # Glass panels, tabs, LED, sparkline, sliders, pills, math ticker
+│   ├── stage/                    # RL "Cinematic Stage" (frozen): StageLayout, StageGrid, …
+│   └── labkit/                   # Generic twin for new areas: LabStage, LabNav, TutorDock, viz/
+├── labs/<area>/                  # Per-area labs (*.tsx) + content.ts, python.ts, registry.ts
+├── hooks/                        # useSimLoop (play/pause/reset), useTutorState (per-area tutor)
 ├── services/
-│   ├── llmService.ts            # generateExplanation() tutoring prompt (+ helper generators)
-│   ├── llmClient.ts             # Unified provider dispatch + balanced "thinking" config
-│   └── providers.ts             # Provider registry (Google / OpenAI / Anthropic / DeepSeek)
+│   ├── llmService.ts             # RL tutoring prompt (+ helper generators)
+│   ├── llmClient.ts              # Unified provider dispatch + balanced "thinking" config
+│   └── providers.ts              # Provider registry (Google / OpenAI / Anthropic / DeepSeek)
 ├── utils/
-│   └── apiHelpers.ts            # Rate limiting (5 RPM / 20 RPD) + retry/backoff
-├── constants.ts                 # Defaults, MODULE_CONTENT, LIFECYCLE_CONTEXTS
-├── types.ts                     # ModuleId, SimulationUpdate, provider + reasoning types
-├── index.css                    # Design tokens, fonts, themed range inputs/scrollbars
-├── security-headers.conf        # CSP (provider hosts + Google Fonts), shared nginx headers
+│   ├── apiHelpers.ts             # Rate limiting (5 RPM / 20 RPD) + retry/backoff
+│   └── downloadCode.ts           # Runnable-Python export for new-area labs
+├── constants.ts                  # RL defaults, MODULE_CONTENT, LIFECYCLE_CONTEXTS
+├── types.ts                      # ModuleId, SimulationUpdate, provider + reasoning types
+├── index.css                     # Design tokens, fonts, themed range inputs/scrollbars
+├── security-headers.conf         # CSP (provider hosts + Google Fonts), shared nginx headers
+├── nginx.conf                    # Static serve + SPA fallback
 └── vite.config.ts
 ```
 
@@ -148,11 +166,11 @@ npm run build     # production build (vite/esbuild)
 npm run preview   # preview the production build
 ```
 
-**Hyperparameters**
-- `alpha` (α) — learning rate: how much each Q-update moves the estimate
-- `gamma` (γ) — discount factor: how much future reward counts
-- `epsilon` (ε) — exploration rate: probability of a random action
-- `epsilonDecay` — multiplicative decay applied to ε each episode (`ε ← max(0.01, ε·decay)`)
+**Adding to the platform** — the RL app is deliberately frozen; new work is additive:
+- **Add a lab:** create `labs/<area>/X.tsx` (render `<LabStage>`), add its `LabContent` +
+  Python template, then append a `LabDescriptor` to that area's `registry.ts`.
+- **Add an area:** also add a `CategoryMeta` to `catalog/registry.ts` and a route in
+  `AppRouter.tsx`.
 
 Notes: TypeScript strict mode is on; there is no test/lint setup yet. The production build is
 `vite build` (esbuild) — it transpiles without a separate `tsc` type-check pass.
@@ -160,9 +178,9 @@ Notes: TypeScript strict mode is on; there is no test/lint setup yet. The produc
 ## Contributing
 
 Ideas welcome:
-- More algorithms (PPO, A3C, SAC) and environments (continuous control, partial observability)
-- Richer visualizations (value surfaces, policy fields)
-- Expanded lifecycle / modern-RL context
+- More algorithms and environments across every area
+- Richer visualizations (value surfaces, policy fields, decision regions)
+- New subject areas (each one is self-contained under `labs/<area>/`)
 - A test suite
 
 ## License
