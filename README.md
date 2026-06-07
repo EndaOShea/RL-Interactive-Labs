@@ -7,7 +7,7 @@
 An interactive platform for learning machine learning **by doing** — live, client-side
 simulations with real-time math and multi-provider AI tutoring, wrapped in a full-screen
 "Cinematic Stage" UI. It began as **Policy Playground** (Reinforcement Learning) and now spans
-a dozen subject areas, each added without touching the original RL app.
+fourteen subject areas, each added without touching the original RL app.
 
 View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
 
@@ -35,9 +35,13 @@ client-side** — no TF.js/ONNX and no servers.
   Dijkstra, A*).
 - **Unsupervised Learning** — DBSCAN density clustering, GMM/EM mixtures, hierarchical
   dendrograms.
-- **Supervised Learning** — decision trees, max-margin SVMs, Gaussian Naive Bayes.
+- **Supervised Learning** — decision trees, gradient boosting (XGBoost / LightGBM / CatBoost
+  tree-growth toggle), max-margin SVMs, Gaussian Naive Bayes.
 - **Logic & Reasoning** — truth tables and a DPLL SAT-solver search tree.
 - **Neural Networks** — a single perceptron, a backprop-trained MLP, and activation functions.
+- **Deep Learning** — residual/skip connections (ResNet) vs vanishing gradients, batch
+  normalization, dropout, transfer learning, and optimizers (SGD / Momentum / RMSProp / Adam)
+  with learning-rate schedules.
 - **Model Checking** — exhaustive reachability with safety invariants and counterexamples
   (mutual exclusion, river crossing).
 - **Image Classification** — convolution filters and CNN feature maps.

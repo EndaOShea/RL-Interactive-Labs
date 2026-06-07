@@ -1,0 +1,70 @@
+import React from 'react';
+import { LabDescriptor } from '../../catalog/types';
+import {
+  RESNET_CONTENT, BATCHNORM_CONTENT, DROPOUT_CONTENT, TRANSFER_CONTENT, OPTIM_CONTENT,
+} from './content';
+
+const ACCENT = '#f43f5e';
+
+export const DEEP_LEARNING_LABS: LabDescriptor[] = [
+  {
+    id: 'resnet',
+    category: 'deep-learning',
+    title: 'Residual Networks',
+    subtitle: 'Skip connections vs vanishing gradients',
+    blurb: 'See the gradient vanish through a deep plain net, then watch skip connections keep it alive layer after layer — the ResNet idea.',
+    icon: 'M4 7a2 2 0 1 0 0-.01M4 17a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M20 7a2 2 0 1 0 0-.01M20 17a2 2 0 1 0 0-.01M6 7h12M6 17h12M4 9v6M20 9v6',
+    accent: ACCENT,
+    codeFile: 'resnet.py',
+    content: RESNET_CONTENT,
+    component: React.lazy(() => import('./ResNet')),
+  },
+  {
+    id: 'batchnorm',
+    category: 'deep-learning',
+    title: 'Batch Normalization',
+    subtitle: 'Stabilising activation statistics',
+    blurb: 'Watch activations drift and saturate across a deep net, then snap back to a healthy spread once batch norm centres each layer.',
+    icon: 'M4 18V8M9 18V5M14 18v-7M19 18v-4M3 14h18',
+    accent: ACCENT,
+    codeFile: 'batchnorm.py',
+    content: BATCHNORM_CONTENT,
+    component: React.lazy(() => import('./BatchNorm')),
+  },
+  {
+    id: 'dropout',
+    category: 'deep-learning',
+    title: 'Dropout',
+    subtitle: 'Regularisation by random thinning',
+    blurb: 'Randomly drop units each step and watch a jagged, overfit boundary smooth out as the train–validation gap closes.',
+    icon: 'M5 6a1.6 1.6 0 1 0 0-.01M12 6a1.6 1.6 0 1 0 0-.01M19 6a1.6 1.6 0 1 0 0-.01M5 18a1.6 1.6 0 1 0 0-.01M19 18a1.6 1.6 0 1 0 0-.01M12 12a1.6 1.6 0 1 0 0-.01M5 8v8M19 8v8',
+    accent: ACCENT,
+    codeFile: 'dropout.py',
+    content: DROPOUT_CONTENT,
+    component: React.lazy(() => import('./Dropout')),
+  },
+  {
+    id: 'transfer-learning',
+    category: 'deep-learning',
+    title: 'Transfer Learning',
+    subtitle: 'Pretrained backbone + small head',
+    blurb: 'Compare learning from scratch with reusing a frozen pretrained backbone — see how few labels transfer needs to win.',
+    icon: 'M4 7h6v6H4zM14 11h6v6h-6zM10 9h4M16 13v-2M9 13l5 4',
+    accent: ACCENT,
+    codeFile: 'transfer_learning.py',
+    content: TRANSFER_CONTENT,
+    component: React.lazy(() => import('./TransferLearning')),
+  },
+  {
+    id: 'optimizers',
+    category: 'deep-learning',
+    title: 'Optimizers & LR Schedules',
+    subtitle: 'SGD · Momentum · RMSProp · Adam',
+    blurb: 'Race optimizers down a ravine-shaped loss and see how learning rate and schedules decide who converges and who diverges.',
+    icon: 'M3 21c4-1 6-4 7-9s3-8 7-9M3 21l4-2M3 21l2-4',
+    accent: ACCENT,
+    codeFile: 'optimizers.py',
+    content: OPTIM_CONTENT,
+    component: React.lazy(() => import('./Optimizers')),
+  },
+];

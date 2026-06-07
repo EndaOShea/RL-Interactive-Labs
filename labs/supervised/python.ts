@@ -45,6 +45,64 @@ ${isLinear ? 'print("w:", clf.coef_[0], "b:", clf.intercept_[0])\nprint("margin 
 `;
 };
 
+export const gradientBoostingPython = (variant = 'xgboost', lr = 0.3, maxDepth = 3, numLeaves = 8, lam = 1) => {
+  const centers = `centers = [(-1, -1), (1, -1), (-1, 1), (1, 1)]
+X, c = make_blobs(n_samples=200, centers=centers, cluster_std=0.5, random_state=0)
+y = np.array([0, 1, 1, 0])[c]   # XOR labelling`;
+  if (variant === 'lightgbm') {
+    return `import numpy as np
+from sklearn.datasets import make_blobs
+import lightgbm as lgb   # pip install lightgbm
+
+# LightGBM — leaf-wise growth — mirrors the lab (learning_rate=${lr}, num_leaves=${numLeaves}, lambda_l2=${lam})
+${centers}
+
+clf = lgb.LGBMClassifier(
+    learning_rate=${lr},
+    num_leaves=${numLeaves},     # leaf-wise growth budget
+    reg_lambda=${lam},
+    n_estimators=200,
+).fit(X, y)
+print("train acc:", clf.score(X, y))
+`;
+  }
+  if (variant === 'catboost') {
+    return `import numpy as np
+from sklearn.datasets import make_blobs
+from catboost import CatBoostClassifier   # pip install catboost
+
+# CatBoost — symmetric (oblivious) trees + ordered boosting — mirrors the lab
+# (learning_rate=${lr}, depth=${maxDepth}, l2_leaf_reg=${lam})
+${centers}
+
+clf = CatBoostClassifier(
+    learning_rate=${lr},
+    depth=${maxDepth},           # symmetric trees: one split test per level
+    l2_leaf_reg=${lam},
+    iterations=200,
+    verbose=False,
+).fit(X, y)
+print("train acc:", clf.score(X, y))
+`;
+  }
+  return `import numpy as np
+from sklearn.datasets import make_blobs
+import xgboost as xgb   # pip install xgboost
+
+# XGBoost — level-wise growth — mirrors the lab (eta=${lr}, max_depth=${maxDepth}, lambda=${lam})
+${centers}
+
+clf = xgb.XGBClassifier(
+    learning_rate=${lr},
+    max_depth=${maxDepth},       # level-wise growth to a fixed depth
+    reg_lambda=${lam},
+    n_estimators=200,
+    eval_metric="logloss",
+).fit(X, y)
+print("train acc:", clf.score(X, y))
+`;
+};
+
 export const naiveBayesPython = (variant = 'gaussian', alpha = 1, bins = 8) => {
   if (variant === 'multinomial') {
     return `import numpy as np

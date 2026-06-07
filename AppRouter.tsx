@@ -19,6 +19,7 @@ const AppRouter: React.FC = () => (
       <Route path="/supervised/:labId?" element={<AreaHost category="supervised" />} />
       <Route path="/logic/:labId?" element={<AreaHost category="logic" />} />
       <Route path="/neural/:labId?" element={<AreaHost category="neural" />} />
+      <Route path="/deep-learning/:labId?" element={<AreaHost category="deep-learning" />} />
       <Route path="/model-checking/:labId?" element={<AreaHost category="model-checking" />} />
       <Route path="/image/:labId?" element={<AreaHost category="image" />} />
       <Route path="/audio/:labId?" element={<AreaHost category="audio" />} />

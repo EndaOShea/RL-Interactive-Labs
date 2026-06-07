@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { DTREE_CONTENT, SVM_CONTENT, NB_CONTENT } from './content';
+import { DTREE_CONTENT, SVM_CONTENT, NB_CONTENT, GBM_CONTENT } from './content';
 
 const ACCENT = '#fbbf24';
 
@@ -28,6 +28,18 @@ export const SUPERVISED_LABS: LabDescriptor[] = [
     codeFile: 'svm.py',
     content: SVM_CONTENT,
     component: React.lazy(() => import('./Svm')),
+  },
+  {
+    id: 'gradient-boosting',
+    category: 'supervised',
+    title: 'Gradient Boosting',
+    subtitle: 'Boosted trees · XGBoost / LightGBM / CatBoost',
+    blurb: 'Stack shallow trees that each fix the last one’s errors — toggle XGBoost, LightGBM and CatBoost to see how their tree growth differs.',
+    icon: 'M4 19h4v-6H4zM10 19h4V9h-4zM16 19h4V5h-4zM3 13l5-4 4 2 6-6',
+    accent: ACCENT,
+    codeFile: 'gradient_boosting.py',
+    content: GBM_CONTENT,
+    component: React.lazy(() => import('./GradientBoosting')),
   },
   {
     id: 'naive-bayes',

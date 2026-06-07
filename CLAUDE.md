@@ -11,9 +11,9 @@ real-time math breakdowns, and multi-provider AI tutoring — all inside a singl
 
 The platform is being expanded **one subject area at a time** beyond RL. Added areas so far:
 Classic ML, Search & Pathfinding, Unsupervised Learning, Supervised Learning, Logic & Reasoning,
-Neural Networks, Model Checking, Image Classification, Audio & Speech, Large Language Models,
-Diffusion Models, Math Foundations. See **Multi-area platform** below. The original RL app is deliberately left
-untouched and now lives at the `/rl` route; a catalog home (`/`) is the hub.
+Neural Networks, Deep Learning, Model Checking, Image Classification, Audio & Speech, Large Language
+Models, Diffusion Models, Math Foundations. See **Multi-area platform** below. The original RL app is
+deliberately left untouched and now lives at the `/rl` route; a catalog home (`/`) is the hub.
 
 ## Multi-area platform (catalog + non-RL labs)
 
@@ -40,13 +40,16 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
   alone). Keys are in memory only, per area.
 - **Labs** — under `labs/<area>/` (`classic-ml`: kNN, linear/logistic regression, k-means, PCA;
   `search`: Pathfinding, GraphSearch; `unsupervised`: DBSCAN, GMM/EM, Hierarchical; `supervised`:
-  DecisionTree, SVM, NaiveBayes; `logic`: TruthTable, DPLL; `neural`: Perceptron, MLP, Activations;
-  `model-checking`: MutualExclusion, RiverCrossing; `image`: Convolution, FeatureMaps; `audio`:
-  Fourier, Spectrogram; `llm`: Tokenizer, Sampling, Attention; `diffusion`: ForwardReverse,
-  NoiseSchedule; `math`: GradientDescent, Taylor, LinearTransform). Each area has `content.ts`,
-  `python.ts`, `registry.ts` (+ area-specific helpers). Viz primitives in `components/labkit/viz/`:
-  `ScatterPlot` (points/field/circles/ellipses), `FunctionPlot`, `GridBoard`, `GraphCanvas`,
-  `Dendrogram`. A lab owns its sim state + `step()`, builds a `SimulationUpdate` for the live
+  DecisionTree, GradientBoosting (XGBoost/LightGBM/CatBoost tree-growth toggle), SVM, NaiveBayes;
+  `logic`: TruthTable, DPLL; `neural`: Perceptron, MLP, Activations; `deep-learning`: ResNet
+  (vanishing-gradient vs skip connections), BatchNorm, Dropout, TransferLearning, Optimizers
+  (SGD/Momentum/RMSProp/Adam + LR schedules); `model-checking`: MutualExclusion, RiverCrossing;
+  `image`: Convolution, FeatureMaps; `audio`: Fourier, Spectrogram; `llm`: Tokenizer, Sampling,
+  Attention; `diffusion`: ForwardReverse, NoiseSchedule; `math`: GradientDescent, Taylor,
+  LinearTransform). Each area has `content.ts`, `python.ts`, `registry.ts` (+ area-specific helpers).
+  Viz primitives in `components/labkit/viz/`: `ScatterPlot` (points/field/circles/ellipses/lines),
+  `FunctionPlot`, `GridBoard`, `GraphCanvas`, `Dendrogram`, `LayerDiagram`, `Heatmap`,
+  `DistributionBars`. A lab owns its sim state + `step()`, builds a `SimulationUpdate` for the live
   math, and renders `<LabStage>` with its slots — mirroring how RL labs render `StageLayout`.
   Sims are **analytic / client-side** (no TF.js/ONNX/servers). Exports runnable Python via
   `utils/downloadCode.ts` + per-lab templates.

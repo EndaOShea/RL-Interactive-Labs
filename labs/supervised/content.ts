@@ -65,6 +65,35 @@ export const SVM_CONTENT: LabContent = {
   ],
 };
 
+export const GBM_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Gradient Boosting',
+      body: 'Boosting builds an ensemble sequentially: each new shallow tree is fit to the errors (the negative gradient of the loss) left by all the trees before it, then added with a small shrinkage factor. With second-order (Newton) boosting, each leaf uses both the gradient and the curvature of the loss, giving the optimal leaf weight w* = −Σg / (Σh + λ). Stacking many weak trees this way turns them into one strong model.',
+      details: [
+        { label: 'Gradient / hessian', text: 'For logistic loss, g = p − y and h = p(1−p). Trees regress on −g; leaves use the Newton step.' },
+        { label: 'Shrinkage η', text: 'Each tree is scaled by the learning rate before being added. Small η + many trees usually generalises best.' },
+        { label: 'λ (L2)', text: 'Regularises leaf weights toward zero, damping noisy splits — the +λ in the denominator.' },
+        { label: 'Split gain', text: '½[ G_L²/(H_L+λ) + G_R²/(H_R+λ) − G²/(H+λ) ] − γ; a split is kept only if it improves the regularised objective.' },
+      ],
+    },
+    {
+      heading: 'XGBoost vs LightGBM vs CatBoost',
+      body: 'All three share the gradient-boosting core and differ mainly in how each tree is grown. XGBoost grows level-wise (split every node down to a fixed depth) with strong regularisation. LightGBM grows leaf-wise (always split the single leaf with the largest gain), producing deeper, unbalanced trees that train fast and often score higher, at a slightly higher overfitting risk. CatBoost grows symmetric (oblivious) trees — the same split test on every node of a level — which are balanced, very fast to evaluate, and paired with ordered boosting to reduce target leakage, plus native categorical-feature handling.',
+      details: [
+        { label: 'XGBoost', text: 'Level-wise growth, second-order gain, L1/L2 regularisation. The robust all-rounder.' },
+        { label: 'LightGBM', text: 'Leaf-wise growth + histogram binning. Fastest on large data; cap with num_leaves / min-data-in-leaf.' },
+        { label: 'CatBoost', text: 'Symmetric trees + ordered boosting + built-in categorical encoding. Strong defaults, great on categorical data.' },
+        { label: 'Histograms', text: 'Production libraries bin features into histograms so split-finding is O(bins), not O(points) — the key speed trick.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    { category: 'METHODOLOGY', title: 'Tune η with n_estimators', description: 'Learning rate and tree count trade off; a small η needs more trees.', recommendation: 'Use early stopping on a validation set rather than fixing the tree count by hand.' },
+    { category: 'VERIFICATION', title: 'Overfitting', description: 'Boosting fits training data aggressively, especially leaf-wise growth.', recommendation: 'Regularise with λ, max-depth / num-leaves, subsampling, and early stopping.' },
+  ],
+};
+
 export const NB_CONTENT: LabContent = {
   sections: [
     {

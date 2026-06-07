@@ -12,6 +12,7 @@ import { UNSUPERVISED_LABS } from '../labs/unsupervised/registry';
 import { SUPERVISED_LABS } from '../labs/supervised/registry';
 import { LOGIC_LABS } from '../labs/logic/registry';
 import { NEURAL_LABS } from '../labs/neural/registry';
+import { DEEP_LEARNING_LABS } from '../labs/deep-learning/registry';
 import { MODEL_CHECKING_LABS } from '../labs/model-checking/registry';
 import { IMAGE_LABS } from '../labs/image/registry';
 import { AUDIO_LABS } from '../labs/audio/registry';
@@ -28,7 +29,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Reinforcement Learning',
     blurb: 'Agents that learn by trial, reward and planning — the original Policy Playground.',
     icon: 'M12 2 2 7l10 5 10-5-10-5Z',
-    order: 11,
+    order: 12,
     to: '/rl',
   },
   {
@@ -88,11 +89,19 @@ export const CATEGORIES: CategoryMeta[] = [
     accent: '#fb7185',
   },
   {
+    id: 'deep-learning',
+    label: 'Deep Learning',
+    blurb: 'What makes deep nets trainable — residual connections, batch norm, dropout, transfer learning and optimizers.',
+    icon: 'M4 7a2 2 0 1 0 0-.01M4 17a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M20 7a2 2 0 1 0 0-.01M20 17a2 2 0 1 0 0-.01M6 7h12M6 17h12M4 9v6M20 9v6',
+    order: 9,
+    accent: '#f43f5e',
+  },
+  {
     id: 'image',
     label: 'Image Classification',
     blurb: 'How CNNs see — convolution filters, feature maps and a tiny image classifier pipeline.',
     icon: 'M3 5h18v14H3zM3 15l5-5 4 4 3-3 6 6M8 9a1.4 1.4 0 1 0 0-.01',
-    order: 9,
+    order: 10,
     accent: '#60a5fa',
   },
   {
@@ -100,7 +109,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Audio & Speech',
     blurb: 'The Fourier front-end of speech recognition — harmonic synthesis and live spectrograms.',
     icon: 'M4 10v4M8 6v12M12 9v6M16 5v14M20 10v4',
-    order: 10,
+    order: 11,
     accent: '#fb923c',
   },
   {
@@ -108,7 +117,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Large Language Models',
     blurb: 'Inside an LLM — tokenization, temperature/top-k/top-p sampling and self-attention.',
     icon: 'M4 5h16v10H8l-4 4zM8 9h8M8 12h5',
-    order: 12,
+    order: 13,
     accent: '#a78bfa',
   },
   {
@@ -116,7 +125,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Diffusion Models',
     blurb: 'Generative diffusion — the forward noising process, reverse denoising and noise schedules.',
     icon: 'M5 5a1 1 0 1 0 0-.01M12 5a1 1 0 1 0 0-.01M19 6a1 1 0 1 0 0-.01M7 12a1 1 0 1 0 0-.01M17 13a1 1 0 1 0 0-.01M12 19a1 1 0 1 0 0-.01',
-    order: 13,
+    order: 14,
     accent: '#f59e0b',
   },
   {
@@ -152,6 +161,7 @@ export const LABS: LabDescriptor[] = [
   ...SUPERVISED_LABS,
   ...LOGIC_LABS,
   ...NEURAL_LABS,
+  ...DEEP_LEARNING_LABS,
   ...MODEL_CHECKING_LABS,
   ...IMAGE_LABS,
   ...AUDIO_LABS,
