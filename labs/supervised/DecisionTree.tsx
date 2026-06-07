@@ -132,7 +132,7 @@ const DecisionTreeLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
       : 'entropy measures the bits of uncertainty in a node, and information gain is the parent entropy minus the weighted entropy of the children';
     narration.narratePhase(
       `run:${crit}:${minLeaf}`,
-      `This is a decision tree using ${critWord} to choose its splits. At every node it asks one yes or no question about a feature, and it greedily picks the cut that most reduces impurity. ${measure[0].toUpperCase() + measure.slice(1)}. Because this data is X O R like, a single straight cut can never separate it. Watch the left panel carve into rectangular regions while the tree on the right grows level by level, with the newest split shown in amber.`
+      `The challenge here: separate four clusters arranged in an X O R pattern, where no single straight cut can ever split the classes. A decision tree tackles this by asking one yes or no question about a feature at every node, greedily picking the cut that most reduces ${critWord}. ${measure[0].toUpperCase() + measure.slice(1)}. Watch the left panel carve into rectangular regions while the tree on the right grows level by level, with the newest split shown in amber. Decision trees and their forest ensembles power credit scoring, medical diagnosis and fraud detection across industry.`
     );
     if (a >= 0.99) {
       narration.narratePhase(

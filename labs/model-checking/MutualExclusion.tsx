@@ -88,7 +88,7 @@ const MutualExclusionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     setCursor(cursor + 1);
     narration.narratePhase(
       `run:${proto}:${mode}`,
-      `This is model checking. Two threads each cycle from idle to waiting to critical, and the search walks every reachable combination, exploring all the ways their steps can interleave. The live invariant reads always globally not, both in critical at once — meaning in every reachable state, the two threads are never both critical together. Using the ${PROTO_NAME[proto]} protocol in ${mode === 'bfs' ? 'breadth first' : 'depth first'} order. Watch the state graph fan out, and if a red unsafe state appears, the gold path back to the start is the counterexample.`,
+      `The challenge here: prove that two concurrent threads, each cycling from idle to waiting to critical, can never both be in their critical section at the same time, no matter how their steps interleave. To do it, this model checker exhaustively walks every reachable combination of states under the ${PROTO_NAME[proto]} protocol in ${mode === 'bfs' ? 'breadth first' : 'depth first'} order, checking the live invariant — always, globally, not both critical at once — in each one. Watch the state graph fan out, and if a red unsafe state appears, the gold path back to the start is the counterexample. This is how engineers verify concurrent software, operating-system kernels, cache-coherence hardware and distributed protocols, where a single missed race can be catastrophic.`,
     );
     setLastLog({
       algorithm: `Model Checking · ${mode.toUpperCase()} reachability`,

@@ -64,10 +64,10 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
   // what we are doing and the live math, and one CONCLUSION interpreting the result.
   const intro = () => {
     const n = table ? table.vars.length : 0;
-    const base = `This is a truth table. We list the formula's value for every assignment of its ${n} variable${n === 1 ? '' : 's'}, which is two to the power of ${n} rows, and that completely defines what the formula means.`;
-    if (mode === 'models') return `${base} In list-models mode we collect the rows where the formula comes out true. Those true rows are its models. Watch the green rows light up as the satisfying assignments are found.`;
-    if (mode === 'cnf') return `${base} In derive-conjunctive-normal-form mode we walk the false rows instead. Negating a false assignment gives one clause that rules out exactly that row, so anding all of them together builds a formula equivalent to the original. Watch each false row contribute a clause.`;
-    return `${base} In classify mode we check whether it is a tautology, true in every row, a contradiction, true in none, or merely satisfiable, true in at least one. Watch the proportion bar fill as each row is evaluated.`;
+    const base = `The challenge here: pin down exactly what this boolean formula means, with no ambiguity. A truth table answers it by listing the formula's value for every assignment of its ${n} variable${n === 1 ? '' : 's'}, which is two to the power of ${n} rows, completely defining the formula's behaviour.`;
+    if (mode === 'models') return `${base} In list-models mode we collect the rows where the formula comes out true. Those true rows are its models. Watch the green rows light up as the satisfying assignments are found. Enumerating models like this underlies configuration checking, database query evaluation and formal specification work.`;
+    if (mode === 'cnf') return `${base} In derive-conjunctive-normal-form mode we walk the false rows instead. Negating a false assignment gives one clause that rules out exactly that row, so anding all of them together builds a formula equivalent to the original. Watch each false row contribute a clause. This canonical form is exactly what hardware verification tools and SAT solvers consume.`;
+    return `${base} In classify mode we check whether it is a tautology, true in every row, a contradiction, true in none, or merely satisfiable, true in at least one. Watch the proportion bar fill as each row is evaluated. This same reasoning powers digital circuit design, compiler optimization and formal verification of safety-critical systems.`;
   };
   const conclusion = () => {
     if (!table) return '';

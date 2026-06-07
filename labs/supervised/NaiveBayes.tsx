@@ -102,12 +102,12 @@ const NaiveBayesLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     if (variant === 'gaussian') {
       narration.narratePhase(
         'run:gaussian',
-        `This is Gaussian naive bayes. It applies Bayes rule with one strong shortcut, that the features are independent given the class, so the posterior probability of a class is its prior times the product of a one dimensional Gaussian likelihood for each feature, all normalised. On screen each ellipse is one class fitted as an axis aligned Gaussian at plus or minus two sigma, and the white point is a roaming query coloured by whichever class wins. The boundaries here are curved, not straight lines.`
+        `The challenge here: given a new point of unknown class, decide which of three overlapping clusters it most likely belongs to, and say how confident you are. Gaussian naive bayes answers this with Bayes rule and one strong shortcut, that the features are independent given the class, so the posterior probability of a class is its prior times the product of a one dimensional Gaussian likelihood for each feature, all normalised. On screen each ellipse is one class fitted as an axis aligned Gaussian at plus or minus two sigma, and the white point is a roaming query coloured by whichever class wins, with curved boundaries rather than straight lines. Naive bayes powers spam filtering, sentiment analysis and medical screening where fast probabilistic guesses are needed.`
       );
     } else {
       narration.narratePhase(
         `run:multinomial:${alpha < 0.01 ? 'noalpha' : alpha > 2 ? 'high' : 'std'}`,
-        `This is multinomial naive bayes. Instead of fitting a Gaussian, it bins each axis into cells and learns how often each class lands in each cell, so the likelihood of a feature is the smoothed cell frequency, the count plus alpha over the total plus alpha times the number of bins. That gives blocky decision regions rather than smooth ellipses. The Laplace alpha, currently ${alpha}, decides how unseen cells are handled, a large alpha smooths and blurs while alpha near zero turns brittle.`
+        `The challenge here: classify a new point among three clusters using only discrete counts, while still handling cells where a class was never seen. Multinomial naive bayes solves this by binning each axis into cells and learning how often each class lands in each cell, so the likelihood of a feature is the smoothed cell frequency, the count plus alpha over the total plus alpha times the number of bins. That gives blocky decision regions rather than smooth ellipses, and the Laplace alpha, currently ${alpha}, decides how unseen cells are handled, a large alpha smooths and blurs while alpha near zero turns brittle. Multinomial naive bayes is the classic text classifier behind spam filtering and document categorisation from word counts.`
       );
     }
     if (conf >= 90) {

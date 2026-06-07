@@ -365,7 +365,7 @@ function introNarration(fn: Fn, opt: Opt): string {
       : opt === 'rmsprop'
         ? 'RMSProp keeps a running mean of the squared gradient and divides the step by its square root, so steep directions are damped and flat ones amplified.'
         : 'Plain gradient descent moves the point opposite the slope, x becomes x minus alpha times the gradient; with momentum it also carries a velocity that rolls it across shallow dips.';
-  return `Gradient descent is just optimisation: it keeps stepping downhill until the slope is zero. ${rule} ${shape} Watch the gold point ride the curve, the red tangent show the current slope, and the loss trace fall as it descends.`;
+  return `The challenge here: find the lowest point of this curve using only the local slope, never seeing the whole landscape at once. Gradient descent solves it by repeatedly stepping downhill, opposite the slope, until the gradient reaches zero. ${rule} ${shape} Watch the gold point ride the curve, the red tangent show the current slope, and the loss trace fall as it descends. This is the workhorse that trains almost every neural network and machine-learning model, adjusting millions of parameters to minimise a loss.`;
 }
 
 // per-optimiser math detail rows

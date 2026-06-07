@@ -90,30 +90,37 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   // Conceptual INTRO narration: paraphrase this algorithm's Context + voice its live-math, said once per run/algorithm.
   const introNarration = (): string => {
     if (isBi) {
-      return 'Bi-directional search grows two frontiers at once, one outward from the start and one backward from the goal, and stops the moment they meet in the middle. '
-        + 'Because each half only has to reach the midpoint, together they settle far fewer cells than a single search would. Watch the two coloured waves spread toward each other.';
+      return 'The challenge here: find a route from the start to the goal across this wall-dotted grid while touching as few cells as possible. '
+        + 'Bi-directional search grows two frontiers at once, one outward from the start and one backward from the goal, and stops the moment they meet in the middle, so each half only has to reach the midpoint and together they settle far fewer cells than a single search would. Watch the two coloured waves spread toward each other. '
+        + 'This trick speeds up route-finding in GPS navigation and large game maps where searching the whole world would be too slow.';
     }
     const hWords = HEURISTIC_LABEL[heuristic].toLowerCase();
     switch (algo) {
       case 'astar':
-        return `A-star expands the frontier cell with the smallest f, where f equals g plus h: the real cost travelled from the start plus the ${hWords} estimate of the distance still to go. `
-          + 'Because that estimate never overshoots, A-star is guaranteed to find the shortest path while exploring far less than a blind flood. Watch the visited cells lean toward the goal.';
+        return `The challenge here: find the lowest-cost route from the start to the goal across this wall-dotted grid, without searching the whole map. `
+          + `A-star expands the frontier cell with the smallest f, where f equals g plus h: the real cost travelled from the start plus the ${hWords} estimate of the distance still to go, and because that estimate never overshoots it is guaranteed to find the shortest path while exploring far less than a blind flood. Watch the visited cells lean toward the goal. `
+          + 'This is the algorithm behind GPS routing, game-character navigation and robot motion planning.';
       case 'wastar':
-        return `Weighted A-star expands by f equals g plus epsilon times h, inflating the ${hWords} estimate so the search commits toward the goal sooner. `
-          + 'It expands far fewer cells, and the path it returns is provably at most epsilon times the optimal cost. Watch how few cells it touches compared with plain A-star.';
+        return `The challenge here: reach the goal across this wall-dotted grid fast, even if the route is a touch longer than the very shortest. `
+          + `Weighted A-star expands by f equals g plus epsilon times h, inflating the ${hWords} estimate so the search commits toward the goal sooner: it expands far fewer cells, and the path it returns is provably at most epsilon times the optimal cost. Watch how few cells it touches compared with plain A-star. `
+          + 'Real-time games and robotics use this when a good-enough path right now beats a perfect path too late.';
       case 'greedy':
-        return `Greedy search expands whichever frontier cell has the smallest h, the ${hWords} estimate to the goal, ignoring the cost already paid. `
-          + 'It rushes straight at the target, so it is fast, but walls can fool it into a longer path. Watch it charge toward the goal and sometimes get trapped.';
+        return `The challenge here: get from the start to the goal across this wall-dotted grid as quickly as you can. `
+          + `Greedy search expands whichever frontier cell has the smallest h, the ${hWords} estimate to the goal, ignoring the cost already paid, so it rushes straight at the target and is fast, but walls can fool it into a longer path. Watch it charge toward the goal and sometimes get trapped. `
+          + 'This goal-directed style appears in quick game-AI movement and as a fast first pass in larger planners.';
       case 'dijkstra':
-        return 'Dijkstra always expands the cell with the smallest g, the cheapest cost found so far from the start, using no goal information at all. '
-          + 'That guarantees the shortest path, but the frontier floods outward in every direction. Watch it spread evenly like ripples on water.';
+        return 'The challenge here: find the genuinely cheapest route from the start to the goal across this grid, even though we have no hint about where the goal is. '
+          + 'Dijkstra always expands the cell with the smallest g, the cheapest cost found so far from the start, using no goal information at all, which guarantees the shortest path but makes the frontier flood outward in every direction. Watch it spread evenly like ripples on water. '
+          + 'It powers network routing, road-network shortest paths and any system needing guaranteed-cheapest routes.';
       case 'bfs':
-        return 'Breadth-first search expands the oldest cell on the frontier first, a simple first-in first-out queue, so it explores in rings of equal step-count. '
-          + 'On an unweighted grid that finds the path with the fewest steps. Watch the visited region grow as even rings around the start.';
+        return 'The challenge here: find the path with the fewest steps from the start to the goal across this grid, where every move costs the same. '
+          + 'Breadth-first search expands the oldest cell on the frontier first, a simple first-in first-out queue, so it explores in rings of equal step-count and finds the fewest-step path on an unweighted grid. Watch the visited region grow as even rings around the start. '
+          + 'BFS underlies social-network degrees of separation, web crawling and puzzle solvers.';
       case 'dfs':
       default:
-        return 'Depth-first search expands the newest cell first, a last-in first-out stack, so it plunges deep down one branch before backing up. '
-          + 'It uses very little memory but the path it returns is rarely the shortest. Watch it snake far in one direction before turning back.';
+        return 'The challenge here: reach the goal across this grid using as little memory as possible, even if the route is not the shortest. '
+          + 'Depth-first search expands the newest cell first, a last-in first-out stack, so it plunges deep down one branch before backing up, using very little memory but rarely returning the shortest path. Watch it snake far in one direction before turning back. '
+          + 'DFS drives maze generation, dependency resolution and cycle detection in real systems.';
     }
   };
 

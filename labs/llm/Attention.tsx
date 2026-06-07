@@ -76,7 +76,8 @@ const AttentionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
     // live math (softmax of Q dot K over root d, times V) and what to watch; plus
     // a CONCLUSION when a full sweep over every query row finishes.
     const intro =
-      `Self-attention lets every word look at every other word and pull in what it needs. ` +
+      `The challenge here: in "the cat sat on the mat", which word should each word pay attention to, and how strongly? ` +
+      `Self-attention solves it by letting every word look at every other word and pull in what it needs. ` +
       `For each token we take its query, dot it against every key, divide by the square root of the head dimension to keep the scores stable, ` +
       `then a softmax turns each row into weights that sum to one, and those weights mix the values. ` +
       (causal
@@ -85,7 +86,8 @@ const AttentionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
       (heads > 1
         ? `With ${heads} heads the four embedding dimensions split into separate subspaces, and you are watching one head; each head can specialise in a different relation. `
         : `A single head is shown; real Transformers run many heads in parallel and stack dozens of layers. `) +
-      `Watch each row light up to see where that word is looking; a lower scale sharpens the focus, a higher scale spreads it out.`;
+      `Watch each row light up to see where that word is looking; a lower scale sharpens the focus, a higher scale spreads it out. ` +
+      `This is the core operation inside every Transformer — powering GPT, Llama, machine translation, and the vision and protein models built on the same architecture.`;
     narration.narratePhase(`run:${causal ? 'causal' : 'full'}:${heads}:${head}:${scale.toFixed(2)}`, intro);
 
     setLastLog({

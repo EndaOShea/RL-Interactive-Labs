@@ -47,7 +47,7 @@ const DpllLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     if (pureLiteral) rules.push('pure-literal elimination, which safely fixes a variable that appears with only one polarity');
     if (learn) rules.push('clause learning, which records a no-good after each conflict so the same dead end is never re-entered');
     const ruleText = rules.length ? `It uses ${rules.join('; and ')}.` : 'With every inference rule switched off, it falls back to plain guessing and backtracking.';
-    return `This is D-P-L-L, the backtracking search at the heart of every SAT solver. It asks whether this conjunctive-normal-form formula can be satisfied, alternating cheap forced inference with decisions. ${ruleText} When no inference applies it guesses a variable, and a clause with every literal false is a conflict that makes it backtrack. Watch the search tree branch and the assignment trail grow.`;
+    return `The challenge here: decide whether this conjunctive-normal-form formula can be satisfied at all, that is, whether there is any assignment of true and false that makes every clause hold. This is the boolean satisfiability problem, the first proven NP-complete problem. D-P-L-L tackles it with backtracking search, alternating cheap forced inference with decisions. ${ruleText} When no inference applies it guesses a variable, and a clause with every literal false is a conflict that makes it backtrack. Watch the search tree branch and the assignment trail grow. SAT solvers built on this loop now drive hardware and software verification, automated planning, and cryptanalysis.`;
   };
 
   const step = () => {

@@ -93,7 +93,7 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     // matters for training.
     if (overlay) {
       narration.narratePhase('run:overlay',
-        'This view overlays every activation function on the same axes. The flat, saturating curves like sigmoid and tanh squash their inputs into a fixed range, while the ReLU family stays a straight line for positive inputs. Compare how quickly each one flattens, because wherever the curve goes flat its gradient dies and learning stalls.');
+        'The challenge here: pick the right non-linearity for a neuron, the small function that decides how it fires. This view overlays every activation on the same axes, so you can compare them directly. The flat, saturating curves like sigmoid and tanh squash their inputs into a fixed range, while the ReLU family stays a straight line for positive inputs. Watch how quickly each one flattens, because wherever the curve goes flat its gradient dies and learning stalls. Choosing between these is a real design decision in every deep network built for vision, speech and language.');
     } else {
       const teach = fn === 'sigmoid'
         ? 'Sigmoid squashes any input into the range zero to one, but both tails go flat, so their gradient, the gold curve, falls to nearly zero and neurons out there barely learn. Chaining many of these is why deep sigmoid networks were historically so hard to train.'
@@ -109,7 +109,7 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
                   ? 'SiLU, also called Swish, multiplies the input by its own sigmoid gate. The result dips slightly below zero before rising, a smooth self-gated curve whose gradient stays useful, used in networks like EfficientNet.'
                   : 'GELU is a smooth, self-gated curve that weights each input by the chance it is positive. It is the activation inside Transformers, giving a softer, more trainable landscape than a hard ReLU corner.';
       narration.narratePhase(`run:${fn}`,
-        `This is the ${fn} activation, the non-linearity applied at each neuron, and without it stacking layers would collapse to one plain linear map. ${teach} As the run sweeps the marker across x, watch the gold gradient curve, since that is exactly the signal backpropagation multiplies on the way back.`);
+        `The challenge here: understand exactly how the ${fn} activation shapes an input and, just as importantly, how big a gradient it hands back for learning. This non-linearity is applied at each neuron, and without it stacking layers would collapse to one plain linear map. ${teach} As the run sweeps the marker across x, watch the gold gradient curve, since that is exactly the signal backpropagation multiplies on the way back. The choice of activation directly affects whether real deep networks for vision, speech and language train at all.`);
     }
     setLastLog({
       algorithm: `Activation · ${fn}`,

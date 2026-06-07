@@ -195,7 +195,7 @@ const ForwardReverseLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
       } else {
         // INTRO for the forward pass — voice the marginal formula and what to watch.
         narration.narratePhase(`run:forward:${schedule}:${dataset}`,
-          `Forward diffusion. Each point follows the closed-form marginal: x at step t equals the square root of alpha-bar times the clean point, plus the square root of one minus alpha-bar times a fixed noise vector. On the ${schedule} schedule, alpha-bar is the signal that survives, sliding from one toward zero. Watch the ${dataset} structure smear into a featureless blob as noise takes over.`);
+          `The challenge here: turn structured data into pure noise in a way we can later reverse. Forward diffusion does it with a closed-form marginal: x at step t equals the square root of alpha-bar times the clean point, plus the square root of one minus alpha-bar times a fixed noise vector. On the ${schedule} schedule, alpha-bar is the signal that survives, sliding from one toward zero. Watch the ${dataset} structure smear into a featureless blob as noise takes over. This forward chain is the training backbone of image and video generators like Stable Diffusion and DALL-E.`);
       }
     } else {
       if (tt <= 0) {
@@ -211,7 +211,7 @@ const ForwardReverseLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
           ? `${samp} is deterministic: it predicts the clean point, then re-noises straight to the previous step, hitting the same marginals in only ${steps} strided moves instead of all of T.`
           : `${samp} is stochastic and ancestral: it samples each earlier step with a little fresh noise, so it needs many steps but gives the most diverse samples.`;
         narration.narratePhase(`run:reverse:${sampler}:${guidance}`,
-          `Reverse diffusion. ${sampClause}${guideClause} Watch the blob condense back toward the original shape.`);
+          `The challenge here: start from a blob of pure noise and recover real, structured samples. Reverse diffusion does it by stepping back down the chain. ${sampClause}${guideClause} Watch the blob condense back toward the original shape. This is exactly how diffusion models generate images, audio and 3D shapes, with the sampler-and-guidance choice trading speed against fidelity in production systems.`);
       }
     }
   };

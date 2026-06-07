@@ -86,7 +86,7 @@ const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   useEffect(() => { restart(points, k, method); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seedWord = method === 'ff' ? 'farthest-first' : method === 'random' ? 'random' : 'k-means plus plus';
-  const intro = `k-means partitions the points into ${k} clusters by alternating two steps until nothing moves. First it assigns every point to its nearest centroid; then it moves each centroid to the mean of the points assigned to it. Both steps only ever lower the inertia — the total within-cluster squared distance shown in the panel — so it is coordinate descent toward a local optimum. We seeded the centroids with ${seedWord} initialisation; watch the plus markers drift to the centres of the blobs and the dashed rings tighten.`;
+  const intro = `The challenge here: discover ${k} groups hidden in these unlabelled points, with no answer key to learn from. k-means tackles it by alternating two steps until nothing moves — it assigns every point to its nearest centroid, then moves each centroid to the mean of the points assigned to it. Both steps only ever lower the inertia, the total within-cluster squared distance shown in the panel, so it is coordinate descent toward a local optimum. We seeded the centroids with ${seedWord} initialisation; watch the plus markers drift to the centres of the blobs and the dashed rings tighten. Clustering like this drives customer segmentation, image colour compression, document grouping, and anomaly detection.`;
 
   const step = () => {
     narration.narratePhase(`run:${k}:${method}`, intro);

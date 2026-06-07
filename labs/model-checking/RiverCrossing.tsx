@@ -82,7 +82,7 @@ const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
     setCursor(cursor + 1);
     narration.narratePhase(
       `run:${scenario}:${mode}`,
-      `This puzzle is a reachability question, the same idea as model checking: starting from everyone on the near bank, can we reach the goal where everyone is across, while never passing through an unsafe state? The live property says reach the start, stay always safe, and eventually find the goal. Unsafe states, where a predator is left with its prey and no farmer, are coloured red and never explored. We're searching in ${mode === 'bfs' ? 'breadth first order, which finds the shortest crossing schedule' : 'depth first order, which dives deep for any valid schedule'}. Watch the safe region grow until a path to the goal appears.`,
+      `The task: starting with everyone on the near bank, find a sequence of farmer trips that gets every item safely across the river, never leaving a predator alone with its prey. That is a reachability question, the same idea as model checking — can we reach the goal state while staying always safe? The search explores in ${mode === 'bfs' ? 'breadth first order, which finds the shortest crossing schedule' : 'depth first order, which dives deep for any valid schedule'}, pruning unsafe states, shown in red, where something would get eaten. Watch the safe region grow until a path to the goal appears. The same reachability search powers AI planning, robotics motion and task plans, protocol verification and automated puzzle and game solvers.`,
     );
     setLastLog({
       algorithm: `Model Checking · ${mode.toUpperCase()} reachability`,

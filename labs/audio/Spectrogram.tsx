@@ -222,9 +222,14 @@ const SpectrogramLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     const formula = mel
       ? `For each frame we take a windowed Fourier transform, then pool the linear bins into mel bands, capital M of m and tau equals the sum over f of the mel filter times the magnitude of capital X. High frequencies share wide bands, just like the ear.`
       : `For each frame we take a windowed Fourier transform, capital X of f and tau is the magnitude of the sum of the window times the signal times a complex sinusoid. Each column is one frame's spectrum.`;
+    const challenge =
+      signal === 'chirp' ? `The challenge here: pin down a tone whose pitch keeps changing, and show exactly when it sits at each frequency.`
+        : signal === 'two-tone' ? `The challenge here: pull apart two tones that play at once and reveal each as its own steady band over time.`
+          : signal === 'vowel' ? `The challenge here: expose the hidden resonant structure of a sustained vowel, the formants that tell one vowel from another.`
+            : `The challenge here: separate a clean tone from the broadband noise mixed in with it, and track it through time.`;
     narration.narratePhase(
       `run:${signal}:${windowSize}:${win}:${mel}`,
-      `A spectrogram shows how the spectrum changes over time, because speech is non stationary. We slide ${tradeoff} across the signal. ${formula} ${tape} As the columns fill left to right, ${watch}; the yellow trace follows the dominant frequency.`,
+      `${challenge} A whole signal Fourier transform says which frequencies are present but not when, so a spectrogram slides ${tradeoff} across the signal to show how the spectrum changes over time. ${formula} ${tape} As the columns fill left to right, ${watch}; the yellow trace follows the dominant frequency. This time by frequency picture is the front end behind speech recognition, music transcription, sonar and radar, and medical signal analysis.`,
     );
   };
   const sim = useSimLoop(step, { initialSpeed: 150 });

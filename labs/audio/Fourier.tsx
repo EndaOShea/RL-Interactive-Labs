@@ -174,11 +174,12 @@ const FourierLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     } else {
       narration.narratePhase(
         `run:${preset}:${activeHarmonics}`,
-        `Fourier synthesis builds a signal by adding sine waves. x of t equals the sum over k of a k times the sine of ` +
-        `two pi k f t, so each slider is one harmonic, and harmonic k oscillates k times faster than the fundamental. ` +
-        `${capitalise(voice)} sums ${harmWord}, with the strongest at k equals ${dominant}. Watch the waveform on the left ` +
-        `and the amplitude bars on the right; they are the same signal seen in time and in frequency. As the run sweeps the ` +
-        `phase the waveform slides but the bars never move, because phase does not change which frequencies are present.`,
+        `The challenge here: build the rich shape of ${voice} using nothing but plain sine waves. Fourier synthesis solves it by ` +
+        `adding harmonics. x of t equals the sum over k of a k times the sine of two pi k f t, so each slider is one harmonic, ` +
+        `and harmonic k oscillates k times faster than the fundamental. ${capitalise(voice)} sums ${harmWord}, with the strongest ` +
+        `at k equals ${dominant}. Watch the waveform on the left and the amplitude bars on the right; they are the same signal seen ` +
+        `in time and in frequency, and as the run sweeps the phase the waveform slides but the bars never move. This decomposition ` +
+        `underpins audio synthesisers, MP3 and image compression, and every spectral feature behind speech recognition.`,
       );
     }
   };

@@ -106,11 +106,12 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
     // overall and the live rule it follows (merge the most frequent adjacent pair).
     narration.narratePhase(
       `run:${CORPORA[corpusIdx].name}`,
-      `This is Byte-Pair Encoding learning a tokenizer from scratch on the ${CORPORA[corpusIdx].name} corpus. ` +
+      `The challenge here: a model can only read a fixed vocabulary of tokens, so how do you build one that spells out any word yet stays compact? ` +
+        `Watch Byte-Pair Encoding learn that vocabulary from scratch on the ${CORPORA[corpusIdx].name} corpus. ` +
         `It starts with every word split into characters plus an end-of-word marker, counts every adjacent pair of symbols, ` +
-        `and at each step merges the single most frequent pair into a new symbol. ` +
-        `That is the rule: take the argument that maximises the pair count and join it. ` +
-        `Watch common fragments and whole words grow from the bottom up, merge by merge, and the learned rules build up below.`,
+        `and at each step merges the single most frequent pair into a new symbol — the rule is take the argument that maximises the pair count and join it. ` +
+        `Watch common fragments and whole words grow from the bottom up, merge by merge, and the learned rules build up below. ` +
+        `This is exactly how the tokenizers behind GPT, Llama and most production language models are trained.`,
     );
     setBpe((prev) => {
       if (prev.merges.length >= maxMerges) {

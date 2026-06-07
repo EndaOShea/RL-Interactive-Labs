@@ -96,29 +96,36 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   // Conceptual INTRO narration: paraphrase this algorithm's Context + voice its live-math on a weighted graph.
   const introNarration = (): string => {
     if (isBi) {
-      return 'Bi-directional search grows two cost-driven frontiers at once, one outward from the start and one backward from the goal, and stops the instant they collide. '
-        + 'When a node is reached by both sides the candidate path is its forward cost plus its backward cost, and the two halves are stitched together. Each side only reaches the midpoint, so far fewer nodes are settled than one full Dijkstra.';
+      return 'The challenge here: find the cheapest route from S to G across this weighted graph while settling as few nodes as possible. '
+        + 'Bi-directional search grows two cost-driven frontiers at once, one outward from the start and one backward from the goal, and stops the instant they collide; when a node is reached by both sides the candidate path is its forward cost plus its backward cost, and the two halves are stitched together, so each side only reaches the midpoint and far fewer nodes are settled than one full Dijkstra. '
+        + 'This powers fast route planning in road networks and large communication graphs.';
     }
     switch (algo) {
       case 'astar':
-        return 'A-star expands the node with the smallest f, where f equals g plus h: the total edge weight paid from the start plus the straight-line estimate to the goal. '
-          + 'It returns the same cheapest path as Dijkstra, but guided by the heuristic it usually touches far fewer nodes. Watch the frontier lean toward the goal.';
+        return 'The challenge here: find the lowest-total-weight route from S to G across this weighted graph, without examining every node. '
+          + 'A-star expands the node with the smallest f, where f equals g plus h: the total edge weight paid from the start plus the straight-line estimate to the goal, so it returns the same cheapest path as Dijkstra but, guided by the heuristic, usually touches far fewer nodes. Watch the frontier lean toward the goal. '
+          + 'It is the workhorse of GPS routing, game AI and robot path planning.';
       case 'wastar':
-        return 'Weighted A-star expands by f equals g plus epsilon times h, inflating the straight-line estimate so the search commits toward the goal sooner. '
-          + 'It expands a fraction of the nodes, and the cost it returns stays within epsilon times the optimum. Watch how directly it heads for the goal.';
+        return 'The challenge here: get a near-cheapest route from S to G across this weighted graph fast, trading a little optimality for speed. '
+          + 'Weighted A-star expands by f equals g plus epsilon times h, inflating the straight-line estimate so the search commits toward the goal sooner: it expands a fraction of the nodes, and the cost it returns stays within epsilon times the optimum. Watch how directly it heads for the goal. '
+          + 'Large-scale routing engines and real-time planners use this when latency matters more than the last few percent of cost.';
       case 'greedy':
-        return 'Greedy search expands whichever node has the smallest h, the straight-line estimate to the goal, ignoring the edge weight already spent. '
-          + 'It is fast and goal-directed but can be fooled, so its path is not always the cheapest. Watch it chase the goal by direction alone.';
+        return 'The challenge here: reach G from S across this weighted graph as quickly as possible. '
+          + 'Greedy search expands whichever node has the smallest h, the straight-line estimate to the goal, ignoring the edge weight already spent, so it is fast and goal-directed but can be fooled and its path is not always the cheapest. Watch it chase the goal by direction alone. '
+          + 'This appears in quick game-AI navigation and as a fast heuristic stage inside bigger search systems.';
       case 'dijkstra':
-        return 'Dijkstra always expands the node with the smallest g, the cheapest total edge weight found so far from the start, using no goal information. '
-          + 'It returns the true minimum-weight path, but explores blindly in every direction. Watch it settle nodes evenly outward.';
+        return 'The challenge here: find the genuinely cheapest route from S to G across this weighted graph, with no hint about where G lies. '
+          + 'Dijkstra always expands the node with the smallest g, the cheapest total edge weight found so far from the start, using no goal information, so it returns the true minimum-weight path but explores blindly in every direction. Watch it settle nodes evenly outward. '
+          + 'It is the backbone of internet routing protocols and road-network shortest-path engines.';
       case 'bfs':
-        return 'Breadth-first search expands the oldest node first, a first-in first-out queue, so it finds the path with the fewest hops. '
-          + 'But hops are not weight: that direct-looking path can cost more total weight than the optimum. Compare its cost against Dijkstra.';
+        return 'The challenge here: find the route from S to G that uses the fewest hops, even though the edges here carry different weights. '
+          + 'Breadth-first search expands the oldest node first, a first-in first-out queue, so it finds the path with the fewest hops, but hops are not weight, so that direct-looking path can cost more total weight than the optimum. Compare its cost against Dijkstra. '
+          + 'BFS underlies social-network connection-distance, peer-to-peer discovery and web crawling.';
       case 'dfs':
       default:
-        return 'Depth-first search expands the newest node first, a last-in first-out stack, plunging deep along one branch before backtracking. '
-          + 'Its route depends on the adjacency order and is rarely the cheapest. Watch it dive down one chain of nodes first.';
+        return 'The challenge here: reach G from S across this graph using minimal memory, following one branch as far as it goes. '
+          + 'Depth-first search expands the newest node first, a last-in first-out stack, plunging deep along one branch before backtracking, so its route depends on the adjacency order and is rarely the cheapest. Watch it dive down one chain of nodes first. '
+          + 'DFS drives topological sorting, dependency resolution and cycle detection in real software.';
     }
   };
 

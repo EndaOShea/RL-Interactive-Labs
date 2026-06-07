@@ -144,14 +144,16 @@ const SamplingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => 
     // then sample) and what to watch; a short CONCLUSION when a sentence ends.
     const presetLabel = preset || 'a custom setting';
     const intro =
-      `Generation is just next-token prediction in a loop. The model's raw scores become probabilities through a softmax, ` +
+      `The challenge here: at every step the model gives a probability to every possible next word, so how do you pick one — always the safest, or something more surprising? ` +
+      `Generation is just this next-token choice repeated in a loop. The model's raw scores become probabilities through a softmax, ` +
       `and temperature, set here near ${temp.toFixed(1)}, divides those scores first: low temperature sharpens toward the single best token, ` +
       `high temperature flattens the distribution and invites surprise. ` +
       (topk > 0 ? `Top-k then keeps only the ${topk} most likely tokens. ` : '') +
       (topp < 1 ? `Top-p, or nucleus sampling, keeps the smallest set of tokens whose probabilities add up to ${topp.toFixed(2)}. ` : '') +
       (minp > 0 ? `Min-p keeps every token at least ${minp.toFixed(2)} times as likely as the top one, so the floor scales with the model's confidence. ` : '') +
       (rep !== 1 ? `A repetition penalty discounts tokens already generated to break loops. ` : '') +
-      `Whatever survives is renormalised and one token is drawn at random. With ${presetLabel}, watch the bars: greyed bars were cut from the tail, the highlighted bar is the one sampled.`;
+      `Whatever survives is renormalised and one token is drawn at random. With ${presetLabel}, watch the bars: greyed bars were cut from the tail, the highlighted bar is the one sampled. ` +
+      `These are the exact decoding knobs every chatbot and code assistant exposes, balancing factual reliability against creative, varied text.`;
     narration.narratePhase(
       `run:${temp.toFixed(2)}:${topk}:${topp.toFixed(2)}:${minp.toFixed(2)}:${rep.toFixed(2)}`,
       intro,

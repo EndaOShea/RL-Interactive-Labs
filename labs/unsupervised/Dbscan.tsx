@@ -92,7 +92,7 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setNeighborSeries((s) => [...s, nbc].slice(-60));
     narration.narratePhase(
       `run:dbscan:${minPts}`,
-      `DBSCAN groups points by density rather than by counting clusters in advance. A point is a core point when at least minPts neighbours fall inside the radius epsilon; clusters then grow by chaining core points together, and lonely points are left as noise. Watch the dashed epsilon ball sweep each point, and notice that DBSCAN can trace clusters of any shape and flag outliers on its own.`,
+      `The challenge here: pull dense blobs out of this scatter, of any shape, without being told how many clusters there are, and tell scattered outliers apart from real groups. DBSCAN solves it by density: a point is a core point when at least minPts neighbours fall inside the radius epsilon, clusters grow by chaining core points together, and lonely points are left as noise. Watch the dashed epsilon ball sweep each point and trace clusters of any shape on its own. This is the method behind anomaly and fraud detection, spatial analysis of GPS and sensor data, and image segmentation.`,
     );
     if (i + 1 >= total) {
       narration.narratePhase(
@@ -129,7 +129,7 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     const rTxt = Number.isFinite(r) ? r.toFixed(3) : '∞';
     narration.narratePhase(
       `run:optics:${minPts}`,
-      `OPTICS fixes DBSCAN's biggest weakness, that one global epsilon can't describe clusters of different densities. Instead of fixing epsilon, it visits points in a reachability ordering and records each point's reachability distance, the cost to reach it from the already-processed frontier. Read the plot below the scatter as a landscape: deep valleys are dense clusters and tall peaks are the boundaries between them.`,
+      `The challenge here: cluster data whose groups have very different densities, where any single epsilon would either merge the loose ones or shatter the tight ones. OPTICS solves it without fixing epsilon: it visits points in a reachability ordering and records each point's reachability distance, the cost to reach it from the already-processed frontier. Read the plot below the scatter as a landscape, deep valleys are dense clusters and tall peaks are the boundaries between them. This ordering powers exploratory data analysis, geospatial and astronomy clustering, and customer or behaviour segmentation where density varies.`,
     );
     if (k + 1 >= total) {
       narration.narratePhase(

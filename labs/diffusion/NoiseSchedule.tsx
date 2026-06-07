@@ -195,7 +195,7 @@ const NoiseScheduleLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
     } else {
       // INTRO: schedule / view / shift overview, voicing the live curves.
       narration.narratePhase(`run:${schedule}:${view}:${shift}`,
-        `Noise schedule explorer. The schedule decides how fast information dies: alpha-bar is the cumulative signal retained, and beta is the variance added at each step. ${schedDesc}${shiftDesc} Watch where the signal-to-noise curve crosses one — that crossover marks the toughest part of the chain.`);
+        `The challenge here: choose how fast a diffusion model destroys signal, since that single curve decides where its steps do useful work. The schedule decides how fast information dies: alpha-bar is the cumulative signal retained, and beta is the variance added at each step. ${schedDesc}${shiftDesc} Watch where the signal-to-noise curve crosses one — that crossover marks the toughest part of the chain. Picking the right schedule is what lets production image generators like Stable Diffusion and the EDM family hit sharp results in far fewer steps.`);
     }
   };
 

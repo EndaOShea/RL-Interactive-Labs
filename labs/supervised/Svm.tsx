@@ -162,7 +162,7 @@ const SvmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     if (isLinear) {
       narration.narratePhase(
         `run:linear:${shape}`,
-        `This is a linear support vector machine. It looks for the maximum margin boundary, the line with the widest empty street on either side. The width of that street is two divided by the length of the weight vector, so widening the margin means shrinking the weights while keeping every point on its correct side. C sets how harshly margin violations are punished. Watch the ringed support vectors, the only points touching the margin, since they alone fix the line.`
+        `The challenge here: draw the single best straight line that splits these two classes, not just any line that works but the one with the most breathing room. A linear support vector machine solves this by finding the maximum margin boundary, the line with the widest empty street on either side. The width of that street is two divided by the length of the weight vector, so widening the margin means shrinking the weights while keeping every point on its correct side, with C setting how harshly violations are punished. Watch the ringed support vectors, the only points touching the margin, since they alone fix the line. S V Ms are used for text and image classification, bioinformatics like gene expression, and handwriting recognition.`
       );
     } else {
       const kdesc = kern === 'rbf'
@@ -170,7 +170,7 @@ const SvmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         : 'a polynomial kernel of degree ' + degree + ', which bends the boundary with a polynomial of the inner product';
       narration.narratePhase(
         `run:${kern}:${shape}`,
-        `These classes are not linearly separable, so this support vector machine uses the kernel trick. The decision function is a weighted sum of ${kdesc}, taken over only the active support vectors, plus a bias. In effect the data is lifted into a higher dimensional space where a flat separator exists, and the boundary looks curved back here. Watch the field wrap around the shape as the ringed support vectors take shape.`
+        `The challenge here: these classes interlock so tightly that no straight line could ever split them, yet they still need a clean boundary. The support vector machine tackles this with the kernel trick, building a decision function that is a weighted sum of ${kdesc}, taken over only the active support vectors, plus a bias. In effect the data is lifted into a higher dimensional space where a flat separator exists, and the boundary looks curved back here. Watch the field wrap around the shape as the ringed support vectors take shape. Kernel S V Ms are used for image and text classification, bioinformatics, and pattern recognition where the classes are not linearly separable.`
       );
     }
     if (accPct >= 100 && ep > 3) {

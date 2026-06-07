@@ -109,7 +109,7 @@ const HierarchicalLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     setDistSeries((s) => [...s, m.dist].slice(-60));
     narration.narratePhase(
       `run:${linkage}`,
-      `Agglomerative clustering starts with every point as its own cluster and repeatedly merges the two closest, building the tree on the right. With ${linkage} linkage the distance between two clusters is ${linkageInfo(linkage)} The height of each merge is how far apart the clusters were, so a tall gap in the tree is a natural place to cut, and the cut height alone decides how many clusters you keep.`,
+      `The challenge here: discover the nested grouping in this scatter without fixing the number of clusters up front, and expose how points relate at every scale. Agglomerative clustering solves it by starting with every point as its own cluster and repeatedly merging the two closest, building the tree on the right. With ${linkage} linkage the distance between two clusters is ${linkageInfo(linkage)} The height of each merge is how far apart the clusters were, so a tall gap in the tree is a natural place to cut, and the cut height alone decides how many clusters you keep. This is how biologists build gene-expression and phylogenetic trees, and how document, customer and market data get organised into hierarchies.`,
     );
     if (remaining <= 1) {
       narration.narratePhase(
