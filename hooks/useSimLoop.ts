@@ -18,7 +18,7 @@ export interface SimLoop {
 
 export function useSimLoop(step: () => void, opts?: { initialSpeed?: number }): SimLoop {
   const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(opts?.initialSpeed ?? 80);
+  const [speed, setSpeed] = useState(opts?.initialSpeed ?? 150);
 
   const stepRef = useRef(step);
   stepRef.current = step;

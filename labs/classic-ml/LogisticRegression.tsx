@@ -96,7 +96,7 @@ const LogisticRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 60 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const regen = (pc = perClass, sep = separation) => { setData(makeTwoClass(pc, sep)); setW1(0); setW2(0); setB(0); setEpoch(0); setAccSeries([]); setMilestone(false); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); setW1(0); setW2(0); setB(0); setEpoch(0); setAccSeries([]); setMilestone(false); setLastLog(null); narration.cancel(); };

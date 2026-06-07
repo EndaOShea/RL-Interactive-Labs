@@ -132,7 +132,7 @@ const GmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     if (gain < 1e-4 && iter > 2) sim.pause();
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 120 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const restart = (pts: UPt[], k: number) => { narration.cancel(); setP(initParams(pts, k)); setIter(0); setLlSeries([]); setLastLog(null); };
   const regen = (n = count) => { const pts = makeData(n); setPoints(pts); restart(pts, K); };

@@ -145,7 +145,7 @@ const NaiveBayesLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 130 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const regen = (pc = perClass, sp = spread) => { narration.cancel(); setData(makeData(pc, sp)); setVersion((v) => v + 1); setConfSeries([]); setLastLog(null); };
   const reset = () => { sim.stop(); narration.cancel(); setQuery({ x: 0.5, y: 0.5 }); setConfSeries([]); setLastLog(null); };
   const switchVariant = (v: Variant) => { setVariant(v); sim.stop(); narration.cancel(); setConfSeries([]); setLastLog(null); setVersion((x) => x + 1); };

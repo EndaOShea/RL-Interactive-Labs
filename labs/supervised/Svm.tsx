@@ -211,7 +211,7 @@ const SvmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 50 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const resetDual = () => { alphaRef.current = new Array(data.length).fill(0); bDualRef.current = 0; setDualVer((v) => v + 1); };
   const regen = (pc = perClass, s = sep, sh = shape) => {
     narration.cancel();

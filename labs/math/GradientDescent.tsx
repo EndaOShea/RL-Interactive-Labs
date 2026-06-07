@@ -223,7 +223,7 @@ const GradientDescentLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 70 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const reset = () => { sim.stop(); narration.cancel(); resetState(); };
 

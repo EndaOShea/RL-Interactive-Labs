@@ -127,7 +127,7 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       },
     });
   };
-  const sim = useSimLoop(step, { initialSpeed: 60 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const reset = () => { sim.stop(); narration.cancel(); prevHealthyRef.current = null; setQx(-5); setLastLog(null); };
 
   return (

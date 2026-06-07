@@ -28,7 +28,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Reinforcement Learning',
     blurb: 'Agents that learn by trial, reward and planning — the original Policy Playground.',
     icon: 'M12 2 2 7l10 5 10-5-10-5Z',
-    order: 1,
+    order: 11,
     to: '/rl',
   },
   {
@@ -36,7 +36,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Classic ML',
     blurb: 'Supervised & unsupervised learning on 2-D data — boundaries, fits and clusters you can watch form.',
     icon: 'M4 4v16h16M8 16l3-4 3 2 5-7',
-    order: 2,
+    order: 5,
     accent: '#34d399',
   },
   {
@@ -52,7 +52,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Unsupervised Learning',
     blurb: 'Find structure without labels — density (DBSCAN), mixtures (GMM/EM) and hierarchical dendrograms.',
     icon: 'M7 9a2 2 0 1 0 0-.01M11 13a2 2 0 1 0 0-.01M8 14a2 2 0 1 0 0-.01M17 8a2 2 0 1 0 0-.01M19 16v.01',
-    order: 4,
+    order: 7,
     accent: '#f472b6',
   },
   {
@@ -60,7 +60,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Supervised Learning',
     blurb: 'Learn labelled decision boundaries — decision trees, max-margin SVMs and Gaussian Naive Bayes.',
     icon: 'M12 4v4M6 14v3h12v-3M12 8v6M6 14a2 2 0 1 0 0-.01M18 14a2 2 0 1 0 0-.01',
-    order: 5,
+    order: 6,
     accent: '#fbbf24',
   },
   {
@@ -68,7 +68,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Logic & Reasoning',
     blurb: 'Propositional logic and automated reasoning — truth tables and a DPLL SAT solver search tree.',
     icon: 'M4 5h16M4 10h16M4 15h16M9 5v14',
-    order: 6,
+    order: 2,
     accent: '#818cf8',
   },
   {
@@ -76,7 +76,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Neural Networks',
     blurb: 'From a single perceptron to a backprop-trained MLP bending non-linear boundaries; activations & gradients.',
     icon: 'M4 6a2 2 0 1 0 0-.01M4 18a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M20 6a2 2 0 1 0 0-.01M20 18a2 2 0 1 0 0-.01M6 6l5 5M6 18l5-5M13 11l6-4M13 13l6 4',
-    order: 7,
+    order: 8,
     accent: '#2dd4bf',
   },
   {
@@ -84,7 +84,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Model Checking',
     blurb: 'Verify concurrent/transition systems by exhaustive reachability — safety invariants and counterexamples.',
     icon: 'M6 7a2 2 0 1 0 0-.01M18 7a2 2 0 1 0 0-.01M6 17a2 2 0 1 0 0-.01M18 17a2 2 0 1 0 0-.01M8 7h8M8 17h8M6 9v6M18 9v6',
-    order: 8,
+    order: 4,
     accent: '#fb7185',
   },
   {
@@ -108,7 +108,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Large Language Models',
     blurb: 'Inside an LLM — tokenization, temperature/top-k/top-p sampling and self-attention.',
     icon: 'M4 5h16v10H8l-4 4zM8 9h8M8 12h5',
-    order: 11,
+    order: 12,
     accent: '#a78bfa',
   },
   {
@@ -116,7 +116,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Diffusion Models',
     blurb: 'Generative diffusion — the forward noising process, reverse denoising and noise schedules.',
     icon: 'M5 5a1 1 0 1 0 0-.01M12 5a1 1 0 1 0 0-.01M19 6a1 1 0 1 0 0-.01M7 12a1 1 0 1 0 0-.01M17 13a1 1 0 1 0 0-.01M12 19a1 1 0 1 0 0-.01',
-    order: 12,
+    order: 13,
     accent: '#f59e0b',
   },
   {
@@ -124,7 +124,7 @@ export const CATEGORIES: CategoryMeta[] = [
     label: 'Math Foundations',
     blurb: 'The maths behind ML — gradient descent, Taylor series and linear transformations.',
     icon: 'M3 21V3M3 21h18M6 14c3 0 4-8 7-8s4 6 7 6',
-    order: 13,
+    order: 1,
     accent: '#22d3ee',
   },
 ];

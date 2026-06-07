@@ -25,7 +25,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  *    The toggle click doubles as the user gesture some browsers require before
  *    speech is allowed. Enabling re-arms the current phase so it is (re)spoken.
  *  • Phase-keyed. `narratePhase` dedups on the key, so repeating the same phase
- *    every render is silent; a new key interrupts any now-stale explanation.
+ *    every render is silent; a new key QUEUES behind the current explanation so
+ *    it finishes before the next one starts (the goal/"done" line never talks
+ *    over the intro). Each phase is spoken once until cancel() re-arms.
  *  • Safe everywhere. No-ops (and reports `supported:false`) when the API is
  *    missing, so callers never have to feature-detect.
  */
@@ -43,7 +45,7 @@ export interface NarrationControl {
   /**
    * Speak a conceptual explanation of the CURRENT phase. Call it as often as you
    * like (e.g. on every step) with a stable `key` describing the phase — it only
-   * speaks when `key` changes, interrupting any stale explanation. This is the
+   * speaks when `key` changes, queuing behind any in-flight explanation. This is the
    * primary API: write `text` as one or two plain-English sentences that explain
    * what is happening overall and tie back to the Context/Math, not a per-move
    * event. Example:
@@ -93,6 +95,11 @@ export function useNarration(opts?: { initialRate?: number }): NarrationControl 
   rateRef.current = rate;
   const lastTextRef = useRef<string>('');
   const lastKeyRef = useRef<string>('');
+  // Every phase key spoken since the last cancel()/re-arm. A phase is explained
+  // ONCE and then stays quiet — so labs that alternate keys every episode (e.g.
+  // `run:X` while training, `done:X` on reaching the goal) no longer restart the
+  // intro each epoch. cancel()/enabling clears this to re-arm everything.
+  const spokenKeysRef = useRef<Set<string>>(new Set());
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
   // Voices populate asynchronously in most browsers.
@@ -125,6 +132,7 @@ export function useNarration(opts?: { initialRate?: number }): NarrationControl 
     try { window.speechSynthesis.cancel(); } catch { /* ignore */ }
     lastTextRef.current = '';
     lastKeyRef.current = '';
+    spokenKeysRef.current.clear();
   }, [supported]);
 
   const narratePhase = useCallback((key: string, text: string) => {
@@ -132,9 +140,15 @@ export function useNarration(opts?: { initialRate?: number }): NarrationControl 
     const k = (key || '').trim();
     const t = (text || '').trim();
     if (!t) return;
-    if (k && k === lastKeyRef.current) return;   // same phase — already explained
+    if (k && spokenKeysRef.current.has(k)) return;   // this phase has already been explained
+    if (k) spokenKeysRef.current.add(k);
     lastKeyRef.current = k;
-    speak(t, true);                              // a new phase supersedes the previous explanation
+    // QUEUE, don't interrupt: a new phase waits for the current explanation to
+    // finish speaking rather than cutting it off. So the goal/"done" narration
+    // plays AFTER the intro has finished, instead of talking over it. The Web
+    // Speech API queues utterances natively when we don't call cancel() first;
+    // cancel() (reset / disable) still flushes the whole queue.
+    speak(t, false);
   }, [supported, speak]);
 
   const narrate = useCallback((text: string, o?: { interrupt?: boolean }) => {
@@ -152,7 +166,7 @@ export function useNarration(opts?: { initialRate?: number }): NarrationControl 
   const setEnabled = useCallback((v: boolean) => {
     setEnabledState(v);
     if (!v) cancel();
-    else lastKeyRef.current = '';   // re-arm: the current phase is (re)explained on the next call
+    else { lastKeyRef.current = ''; spokenKeysRef.current.clear(); }   // re-arm: phases are (re)explained on the next call
   }, [cancel]);
 
   const toggle = useCallback(() => setEnabled(!enabledRef.current), [setEnabled]);

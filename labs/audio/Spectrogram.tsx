@@ -227,7 +227,7 @@ const SpectrogramLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       `A spectrogram shows how the spectrum changes over time, because speech is non stationary. We slide ${tradeoff} across the signal. ${formula} ${tape} As the columns fill left to right, ${watch}; the yellow trace follows the dominant frequency.`,
     );
   };
-  const sim = useSimLoop(step, { initialSpeed: 90 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const reset = () => { sim.stop(); resetState(); narration.cancel(); };
 
   // Scenario changes only cancel any stale speech; the INTRO phase re-explains on

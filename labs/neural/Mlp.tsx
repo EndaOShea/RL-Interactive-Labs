@@ -112,7 +112,7 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       },
     });
   };
-  const sim = useSimLoop(step, { initialSpeed: 60 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const rebuild = (fn: () => void, args: Partial<{ k: DatasetKind; h: number; hl: number; a: Act }>) => { sim.stop(); narration.cancel(); fn(); build(args.k ?? kind, args.h ?? hidden, args.hl ?? hlayers, args.a ?? act); };
   const reset = () => { sim.stop(); narration.cancel(); build(); };

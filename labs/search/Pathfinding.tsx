@@ -148,7 +148,7 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     if (next.status !== 'running') sim.pause();
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 40 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const resetState = () => {
     setSearch(initSearch(START)); setBi(initBiSearch(START, GOAL));

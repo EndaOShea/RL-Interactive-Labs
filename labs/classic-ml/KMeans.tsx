@@ -133,7 +133,7 @@ const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     }
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 90 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const regen = (t = total) => { const pts = makePoints(t); setPoints(pts); restart(pts, k, method); };
   const reset = () => { sim.stop(); restart(points, k, method); };

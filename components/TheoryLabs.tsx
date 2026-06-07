@@ -151,7 +151,7 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
   const [history, setHistory] = useState<{s:number, a:number, r:number}[]>([]);
 
   // --- Parameters ---
-  const [speed, setSpeed] = useState(50);
+  const [speed, setSpeed] = useState(150);
   const [epsilon, setEpsilon] = useState(0.1); 
   const [alpha, setAlpha] = useState(0.1);
   const [gamma, setGamma] = useState(0.9);
@@ -531,6 +531,7 @@ for episode in range(200):
   const resetSim = (clearMemory = true) => {
     setIsPlaying(false);
     narration.cancel();
+    setSpeed(150);   // restart slow so the intro narration can play again
     setAgentPos(startPos);
     setSarsaNextAction(null);
     setEpisode(0);
@@ -954,6 +955,7 @@ for episode in range(200):
     if (done) {
         setEpisode(e => e + 1);
         setSteps(0);
+        if (episode === 0) setSpeed(50);   // first goal reached — speed up; the intro narration has played
         if (onUpdateMetrics) {
             onUpdateMetrics({
                 episode: episode + 1,
@@ -1186,7 +1188,7 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
     const [tempDecay, setTempDecay] = useState(1.0); // 1.0 = no annealing
     const TEMP_MIN = 0.15;
 
-    const [speed, setSpeed] = useState(50);
+    const [speed, setSpeed] = useState(150);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
 
@@ -1309,6 +1311,7 @@ for episode in range(100):
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
         narration.cancel();
+        setSpeed(150);   // restart slow so the intro narration can play again
         setAgentPos(startPos);
         setEpisode(0);
         setSteps(0);
@@ -1460,6 +1463,7 @@ for episode in range(100):
         if (done) {
             setEpisode(e => e + 1);
             setSteps(0);
+            if (episode === 0) setSpeed(50);   // first goal reached — speed up; the intro narration has played
             if (onUpdateMetrics) {
                 onUpdateMetrics({
                     episode: episode + 1,
@@ -1637,7 +1641,7 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     const [qTable, setQTable] = useState<Record<number, number[]>>({});
     const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-    const [speed, setSpeed] = useState(50);
+    const [speed, setSpeed] = useState(150);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
     const [epsilon, setEpsilon] = useState(1.0);
@@ -1873,6 +1877,7 @@ for episode in range(200):
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
         narration.cancel();
+        setSpeed(150);   // restart slow so the intro narration can play again
         setAgentPos(startPos);
         setEpisode(0);
         setSteps(0);
@@ -2022,6 +2027,7 @@ for episode in range(200):
         if (done) {
             setEpisode(e => e + 1);
             setSteps(0);
+            if (episode === 0) setSpeed(50);   // first goal reached — speed up; the intro narration has played
 
             setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
 
@@ -2671,7 +2677,7 @@ export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics
     const [isPlaying, setIsPlaying] = useState(false);
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
-    const [speed, setSpeed] = useState(100);
+    const [speed, setSpeed] = useState(150);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
     const [epsilon, setEpsilon] = useState(0.1);
@@ -2794,6 +2800,7 @@ for episode in range(100):
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
         narration.cancel();
+        setSpeed(150);   // restart slow so the intro narration can play again
         setAgentAPos(0);
         setAgentBPos(MA_STATES - 1);
         setCollisionCell(null);
@@ -2968,6 +2975,7 @@ for episode in range(100):
         if (done) {
             setEpisode(e => e + 1);
             setSteps(0);
+            if (episode === 0) setSpeed(50);   // first goal reached — speed up; the intro narration has played
             if (onUpdateMetrics) {
                 onUpdateMetrics({
                     episode: episode + 1,

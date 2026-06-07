@@ -207,7 +207,7 @@ const NoiseScheduleLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
       return nm;
     });
   };
-  const sim = useSimLoop(step, { initialSpeed: 40 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const reset = () => { narration.cancel(); sim.stop(); setMarker(0); setLastLog(null); };
 
   const applyPreset = (name: string) => {

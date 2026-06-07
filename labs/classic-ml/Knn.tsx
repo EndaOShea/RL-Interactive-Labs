@@ -90,7 +90,7 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 130 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const regen = (n = perClass) => { setPoints(makeBlobs(CENTERS, SPREAD, n)); setVersion((v) => v + 1); setConf([]); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); setQuery({ x: 0.5, y: 0.5 }); setConf([]); setLastLog(null); narration.cancel(); };

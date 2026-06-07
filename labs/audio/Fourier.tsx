@@ -182,7 +182,7 @@ const FourierLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       );
     }
   };
-  const sim = useSimLoop(step, { initialSpeed: 60 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const reset = () => { sim.stop(); setPhase(0); setLastLog(null); narration.cancel(); };
 
   const insight = `${preset === 'custom' ? 'Custom spectrum' : preset} with ${activeHarmonics} active harmonic${activeHarmonics === 1 ? '' : 's'}` +

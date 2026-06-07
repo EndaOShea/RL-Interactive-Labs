@@ -103,7 +103,7 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 70 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const resetWeights = (deg: number) => { setW(new Array(deg).fill(0)); setB(0); setEpoch(0); setLoss([]); setConverged(false); setLastLog(null); narration.cancel(); };
   const regen = (count = n, ns = noise) => { setData(makeData(count, ns)); resetWeights(degree); };

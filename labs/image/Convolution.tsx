@@ -201,7 +201,7 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 60 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const resetSweep = () => { setPos(0); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); resetSweep(); };
   const changePreset = (p: ImgPreset) => { sim.stop(); setPreset(p); resetSweep(); };

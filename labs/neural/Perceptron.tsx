@@ -127,7 +127,7 @@ const PerceptronLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
       },
     });
   };
-  const sim = useSimLoop(step, { initialSpeed: 120 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const regen = (pc = perClass, s = sep, nz = noise) => { setData(makeData(pc, s, nz)); reset(); };
   const reset = () => {

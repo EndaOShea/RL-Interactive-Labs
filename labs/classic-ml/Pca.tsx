@@ -98,7 +98,7 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     });
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 90 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const regen = (n = count) => { setBase(makeCloud(n)); setE1Series([]); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); setAngle(0.5); setE1Series([]); setLastLog(null); narration.cancel(); };

@@ -161,7 +161,7 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     if (mode === 'optics') stepOptics(); else stepDbscan();
   };
 
-  const sim = useSimLoop(step, { initialSpeed: 70 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
 
   const regen = (n = count) => { narration.cancel(); setPoints(makeData(n)); setCursor(0); setNeighborSeries([]); setLastLog(null); };
   const reset = () => { narration.cancel(); sim.stop(); setCursor(0); setNeighborSeries([]); setLastLog(null); };

@@ -229,7 +229,7 @@ const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
             : `The transform has settled with a determinant near ${det.toFixed(2)}. Its eigenvalues are complex, which means the map rotates: there is no real direction left unturned, so no real eigenvectors are drawn.`));
     }
   };
-  const sim = useSimLoop(step, { initialSpeed: 40 });
+  const sim = useSimLoop(step, { initialSpeed: 150 });
   const animate = () => { narration.cancel(); tRef.current = 0; setT(0); setLastLog(makeLog()); sim.play(); };
   const reset = () => { sim.stop(); narration.cancel(); tRef.current = 1; setT(1); setLastLog(makeLog()); };
 
