@@ -38,22 +38,34 @@ const DpllLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const layout = useMemo(() => layoutTree(solved.root), [solved]);
   const cnfText = useMemo(() => cnf.map((cl) => '(' + cl.map((l) => (l.neg ? '¬' : '') + name(l.v)).join('∨') + ')').join(' ∧ '), [cnf]);
 
+  // Conceptual audio-tutor narration. A key built from the active rules + scenario
+  // makes the INTRO re-speak whenever the user changes a toggle, preset, or seed.
+  const runKey = `run:${presetId ?? `rand${seed}`}:${unitProp ? 'u' : ''}${pureLiteral ? 'p' : ''}${learn ? 'l' : ''}`;
+  const introSentence = () => {
+    const rules: string[] = [];
+    if (unitProp) rules.push('unit propagation, which forces any clause down to its single remaining literal');
+    if (pureLiteral) rules.push('pure-literal elimination, which safely fixes a variable that appears with only one polarity');
+    if (learn) rules.push('clause learning, which records a no-good after each conflict so the same dead end is never re-entered');
+    const ruleText = rules.length ? `It uses ${rules.join('; and ')}.` : 'With every inference rule switched off, it falls back to plain guessing and backtracking.';
+    return `This is D-P-L-L, the backtracking search at the heart of every SAT solver. It asks whether this conjunctive-normal-form formula can be satisfied, alternating cheap forced inference with decisions. ${ruleText} When no inference applies it guesses a variable, and a clause with every literal false is a conflict that makes it backtrack. Watch the search tree branch and the assignment trail grow.`;
+  };
+
   const step = () => {
     if (cursor >= solved.order.length) { sim.pause(); return; }
     const node = solved.order[cursor];
     const assigned = Object.keys(node.assign).length;
     setCursor(cursor + 1);
 
-    // Narrate the live event happening in the search tree.
-    if (node.kind === 'unit') narration.narrate(`Unit propagation forces ${node.label}.`);
-    else if (node.kind === 'pure') narration.narrate(`Pure literal — set ${node.label}.`);
-    else if (node.kind === 'decide') narration.narrate(`Decision: guess ${node.label}. ${assigned} variables assigned.`);
-    else if (node.kind === 'learn') narration.narrate(`Learning a no-good clause to block this dead end.`);
-    else if (node.kind === 'conflict') narration.narrate('Conflict — a clause is falsified, backtracking.', { interrupt: true });
-    else if (node.kind === 'sat') narration.narrate('All clauses satisfied. Formula is satisfiable.', { interrupt: true });
-
-    if (cursor + 1 >= solved.order.length && node.kind !== 'sat') {
-      narration.narrate(solved.satisfiable ? 'Search complete. The formula is SAT.' : 'Search exhausted. The formula is UNSAT.', { interrupt: true });
+    // INTRO once per scenario/rule-set; a MID insight on the first conflict;
+    // CONCLUSION interpreting SAT vs UNSAT when the search finishes.
+    narration.narratePhase(runKey, introSentence());
+    if (node.kind === 'conflict') {
+      narration.narratePhase(`${runKey}:conflict`, 'A conflict just appeared. A clause has all of its literals false, so this branch is a dead end and the solver must backtrack to the last open decision and try the other value. This guess-and-recover loop is what makes the search tree branch.');
+    }
+    if (cursor + 1 >= solved.order.length || node.kind === 'sat') {
+      narration.narratePhase(`done:${runKey}`, solved.satisfiable
+        ? `The formula is satisfiable. The solver found a full assignment that makes every clause true, after ${solved.stats.decisions} decision${solved.stats.decisions === 1 ? '' : 's'} and ${solved.stats.conflicts} conflict${solved.stats.conflicts === 1 ? '' : 's'}. The trail below is one model.`
+        : `The formula is unsatisfiable. Every branch ended in a conflict, so no assignment can satisfy all the clauses at once. The search exhausted the tree to prove it.`);
     }
 
     const stepDesc =

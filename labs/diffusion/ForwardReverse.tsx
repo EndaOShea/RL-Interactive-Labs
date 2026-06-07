@@ -175,17 +175,43 @@ const ForwardReverseLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
     });
   };
 
-  // Plain-English narration of the live event on the cloud.
-  const speak = (tt: number, d: 1 | -1, a: number, s: number) => {
+  // Conceptual audio-tutor narration: one explanation per phase, paraphrasing
+  // this lab's own Context + live math, never a per-step play-by-play.
+  const speak = (tt: number, d: 1 | -1, a: number, _s: number) => {
+    const samp = sampler === 'ddim' ? 'D D I M' : 'D D P M';
+    // MID insight: the signal-to-noise crossover where the clusters merge — the
+    // hardest region for the denoiser, regardless of direction.
+    const inTransition = a < 0.45 && a > 0.08;
+    if (inTransition) {
+      narration.narratePhase(`mid:${d === 1 ? 'forward' : 'reverse'}`,
+        'Now near the signal-to-noise crossover, where alpha-bar is around a half and signal and noise have roughly equal power. This is the blurry middle of the chain where the clusters overlap and a real model does its hardest denoising work.');
+      return;
+    }
     if (d === 1) {
-      if (tt >= T) narration.narrate('Cloud fully dissolved into Gaussian noise. Prior reached.', { interrupt: true });
-      else narration.narrate(`Adding noise at step ${tt}. Signal ${(Math.sqrt(a) * 100).toFixed(0)} percent, S N R ${s.toFixed(1)}.`);
+      if (tt >= T) {
+        // Forward chain finished — the prior is reached.
+        narration.narratePhase('done:forward',
+          'The cloud has fully dissolved into a standard Gaussian. The forward process is a fixed, parameter-free noising chain, so any starting shape ends as pure noise. Now watch it run backward.');
+      } else {
+        // INTRO for the forward pass — voice the marginal formula and what to watch.
+        narration.narratePhase(`run:forward:${schedule}:${dataset}`,
+          `Forward diffusion. Each point follows the closed-form marginal: x at step t equals the square root of alpha-bar times the clean point, plus the square root of one minus alpha-bar times a fixed noise vector. On the ${schedule} schedule, alpha-bar is the signal that survives, sliding from one toward zero. Watch the ${dataset} structure smear into a featureless blob as noise takes over.`);
+      }
     } else {
       if (tt <= 0) {
-        narration.narrate(`Sample fully denoised with ${sampler === 'ddim' ? 'DDIM' : 'DDPM'}. Structure restored.`, { interrupt: true });
+        // CONCLUSION for the reverse pass — interpret the result.
+        narration.narratePhase(`done:reverse:${sampler}`,
+          `Denoising complete with ${samp}. Starting from pure noise, the reverse pass walked back up the data-density gradient and the original clusters re-formed. ${sampler === 'ddim' ? 'D D I M did it deterministically in just a handful of strided steps.' : 'D D P M did it stochastically, adding fresh noise each step for maximum diversity.'}`);
       } else {
-        const g = guidance > 0 ? `, guidance ${guidance}` : '';
-        narration.narrate(`Removing noise at step ${tt}. Signal back to ${((1 - Math.sqrt(1 - a)) * 100).toFixed(0)} percent${g}.`);
+        // INTRO for the reverse pass — voice the sampler and guidance.
+        const guideClause = guidance > 0
+          ? ` Classifier-free guidance is on at scale ${guidance}: the prediction is extrapolated away from the unconditional one, so the cloud contracts harder onto each class centroid, sharper but less diverse.`
+          : ' Guidance is off, so samples spread freely across each cluster.';
+        const sampClause = sampler === 'ddim'
+          ? `${samp} is deterministic: it predicts the clean point, then re-noises straight to the previous step, hitting the same marginals in only ${steps} strided moves instead of all of T.`
+          : `${samp} is stochastic and ancestral: it samples each earlier step with a little fresh noise, so it needs many steps but gives the most diverse samples.`;
+        narration.narratePhase(`run:reverse:${sampler}:${guidance}`,
+          `Reverse diffusion. ${sampClause}${guideClause} Watch the blob condense back toward the original shape.`);
       }
     }
   };

@@ -122,16 +122,29 @@ const DecisionTreeLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     const a = ok / data.length;
     setAccSeries((s) => [...s, a].slice(-60));
 
-    // narrate the split(s) chosen at this newest level
+    // best split + info-gain at this newest level (feeds the live-math payload)
     const splits = newestSplits(t, nd);
-    if (splits.length) {
-      const s0 = splits.reduce((m, s) => (s.gain > m.gain ? s : m), splits[0]);
-      const fname = s0.feat === 0 ? 'x₁' : 'x₂';
-      narration.narrate(`Depth ${nd}. Split on ${fname} at ${s0.thr.toFixed(2)}, ${crit} gain ${s0.gain.toFixed(3)}. ${Math.round(a * 100)} percent correct.`);
-    } else {
-      narration.narrate(`Depth ${nd}. No further split improves purity. ${Math.round(a * 100)} percent correct.`);
+
+    // Conceptual audio tutor — one explanation per phase (keyed, so it speaks once).
+    const critWord = crit === 'gini' ? 'Gini impurity' : 'entropy';
+    const measure = crit === 'gini'
+      ? 'Gini is one minus the sum of the squared class proportions, and reaches zero when a node holds a single class'
+      : 'entropy measures the bits of uncertainty in a node, and information gain is the parent entropy minus the weighted entropy of the children';
+    narration.narratePhase(
+      `run:${crit}:${minLeaf}`,
+      `This is a decision tree using ${critWord} to choose its splits. At every node it asks one yes or no question about a feature, and it greedily picks the cut that most reduces impurity. ${measure[0].toUpperCase() + measure.slice(1)}. Because this data is X O R like, a single straight cut can never separate it. Watch the left panel carve into rectangular regions while the tree on the right grows level by level, with the newest split shown in amber.`
+    );
+    if (a >= 0.99) {
+      narration.narratePhase(
+        `done:${crit}:${minLeaf}`,
+        `The tree now separates the data perfectly, reaching about ${Math.round(a * 100)} percent on the training points. It took at least two levels, since one split alone cannot solve this pattern. But a tree this deep with a small minimum leaf size starts to memorise noise, so watch for overfitting.`
+      );
+    } else if (nd >= 2) {
+      narration.narratePhase(
+        `mid:${crit}:${minLeaf}`,
+        `Two levels are now in place, which is the minimum needed to carve the four quadrants of this pattern. Each extra level fits finer detail, so notice when the accuracy stops improving meaningfully and the tree only adds tiny leaves.`
+      );
     }
-    if (a >= 0.99) narration.narrate(`Tree fully separates the data at depth ${nd}.`, { interrupt: true });
 
     const [tn, tl] = countNodes(t);
     setLastLog({

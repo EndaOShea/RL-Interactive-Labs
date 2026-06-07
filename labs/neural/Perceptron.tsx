@@ -86,19 +86,24 @@ const PerceptronLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     if (rule === 'pocket' && newAcc > pocketRef.current.acc) {
       pocketRef.current = { w1: nw1, w2: nw2, b: nb, acc: newAcc };
       setBestAcc(newAcc);
-      if (newAcc > bestAcc + 0.02) narration.narrate(`New best in the pocket, accuracy ${(newAcc * 100).toFixed(0)} percent.`);
     }
 
-    // narration of the live event
-    if (wrong) narration.narrate(`Point ${idx + 1} misclassified, boundary tilts ${p.yy > 0 ? 'up' : 'down'}.`);
+    // Conceptual audio tutor: one INTRO per rule, one CONCLUSION on convergence.
+    // The per-point updates stay visual; the voice explains the learning rule and
+    // what the live formula means.
+    const introSentence = rule === 'margin'
+      ? `This is a margin perceptron, a single neuron that draws one straight boundary. It cycles through the points and, whenever a point sits inside a band of width gamma around the line, it nudges the weights by the learning rate times the label times the point. Pushing points a clear distance off the boundary, not just onto the correct side, is the first step toward the wide-margin idea the support vector machine optimises. Watch the white line and its gold margin lines settle as the dots clear the band.`
+      : rule === 'pocket'
+        ? `This is the pocket perceptron. The live rule still updates the weights only on a mistake, by the learning rate times the label times the point, but on overlapping data those weights never settle. So the pocket quietly remembers the best-accuracy line it has ever seen, shown in green. Watch the white line keep wandering while the green pocket line holds onto the best fit found so far.`
+        : `This is Rosenblatt's perceptron from 1958, a single neuron that outputs the sign of w dot x plus b. It learns online, cycling through the examples and only correcting itself on a mistake by moving the weights toward the point it got wrong. If the two classes can be split by a straight line, it is guaranteed to converge in a finite number of updates. Watch the white boundary tilt with each correction until every point is on its own side.`;
+    narration.narratePhase(`run:${rule}`, introSentence);
 
     if (next === 0) {
       setPassErrors(m); setMistakes(0);
       if (m === 0 && rule !== 'pocket') {
         setConverged(true); sim.pause();
-        narration.narrate(`Converged — every point correct after ${updates + (wrong ? 1 : 0)} updates.`, { interrupt: true });
-      } else {
-        narration.narrate(`Pass complete, ${m} ${m === 1 ? 'mistake' : 'mistakes'} this sweep.`);
+        narration.narratePhase(`done:${rule}`,
+          `The perceptron has converged. Every point is now correctly classified, so it stopped updating. This only works because the data is linearly separable, the classic limit that a single neuron cannot solve patterns like XOR, which is exactly why hidden layers were invented.`);
       }
     }
 

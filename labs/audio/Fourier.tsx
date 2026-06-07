@@ -37,6 +37,8 @@ const PRESETS: Record<Exclude<Preset, 'custom'>, number[]> = {
 };
 const EXTRA_BLURB: Record<string, string> = Object.fromEntries(FOURIER_EXTRA_PRESETS.map((p) => [p.id, p.blurb]));
 
+const capitalise = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 const FourierLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [amps, setAmps] = useState<number[]>(PRESETS.square);
   const [preset, setPreset] = useState<Preset>('square');
@@ -49,17 +51,14 @@ const FourierLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const setAmp = (i: number, v: number) => {
     setAmps((a) => { const n = [...a]; n[i] = v; return n; });
     setPreset('custom');
-    narration.narrate(`Harmonic ${i + 1} amplitude set to ${v.toFixed(2)}.`);
   };
   const applyPreset = (p: Exclude<Preset, 'custom'>) => {
     setAmps(PRESETS[p]); setPreset(p); setPhase(0); setLastLog(null);
     narration.cancel();
-    const active = PRESETS[p].filter((a) => Math.abs(a) > 1e-4).length;
-    narration.narrate(`${p} wave loaded, ${active} active harmonic${active === 1 ? '' : 's'}.`, { interrupt: true });
   };
   const setSpectrumView = (v: SpectrumView) => {
     setView(v);
-    narration.narrate(v === 'mel' ? 'Switched to a mel-warped frequency axis.' : 'Back to a linear frequency axis.', { interrupt: true });
+    narration.cancel();
   };
 
   // Sum and per-component waveforms over one period (shifted by phase).
@@ -158,13 +157,29 @@ const FourierLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       },
     });
 
-    // Narrate the live event: dominant harmonic + phase progress, varied.
-    if (Math.abs(np) < 0.021) {
-      narration.narrate(`Phase wrapped. Dominant harmonic is k equals ${dominant}.`);
-    } else if (Math.abs(np - 0.5) < 0.011) {
-      narration.narrate(`Waveform half a period shifted. ${activeHarmonics} harmonics summed.`);
+    // Conceptual audio tutor: ONE spoken explanation per phase. The phase key
+    // changes when the chosen voice (preset), the spectrum axis, or the active
+    // harmonic count changes — so the tutor re-explains only when the concept on
+    // screen actually changes, and stays quiet through the phase animation.
+    const voice = preset === 'custom' ? 'this custom spectrum' : `the ${preset} wave`;
+    const harmWord = `${activeHarmonics} harmonic${activeHarmonics === 1 ? '' : 's'}`;
+    if (view === 'mel') {
+      narration.narratePhase(
+        `mel:${preset}:${activeHarmonics}`,
+        `Now we warp the spectrum onto a mel axis. Mel of f equals 2595 times the log of one plus f over 700, ` +
+        `which spaces frequencies the way the ear hears them. ${capitalise(voice)} keeps the same ${harmWord}, ` +
+        `but watch the bars on the right crowd together at high frequency. That crowding is exactly what a log mel ` +
+        `speech front end pools into a single feature.`,
+      );
     } else {
-      narration.narrate(`Reconstructing from ${activeHarmonics} harmonics, peak at k ${dominant}.`);
+      narration.narratePhase(
+        `run:${preset}:${activeHarmonics}`,
+        `Fourier synthesis builds a signal by adding sine waves. x of t equals the sum over k of a k times the sine of ` +
+        `two pi k f t, so each slider is one harmonic, and harmonic k oscillates k times faster than the fundamental. ` +
+        `${capitalise(voice)} sums ${harmWord}, with the strongest at k equals ${dominant}. Watch the waveform on the left ` +
+        `and the amplitude bars on the right; they are the same signal seen in time and in frequency. As the run sweeps the ` +
+        `phase the waveform slides but the bars never move, because phase does not change which frequencies are present.`,
+      );
     }
   };
   const sim = useSimLoop(step, { initialSpeed: 60 });

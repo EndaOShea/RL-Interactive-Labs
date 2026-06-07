@@ -102,20 +102,48 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
   };
 
   const bpeStep = () => {
+    // Conceptual INTRO for the current corpus: what Byte-Pair Encoding is doing
+    // overall and the live rule it follows (merge the most frequent adjacent pair).
+    narration.narratePhase(
+      `run:${CORPORA[corpusIdx].name}`,
+      `This is Byte-Pair Encoding learning a tokenizer from scratch on the ${CORPORA[corpusIdx].name} corpus. ` +
+        `It starts with every word split into characters plus an end-of-word marker, counts every adjacent pair of symbols, ` +
+        `and at each step merges the single most frequent pair into a new symbol. ` +
+        `That is the rule: take the argument that maximises the pair count and join it. ` +
+        `Watch common fragments and whole words grow from the bottom up, merge by merge, and the learned rules build up below.`,
+    );
     setBpe((prev) => {
-      if (prev.merges.length >= maxMerges) { bpeSim.stop(); narration.narrate('Merge budget reached. Vocabulary built.', { interrupt: true }); return prev; }
+      if (prev.merges.length >= maxMerges) {
+        bpeSim.stop();
+        narration.narratePhase(
+          `done:${CORPORA[corpusIdx].name}:budget`,
+          `The merge budget is reached, so the tokenizer is built. The vocabulary now holds ${prev.vocab.length} symbols, ` +
+            `and that ordered list of merges will tokenize any new text the same way every time. This is exactly how GPT and Llama tokenizers are made.`,
+        );
+        return prev;
+      }
       const res = applyMerge(prev);
-      if (!res) { bpeSim.stop(); narration.narrate('No pairs left to merge. Done.', { interrupt: true }); return prev; }
+      if (!res) {
+        bpeSim.stop();
+        narration.narratePhase(
+          `done:${CORPORA[corpusIdx].name}:exhausted`,
+          `There are no adjacent pairs left to merge, so training stops. Every frequent fragment in this corpus has been folded into the vocabulary, ` +
+            `and the learned merge order now tokenizes future text deterministically.`,
+        );
+        return prev;
+      }
       const { state, step } = res;
       setLastMerge(step);
       const n = state.merges.length;
       const done = n >= maxMerges;
-      narration.narrate(
-        done
-          ? `Final merge: "${step.pair[0]}" plus "${step.pair[1]}" makes "${step.joined}". ${n} merges, vocab ${state.vocab.length}.`
-          : `Merge "${step.pair[0]}" and "${step.pair[1]}" into "${step.joined}", seen ${step.count} times.`,
-        done ? { interrupt: true } : undefined,
-      );
+      if (done) {
+        bpeSim.stop();
+        narration.narratePhase(
+          `done:${CORPORA[corpusIdx].name}:budget`,
+          `That final merge completes the budget, so the tokenizer is built. The vocabulary holds ${state.vocab.length} symbols, ` +
+            `and this ordered merge list now tokenizes any new text deterministically — the same recipe behind GPT and Llama tokenizers.`,
+        );
+      }
       setBpeLog({
         algorithm: `BPE · learn merges · ${n}/${maxMerges}`,
         stepDescription: `Merge the most frequent adjacent pair into a new symbol`,

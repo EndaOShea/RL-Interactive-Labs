@@ -201,6 +201,9 @@ const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     },
   });
 
+  // matrix signature for stable phase keys (so a new matrix/mode re-arms the narration)
+  const mkey = `${a.toFixed(2)},${b.toFixed(2)},${c.toFixed(2)},${d.toFixed(2)}`;
+
   // Run = animate the interpolation identity → M, then settle.
   const step = () => {
     let nt = tRef.current + 0.05;
@@ -209,16 +212,21 @@ const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     tRef.current = nt;
     setT(nt);
     setLastLog(makeLog());
-    const pct = Math.round(nt * 100);
+    // INTRO: explain the map + voice the live formula once per matrix/mode as the morph starts.
+    narration.narratePhase(`run:${mode}:${mkey}`, mode === 'svd'
+      ? `Singular value decomposition factors any matrix M into a rotation, an axis-aligned stretch, and another rotation — M equals U sigma V-transpose. The stretch amounts are the singular values, always real and non-negative, and the condition number is the ratio of the largest to the smallest. Watch the green unit circle map to an ellipse whose semi-axes are exactly those singular values.`
+      : `A two-by-two matrix is a linear map of the plane: every vector v goes to M times v. The columns of M are where the basis vectors land, and the determinant is the signed factor by which areas scale. An eigenvector is a direction the map only stretches, never rotates, satisfying M v equals lambda v. Watch the basis arrows swing and the white unit square's area become the determinant.`);
+    // CONCLUSION: interpret the settled result.
     if (done) {
-      narration.narrate(mode === 'svd'
-        ? `Decomposition complete. Singular values ${svd.s1.toFixed(2)} and ${svd.s2.toFixed(2)}, condition number ${Number.isFinite(svd.cond) ? svd.cond.toFixed(1) : 'infinite'}.`
-        : `Transform applied. Determinant ${det.toFixed(2)}, eigenvalues ${eigLabel}.`,
-        { interrupt: true });
-    } else if (pct % 20 === 0) {
-      narration.narrate(mode === 'svd'
-        ? `Stretching ${pct} percent along the singular axes.`
-        : `Morphing ${pct} percent, basis vectors moving, area scale ${Math.abs(det).toFixed(2)}.`);
+      narration.narratePhase(`done:${mode}:${mkey}`, mode === 'svd'
+        ? (svd.s2 < 1e-3
+          ? `The map has collapsed the plane onto a line: the smaller singular value is essentially zero, so the matrix is rank-deficient and has no inverse — an infinite condition number.`
+          : `The decomposition has settled. The singular values are about ${svd.s1.toFixed(2)} and ${svd.s2.toFixed(2)}, a condition number near ${Number.isFinite(svd.cond) ? svd.cond.toFixed(1) : 'infinity'}. A large condition number means the map is nearly singular and amplifies noise; near one means a clean rotation or uniform scale.`)
+        : (Math.abs(det) < 1e-3
+          ? `The transform has squashed the plane onto a line — the determinant is essentially zero, so the map is singular and cannot be inverted.`
+          : eig.real
+            ? `The transform has settled. The determinant is about ${det.toFixed(2)}, so areas scale by that factor${det < 0 ? ', and the negative sign means orientation flipped' : ''}. The pink eigen-directions are the axes the map only stretches — the same directions PCA would find.`
+            : `The transform has settled with a determinant near ${det.toFixed(2)}. Its eigenvalues are complex, which means the map rotates: there is no real direction left unturned, so no real eigenvectors are drawn.`));
     }
   };
   const sim = useSimLoop(step, { initialSpeed: 40 });

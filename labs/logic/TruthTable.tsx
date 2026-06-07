@@ -60,28 +60,34 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     return clauses.length ? clauses.join(' ∧ ') : '⊤';
   }, [table]);
 
+  // Conceptual audio-tutor narration: one INTRO per expression+mode that voices
+  // what we are doing and the live math, and one CONCLUSION interpreting the result.
+  const intro = () => {
+    const n = table ? table.vars.length : 0;
+    const base = `This is a truth table. We list the formula's value for every assignment of its ${n} variable${n === 1 ? '' : 's'}, which is two to the power of ${n} rows, and that completely defines what the formula means.`;
+    if (mode === 'models') return `${base} In list-models mode we collect the rows where the formula comes out true. Those true rows are its models. Watch the green rows light up as the satisfying assignments are found.`;
+    if (mode === 'cnf') return `${base} In derive-conjunctive-normal-form mode we walk the false rows instead. Negating a false assignment gives one clause that rules out exactly that row, so anding all of them together builds a formula equivalent to the original. Watch each false row contribute a clause.`;
+    return `${base} In classify mode we check whether it is a tautology, true in every row, a contradiction, true in none, or merely satisfiable, true in at least one. Watch the proportion bar fill as each row is evaluated.`;
+  };
+  const conclusion = () => {
+    if (!table) return '';
+    if (mode === 'models') return `The formula has ${table.nTrue} model${table.nTrue === 1 ? '' : 's'} out of ${table.rows} possible assignments. Those are exactly the worlds in which it holds true.`;
+    if (mode === 'cnf') return `The conjunctive normal form is complete. One clause came from each false row, and together they exactly reproduce the original formula. This canonical form is what a SAT solver consumes.`;
+    if (table.type === 'TAUTOLOGY') return `The formula is a tautology. It is true in every single row, so it is logically valid regardless of its inputs.`;
+    if (table.type === 'CONTRADICTION') return `The formula is a contradiction. It is false in every row, so it can never be satisfied.`;
+    return `The formula is satisfiable. It is true in ${table.nTrue} of ${table.rows} rows, so there is at least one assignment that makes it hold, but not all of them do.`;
+  };
+
   const step = () => {
     if (!table || cursor >= table.rows) { sim.pause(); return; }
     const row = table.data[cursor];
     const idx = cursor;
     setCursor(cursor + 1);
 
-    // Narrate this row's evaluation against the live numbers.
-    const assignStr = table.vars.map((v) => `${v} ${row.env[v] ? 'true' : 'false'}`).join(', ');
-    if (mode === 'models') {
-      if (row.out) narration.narrate(`Model found: ${assignStr}.`);
-    } else if (mode === 'cnf') {
-      if (!row.out) narration.narrate(`Row ${idx + 1} false — adding a blocking clause.`);
-    } else {
-      narration.narrate(`Row ${idx + 1}: ${assignStr}, gives ${row.out ? 'true' : 'false'}.`);
-    }
-
-    // Milestone on the final row.
-    if (cursor + 1 >= table.rows) {
-      if (mode === 'models') narration.narrate(`${table.nTrue} of ${table.rows} assignments satisfy the formula.`, { interrupt: true });
-      else if (mode === 'cnf') narration.narrate('CNF derivation complete.', { interrupt: true });
-      else narration.narrate(`Formula is ${table.type.toLowerCase()}: true in ${table.nTrue} of ${table.rows} rows.`, { interrupt: true });
-    }
+    // Speak the INTRO once per expression+mode (idempotent via the phase key).
+    narration.narratePhase(`run:${expr}:${mode}`, intro());
+    // CONCLUSION on the final row.
+    if (cursor + 1 >= table.rows) narration.narratePhase(`done:${expr}:${mode}`, conclusion());
 
     const baseImpl = mode === 'models'
       ? `Listing models: ${table.nTrue}/${table.rows} assignments satisfy the formula so far.`

@@ -171,16 +171,31 @@ const NoiseScheduleLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
     });
   };
 
+  // Conceptual audio-tutor narration: one explanation per phase, paraphrasing
+  // this lab's own Context + live math, never a per-step play-by-play.
   const speak = (idx: number) => {
     const i = Math.min(idx, T - 1);
-    const ab = active.abar[i];
-    const s = active.snr[i];
-    if (i === crossIdx) {
-      narration.narrate(`S N R crosses one at step ${i + 1}. Hardest denoising region.`, { interrupt: true });
-    } else if (i + 1 >= T) {
-      narration.narrate('Marker reached the end of the chain. Signal gone.', { interrupt: true });
+    const schedDesc =
+      schedule === 'cosine'
+        ? 'Cosine keeps alpha-bar near one for longer, then drops it smoothly, so more steps do useful work.'
+        : schedule === 'sigmoid'
+          ? 'The sigmoid, E D M style schedule is symmetric in log signal-to-noise, packing steps around the crossover where denoising is hardest.'
+          : 'The linear schedule ramps the per-step variance uniformly, which pushes alpha-bar to near zero too early and wastes the final steps on what is already noise.';
+    const shiftDesc = shift !== 1
+      ? ` A log signal-to-noise shift of ${shift} times is applied, offsetting every curve so more signal is kept at each step — the resolution-shift trick for larger images.`
+      : '';
+    if (i + 1 >= T) {
+      // CONCLUSION: the marker swept the whole chain.
+      narration.narratePhase(`done:${schedule}:${shift}`,
+        `The marker has swept the whole chain. Signal-to-noise ratio is the ratio of alpha-bar to one minus alpha-bar: it starts huge as nearly pure signal and ends near zero as pure noise. ${schedDesc} The shape of this curve is the single most important design choice in a diffusion model.`);
+    } else if (i >= crossIdx) {
+      // MID: at or past the SNR=1 crossover.
+      narration.narratePhase(`mid:${schedule}:${shift}`,
+        `Past the point where signal-to-noise crosses one, near step ${crossIdx + 1}. Here clean signal and noise have equal power — the hardest region to denoise — and a good schedule spends extra steps right around it.`);
     } else {
-      narration.narrate(`Step ${i + 1}. Alpha bar ${ab.toFixed(2)}, log S N R ${Math.log(s + 1e-12).toFixed(1)}.`);
+      // INTRO: schedule / view / shift overview, voicing the live curves.
+      narration.narratePhase(`run:${schedule}:${view}:${shift}`,
+        `Noise schedule explorer. The schedule decides how fast information dies: alpha-bar is the cumulative signal retained, and beta is the variance added at each step. ${schedDesc}${shiftDesc} Watch where the signal-to-noise curve crosses one — that crossover marks the toughest part of the chain.`);
     }
   };
 

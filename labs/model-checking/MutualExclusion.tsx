@@ -86,11 +86,10 @@ const MutualExclusionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     const node = res.nodes.get(k)!;
     const depth = res.dist.get(k) ?? 0;
     setCursor(cursor + 1);
-    if (node.bad) {
-      narration.narrate(`Invariant violated! Both processes in Critical at depth ${depth}.`, { interrupt: true });
-    } else {
-      narration.narrate(`Exploring state ${node.label}. ${cursor + 1} states so far.`);
-    }
+    narration.narratePhase(
+      `run:${proto}:${mode}`,
+      `This is model checking. Two threads each cycle from idle to waiting to critical, and the search walks every reachable combination, exploring all the ways their steps can interleave. The live invariant reads always globally not, both in critical at once — meaning in every reachable state, the two threads are never both critical together. Using the ${PROTO_NAME[proto]} protocol in ${mode === 'bfs' ? 'breadth first' : 'depth first'} order. Watch the state graph fan out, and if a red unsafe state appears, the gold path back to the start is the counterexample.`,
+    );
     setLastLog({
       algorithm: `Model Checking · ${mode.toUpperCase()} reachability`,
       stepDescription: node.bad ? 'Reached an UNSAFE state — both in Critical!' : `Explore reachable state ${node.label}`,
@@ -134,11 +133,20 @@ const MutualExclusionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
   const done = cursor >= res.order.length || cexFound;
   const safe = res.badKey == null;
 
-  // milestone narration when the search finishes.
+  // conclusion narration when the search finishes — one conceptual remark per outcome.
   useEffect(() => {
     if (!done) return;
-    if (cexFound) narration.narrate(`Counterexample found in ${res.trace(res.badKey!).length - 1} steps.`, { interrupt: true });
-    else if (safe) narration.narrate(`Search complete. Invariant holds across all ${res.order.length} states.`, { interrupt: true });
+    if (cexFound) {
+      narration.narratePhase(
+        `done:${proto}:cex`,
+        `The search found a counterexample, a real interleaving that reaches the forbidden both-critical state in ${res.trace(res.badKey!).length - 1} steps. That gold trace is a concrete, replayable bug — the ${PROTO_NAME[proto]} protocol does not guarantee mutual exclusion.`,
+      );
+    } else if (safe) {
+      narration.narratePhase(
+        `done:${proto}:safe`,
+        `The search is exhaustive and no unsafe state was ever reached, so the invariant holds across the entire reachable state space. Unlike testing a few runs, model checking has proven the ${PROTO_NAME[proto]} protocol keeps the two threads out of the critical section at the same time.`,
+      );
+    }
   }, [done, cexFound, safe]);
 
   const curKey = revealed[revealed.length - 1];

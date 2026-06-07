@@ -158,18 +158,30 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     return { v: best, i: bi, j: bj };
   }, [pos, full, done, O, TOTAL]);
 
+  // Conceptual audio tutor: one INTRO per (kernel · image · pad · stride) choice
+  // that voices what convolution does and the live formula, plus one CONCLUSION
+  // interpreting the finished feature map. No per-pixel chatter.
+  const introNarration = () => {
+    const padWord = pad === 'zero' ? 'zero padding, which treats off-image pixels as black'
+      : pad === 'replicate' ? 'replicate padding, which repeats the nearest edge pixel'
+      : 'reflect padding, which mirrors the image across its border';
+    const strideWord = stride === 1
+      ? `at stride one, so it visits every position and the feature map stays ${O} by ${O}`
+      : `at stride ${stride}, so it jumps ${stride} pixels each time and downsamples to a ${O} by ${O} map`;
+    return `Convolution slides a small three by three kernel over the ${preset} image and, at every position, multiplies each weight by the pixel beneath it and adds them up. That single weighted sum is the formula I times K — the output is the sum over m and n of the input times the kernel. This is the ${KERNEL_DESC[kernelName]}. It runs with ${padWord}, ${strideWord}. Watch the output panel fill in, brighter where the kernel matches the image.`;
+  };
+  const doneNarration = () =>
+    `The sweep is done. The same kernel ran everywhere, so wherever the image matched this pattern the output lit up and flat regions stayed dark. The brightest response, about ${hotspot.v.toFixed(2)}, marks where the ${kernelName} feature was strongest — that is the feature this one filter detects.`;
+
   const step = () => {
     if (pos >= TOTAL) { sim.pause(); return; }
     const i = curOI, j = curOJ;
     const val = full[i][j];
     const nextPos = pos + 1;
     setPos(nextPos);
+    narration.narratePhase(`run:${kernelName}:${preset}:${pad}:${stride}`, introNarration());
     if (nextPos >= TOTAL) {
-      narration.narrate(`Sweep complete. ${KERNEL_DESC[kernelName]}. Peak response ${hotspot.v.toFixed(2)} at output ${hotspot.i}, ${hotspot.j}.`, { interrupt: true });
-    } else if (Math.abs(val) > 0.85 * Math.max(0.01, Math.abs(hotspot.v))) {
-      narration.narrate(`Strong activation ${val.toFixed(2)} at pixel ${i}, ${j}.`);
-    } else {
-      narration.narrate(`Filtering pixel ${i}, ${j}, response ${val.toFixed(2)}.`);
+      narration.narratePhase(`done:${kernelName}:${preset}:${pad}:${stride}`, doneNarration());
     }
     setLastLog({
       algorithm: `Convolution · ${kernelName}`,

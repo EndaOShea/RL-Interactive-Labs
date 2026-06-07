@@ -129,7 +129,21 @@ const SpectrogramLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   }
 
   const step = () => {
-    if (col >= nFrames) { sim.pause(); narration.narrate('Spectrogram complete, all frames painted.', { interrupt: true }); return; }
+    if (col >= nFrames) {
+      sim.pause();
+      // CONCLUSION — interpret what the finished picture teaches, conceptually.
+      const lesson =
+        signal === 'chirp'
+          ? `The bright band climbed steadily from low to high, because a chirp sweeps its frequency over time. That diagonal is the picture of a rising pitch.`
+          : signal === 'two-tone'
+            ? `Two steady horizontal bands settled in, one per constant tone. Whether they stayed cleanly separated depended on your window length, the time versus frequency tradeoff in action.`
+            : signal === 'vowel'
+              ? `Three stacked steady bands appeared, the formants of the vowel. That resonant pattern is exactly the cue a speech model reads to tell one vowel from another.`
+              : `A clear horizontal band for the tone sat over a broadband haze of noise, showing how a window and taper separate signal from noise.`;
+      narration.narratePhase(`done:${signal}:${win}:${windowSize}:${mel}`,
+        `The spectrogram is complete. ${lesson} This frequency by time picture, log mel in practice, is what a speech recogniser reads instead of the raw waveform.`);
+      return;
+    }
     const mag = fullSpec.cols[col];
     // Peak bin in this frame → dominant frequency.
     let pk = 0; for (let k = 1; k < mag.length; k++) if (mag[k] > mag[pk]) pk = k;
@@ -186,21 +200,41 @@ const SpectrogramLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       },
     });
 
-    // Narrate the live event: where the energy is and how it is moving.
-    if (signal === 'chirp') {
-      narration.narrate(`Frame ${nextCol}. Peak ${axisName} ${pk}, ${dir}.`);
-    } else if (dir !== 'steady') {
-      narration.narrate(`Dominant ${axisName} ${dir} to ${pk} at frame ${nextCol}.`);
-    } else {
-      narration.narrate(`Frame ${nextCol}, energy steady at ${axisName} ${pk}.`);
-    }
+    // INTRO — one conceptual explanation per run, voicing the live math and what
+    // to watch. The key carries every choice that changes the picture, so the
+    // tutor re-explains only when the signal, window, taper, or axis changes, not
+    // on every painted column.
+    const tradeoff = windowSize >= 96
+      ? `a long window of ${windowSize} samples, which resolves frequency finely but blurs time`
+      : windowSize <= 32
+        ? `a short window of ${windowSize} samples, which pins events in time but smears frequency`
+        : `a window of ${windowSize} samples, balancing time against frequency resolution`;
+    const tape = win === 'rectangular'
+      ? `A rectangular window has no taper, the sharpest detail but the worst leakage.`
+      : win === 'blackman'
+        ? `The Blackman taper pushes leakage right down, at the cost of a wider band.`
+        : `The ${WINDOW_LABEL[win]} taper smooths the frame edges to suppress spectral leakage.`;
+    const watch =
+      signal === 'chirp' ? `watch one bright band climb across the columns as the pitch rises`
+        : signal === 'two-tone' ? `watch for two steady horizontal bands, the two constant tones`
+          : signal === 'vowel' ? `watch for stacked steady bands, the vowel formants`
+            : `watch a clear band for the tone over a broadband haze of noise`;
+    const formula = mel
+      ? `For each frame we take a windowed Fourier transform, then pool the linear bins into mel bands, capital M of m and tau equals the sum over f of the mel filter times the magnitude of capital X. High frequencies share wide bands, just like the ear.`
+      : `For each frame we take a windowed Fourier transform, capital X of f and tau is the magnitude of the sum of the window times the signal times a complex sinusoid. Each column is one frame's spectrum.`;
+    narration.narratePhase(
+      `run:${signal}:${windowSize}:${win}:${mel}`,
+      `A spectrogram shows how the spectrum changes over time, because speech is non stationary. We slide ${tradeoff} across the signal. ${formula} ${tape} As the columns fill left to right, ${watch}; the yellow trace follows the dominant frequency.`,
+    );
   };
   const sim = useSimLoop(step, { initialSpeed: 90 });
   const reset = () => { sim.stop(); resetState(); narration.cancel(); };
 
-  const changeSignal = (s: Signal) => { setSignal(s); narration.cancel(); narration.narrate(`Loaded ${s} signal.`, { interrupt: true }); };
-  const changeWin = (w: WindowKind) => { setWin(w); narration.cancel(); narration.narrate(`${WINDOW_LABEL[w]} window selected.`, { interrupt: true }); };
-  const toggleMel = () => { const v = !mel; setMel(v); narration.cancel(); narration.narrate(v ? 'Mel frequency axis on.' : 'Linear frequency axis on.', { interrupt: true }); };
+  // Scenario changes only cancel any stale speech; the INTRO phase re-explains on
+  // the next run because its key carries the signal, window, taper, and axis.
+  const changeSignal = (s: Signal) => { setSignal(s); narration.cancel(); };
+  const changeWin = (w: WindowKind) => { setWin(w); narration.cancel(); };
+  const toggleMel = () => { const v = !mel; setMel(v); narration.cancel(); };
 
   // Waveform plot (downsampled for clarity).
   const wave = useMemo(() => {

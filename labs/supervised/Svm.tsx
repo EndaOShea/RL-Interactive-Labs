@@ -157,12 +157,30 @@ const SvmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
 
     const ep = epoch + 1;
     const accPct = Math.round(metrics.acc * 100);
+
+    // Conceptual audio tutor — one explanation per phase (keyed on kernel + shape).
     if (isLinear) {
-      narration.narrate(`Epoch ${ep}. Margin ${metrics.margin.toFixed(2)}, ${metrics.sv} support vectors, ${accPct} percent correct.`);
+      narration.narratePhase(
+        `run:linear:${shape}`,
+        `This is a linear support vector machine. It looks for the maximum margin boundary, the line with the widest empty street on either side. The width of that street is two divided by the length of the weight vector, so widening the margin means shrinking the weights while keeping every point on its correct side. C sets how harshly margin violations are punished. Watch the ringed support vectors, the only points touching the margin, since they alone fix the line.`
+      );
     } else {
-      narration.narrate(`Epoch ${ep}. ${kern} kernel bending the boundary, ${metrics.sv} active support vectors, ${accPct} percent.`);
+      const kdesc = kern === 'rbf'
+        ? 'an R B F kernel, which uses exp of minus gamma times the squared distance between points; a large gamma gives tight wiggly boundaries while a small gamma stays smooth'
+        : 'a polynomial kernel of degree ' + degree + ', which bends the boundary with a polynomial of the inner product';
+      narration.narratePhase(
+        `run:${kern}:${shape}`,
+        `These classes are not linearly separable, so this support vector machine uses the kernel trick. The decision function is a weighted sum of ${kdesc}, taken over only the active support vectors, plus a bias. In effect the data is lifted into a higher dimensional space where a flat separator exists, and the boundary looks curved back here. Watch the field wrap around the shape as the ringed support vectors take shape.`
+      );
     }
-    if (accPct >= 100 && ep > 3) narration.narrate('All points separated cleanly.', { interrupt: true });
+    if (accPct >= 100 && ep > 3) {
+      narration.narratePhase(
+        `done:${kern}:${shape}`,
+        isLinear
+          ? `Every point is now separated, with a margin of about ${metrics.margin.toFixed(2)}. The boundary sits as far as possible from both classes, defined entirely by the handful of support vectors on the margin.`
+          : `Every point is now separated cleanly. The kernel found a curved boundary that a straight line never could, and only the support vectors, the points with non zero coefficients, define it, so prediction stays cheap even in the lifted space.`
+      );
+    }
 
     setLastLog({
       algorithm: `SVM · ${isLinear ? 'soft margin' : kern + ' kernel'}`,

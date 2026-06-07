@@ -107,9 +107,16 @@ const HierarchicalLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     const jump = m.dist - prev;
     setDone(done + 1);
     setDistSeries((s) => [...s, m.dist].slice(-60));
-    if (remaining <= 1) narration.narrate(`Root reached. Tree complete at height ${m.dist.toFixed(2)}.`, { interrupt: true });
-    else if (jump > prev * 0.6 && prev > 0) narration.narrate(`Big jump to ${m.dist.toFixed(2)} — natural cut, ${remaining} clusters left.`, { interrupt: true });
-    else narration.narrate(`Merge ${done + 1}, distance ${m.dist.toFixed(2)}, ${remaining} clusters remain.`);
+    narration.narratePhase(
+      `run:${linkage}`,
+      `Agglomerative clustering starts with every point as its own cluster and repeatedly merges the two closest, building the tree on the right. With ${linkage} linkage the distance between two clusters is ${linkageInfo(linkage)} The height of each merge is how far apart the clusters were, so a tall gap in the tree is a natural place to cut, and the cut height alone decides how many clusters you keep.`,
+    );
+    if (remaining <= 1) {
+      narration.narratePhase(
+        `done:${linkage}`,
+        `The tree is complete, all the way up to a single root at height ${m.dist.toFixed(2)}. Now slide an imaginary horizontal line across the dendrogram: the deeper the gap you cut through, the better separated the clusters below it, and you choose their number after seeing the structure rather than before.`,
+      );
+    }
     setLastLog({
       algorithm: `Hierarchical · ${linkage} linkage`,
       stepDescription: `Merge ${done + 1}/${agg.merges.length} — join the two closest clusters`,

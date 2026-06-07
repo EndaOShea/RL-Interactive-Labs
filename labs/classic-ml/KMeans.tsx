@@ -85,14 +85,16 @@ const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // Seed centroids from the actual points on mount.
   useEffect(() => { restart(points, k, method); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const seedWord = method === 'ff' ? 'farthest-first' : method === 'random' ? 'random' : 'k-means plus plus';
+  const intro = `k-means partitions the points into ${k} clusters by alternating two steps until nothing moves. First it assigns every point to its nearest centroid; then it moves each centroid to the mean of the points assigned to it. Both steps only ever lower the inertia — the total within-cluster squared distance shown in the panel — so it is coordinate descent toward a local optimum. We seeded the centroids with ${seedWord} initialisation; watch the plus markers drift to the centres of the blobs and the dashed rings tighten.`;
+
   const step = () => {
+    narration.narratePhase(`run:${k}:${method}`, intro);
     if (phase === 'assign') {
       const lab = assign(points, centroids);
       const inertia = inertiaOf(points, centroids, lab);
       const moved = labels.length === lab.length ? lab.reduce((s, l, i) => s + (l !== labels[i] ? 1 : 0), 0) : lab.length;
       setLabels(lab); setInertiaSeries((s) => [...s, inertia].slice(-60)); setPhase('update');
-      if (moved > 0) narration.narrate(`Reassigned ${moved} point${moved === 1 ? '' : 's'}, inertia ${inertia.toFixed(2)}.`);
-      else narration.narrate('No points changed cluster — assignments are stable.');
       setLastLog({
         algorithm: 'k-Means · Assignment step',
         stepDescription: 'Assign each point to its nearest centroid',
@@ -113,8 +115,7 @@ const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       const newC = centroids.map((c, j) => (sums[j].n ? { x: sums[j].x / sums[j].n, y: sums[j].y / sums[j].n } : c));
       const moved = newC.reduce((s, c, j) => s + Math.hypot(c.x - centroids[j].x, c.y - centroids[j].y), 0);
       setCentroids(newC); setIter((it) => it + 1); setPhase('assign');
-      if (moved < 1e-4) { sim.pause(); narration.narrate(`Converged after ${iter + 1} iterations, inertia ${curInertia.toFixed(2)}.`, { interrupt: true }); }
-      else narration.narrate(`Centroids shifted by ${moved.toFixed(3)}, settling in.`);
+      if (moved < 1e-4) { sim.pause(); narration.narratePhase(`done:${k}:${method}`, `The centroids have stopped moving, so k-means has converged to a local optimum with inertia near ${curInertia.toFixed(2)}. Remember this depends on the seeding — a different start can land in a different clustering, so in practice you run it several times and keep the lowest inertia.`); }
       setLastLog({
         algorithm: 'k-Means · Update step',
         stepDescription: `Iteration ${iter + 1} — move centroids to cluster means`,
@@ -137,7 +138,7 @@ const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const regen = (t = total) => { const pts = makePoints(t); setPoints(pts); restart(pts, k, method); };
   const reset = () => { sim.stop(); restart(points, k, method); };
   const setInit = (m: Init) => { setMethod(m); restart(points, k, m); setPresetId(undefined); };
-  const applyPreset = (p: Preset<Cfg>) => { sim.stop(); setK(p.values.k); setMethod(p.values.method); restart(points, p.values.k, p.values.method); setPresetId(p.id); narration.narrate(p.hint, { interrupt: true }); };
+  const applyPreset = (p: Preset<Cfg>) => { sim.stop(); setK(p.values.k); setMethod(p.values.method); restart(points, p.values.k, p.values.method); setPresetId(p.id); narration.narratePhase(`preset:${p.id}`, p.hint); };
 
   const classify = (x: number, y: number) => {
     let best = 0, bd = Infinity;

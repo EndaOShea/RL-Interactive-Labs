@@ -93,15 +93,53 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     },
   });
 
+  // Conceptual INTRO narration: paraphrase this algorithm's Context + voice its live-math on a weighted graph.
+  const introNarration = (): string => {
+    if (isBi) {
+      return 'Bi-directional search grows two cost-driven frontiers at once, one outward from the start and one backward from the goal, and stops the instant they collide. '
+        + 'When a node is reached by both sides the candidate path is its forward cost plus its backward cost, and the two halves are stitched together. Each side only reaches the midpoint, so far fewer nodes are settled than one full Dijkstra.';
+    }
+    switch (algo) {
+      case 'astar':
+        return 'A-star expands the node with the smallest f, where f equals g plus h: the total edge weight paid from the start plus the straight-line estimate to the goal. '
+          + 'It returns the same cheapest path as Dijkstra, but guided by the heuristic it usually touches far fewer nodes. Watch the frontier lean toward the goal.';
+      case 'wastar':
+        return 'Weighted A-star expands by f equals g plus epsilon times h, inflating the straight-line estimate so the search commits toward the goal sooner. '
+          + 'It expands a fraction of the nodes, and the cost it returns stays within epsilon times the optimum. Watch how directly it heads for the goal.';
+      case 'greedy':
+        return 'Greedy search expands whichever node has the smallest h, the straight-line estimate to the goal, ignoring the edge weight already spent. '
+          + 'It is fast and goal-directed but can be fooled, so its path is not always the cheapest. Watch it chase the goal by direction alone.';
+      case 'dijkstra':
+        return 'Dijkstra always expands the node with the smallest g, the cheapest total edge weight found so far from the start, using no goal information. '
+          + 'It returns the true minimum-weight path, but explores blindly in every direction. Watch it settle nodes evenly outward.';
+      case 'bfs':
+        return 'Breadth-first search expands the oldest node first, a first-in first-out queue, so it finds the path with the fewest hops. '
+          + 'But hops are not weight: that direct-looking path can cost more total weight than the optimum. Compare its cost against Dijkstra.';
+      case 'dfs':
+      default:
+        return 'Depth-first search expands the newest node first, a last-in first-out stack, plunging deep along one branch before backtracking. '
+          + 'Its route depends on the adjacency order and is rarely the cheapest. Watch it dive down one chain of nodes first.';
+    }
+  };
+
+  // Conceptual CONCLUSION narration: interpret the result on the weighted graph.
+  const doneNarration = (totalCost: number): string => {
+    if (isBi) return `The two frontiers met in the middle of the graph and the cheapest path was stitched together, for a total cost of about ${totalCost.toFixed(0)}. Meeting at the midpoint settled far fewer nodes than one full search.`;
+    if (algo === 'bfs') return `A path with the fewest hops was found, costing about ${totalCost.toFixed(0)} in total weight. Notice that fewest hops does not mean cheapest, so this can exceed the weighted optimum.`;
+    if (algo === 'greedy') return `Goal reached for a total cost of about ${totalCost.toFixed(0)}. Greedy got there quickly by chasing the heuristic, but this is not guaranteed to be the cheapest route.`;
+    if (algo === 'wastar') return `Goal reached for a total cost of about ${totalCost.toFixed(0)}, with far fewer expansions. The inflated heuristic traded a little optimality for speed, staying within the epsilon bound.`;
+    return `The cheapest path was found, with a total weight of about ${totalCost.toFixed(0)}. A-star and Dijkstra both reach this true optimum; the heuristic just let A-star get there expanding fewer nodes.`;
+  };
+
   const step = () => {
     if (isBi) {
       const next = stepBiSearch(bi, { start: START, goal: GOAL, neighbors });
       setBi(next);
       setFrontierSeries((s) => [...s, next.openF.length + next.openB.length].slice(-60));
       if (next.current != null || next.status !== 'running') setLastLog(buildBiLog(next));
-      if (next.status === 'done') narration.narrate(`Frontiers met at node ${next.meet}. Cheapest path found, cost ${next.bestCost.toFixed(0)}.`, { interrupt: true });
-      else if (next.status === 'nopath') narration.narrate('A frontier emptied. The goal is unreachable.', { interrupt: true });
-      else if (next.current != null) narration.narrate(`${next.side === 'B' ? 'Forward' : 'Backward'} side expanded node ${next.current}.`);
+      narration.narratePhase(`run:bidir`, introNarration());
+      if (next.status === 'done') narration.narratePhase(`done:bidir`, doneNarration(next.bestCost));
+      else if (next.status === 'nopath') narration.narratePhase(`nopath:bidir`, 'A frontier emptied with no nodes left to expand, so the goal is unreachable from the start.');
       if (next.status !== 'running') sim.pause();
       return;
     }
@@ -109,9 +147,9 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     setSearch(next);
     setFrontierSeries((s) => [...s, next.open.length].slice(-60));
     if (next.current != null || next.status !== 'running') setLastLog(buildLog(next));
-    if (next.status === 'done') narration.narrate(`Goal reached via ${next.path.join(', ')}. Total cost ${(next.g.get(GOAL) ?? 0).toFixed(0)}.`, { interrupt: true });
-    else if (next.status === 'nopath') narration.narrate('Frontier empty. The goal is unreachable.', { interrupt: true });
-    else if (next.current != null) narration.narrate(`Expanding node ${next.current}. g ${next.lastG.toFixed(0)}, frontier ${next.open.length}.`);
+    narration.narratePhase(`run:${algo}`, introNarration());
+    if (next.status === 'done') narration.narratePhase(`done:${algo}`, doneNarration(next.g.get(GOAL) ?? 0));
+    else if (next.status === 'nopath') narration.narratePhase(`nopath:${algo}`, 'The frontier emptied with no nodes left to expand, so the goal is unreachable from the start.');
     if (next.status !== 'running') sim.pause();
   };
 

@@ -73,9 +73,17 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
     setLoss((L) => [...L, J].slice(-60));
 
     const settled = Math.abs(prev - J) < 1e-6 && epoch > 8;
-    if (J > prev * 1.05) narration.narrate(`Loss climbed to ${J.toFixed(3)} — the learning rate is too high.`, { interrupt: true });
-    else if (settled && !converged) { setConverged(true); narration.narrate(`Fit converged, loss ${J.toFixed(4)} at degree ${degree}.`, { interrupt: true }); }
-    else if (epoch % 6 === 0) narration.narrate(`Epoch ${epoch + 1}, loss falling to ${J.toFixed(3)}.`);
+    const modelWord = degree === 1 ? 'a straight line' : `a degree ${degree} polynomial`;
+    const intro = ridge > 0
+      ? `This fits ${modelWord} by gradient descent, but with ridge regularisation. The loss is the mean squared error plus lambda times the squared weights, so each step both follows the data gradient and shrinks every weight a little toward zero — gentle weight decay. That trades a touch of bias for much less variance, keeping a high-degree curve from wiggling through the noise. Watch the green curve and the red residual sticks, and the loss curve settling toward the noise floor.`
+      : `This fits ${modelWord} by gradient descent: we minimise the mean squared error, the average squared vertical gap between the curve and the points. Each epoch nudges the weights downhill, theta moves a small step alpha against the gradient of the loss. Watch the green fit bend toward the data, the red sticks shrink as residuals fall, and the loss curve decay toward the noise floor.`;
+    narration.narratePhase(`run:${degree}:${ridge > 0}`, intro);
+    if (J > prev * 1.05) {
+      narration.narratePhase('diverge', `The loss is climbing instead of falling, which means alpha is too large: each step overshoots the minimum and bounces up the far wall of the loss surface. Lower the learning rate to make gradient descent stable.`);
+    } else if (settled && !converged) {
+      setConverged(true);
+      narration.narratePhase(`done:${degree}:${ridge > 0}`, `The fit has converged — the loss has flattened near ${J.toFixed(4)}. That floor reflects the irreducible noise in the data, not a poor model${ridge > 0 ? ', and ridge has kept the weights small and the curve smooth' : ''}. Compare the curve against the truth: that is the bias-variance balance you chose with the degree.`);
+    }
 
     setLastLog({
       algorithm: `${degree > 1 ? `Polynomial (deg ${degree})` : 'Linear'} Regression · GD${ridge > 0 ? ' · Ridge' : ''}`,
@@ -104,7 +112,7 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
   const applyPreset = (p: Preset<Cfg>) => {
     setDegree(p.values.degree); setRidge(p.values.ridge); setAlpha(p.values.alpha);
     resetWeights(p.values.degree); setPresetId(p.id);
-    narration.narrate(p.hint, { interrupt: true });
+    narration.narratePhase(`preset:${p.id}`, p.hint);
   };
 
   // Richer visuals: sampled curve for the (possibly polynomial) fit + residual sticks.

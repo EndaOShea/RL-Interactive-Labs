@@ -131,7 +131,6 @@ const SamplingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => 
     for (let i = 0; i < d.probs.length; i++) { acc += d.probs[i]; if (r <= acc) { pick = i; break; } }
     if (pick < 0) pick = d.probs.findIndex((v) => v > 0);
     const nKept = d.kept.filter(Boolean).length;
-    const wasArgmax = pick === d.probs.indexOf(Math.max(...d.probs));
     const repeat = hist.includes(pick);
 
     setChosen(pick);
@@ -140,14 +139,32 @@ const SamplingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => 
     setGenerated((g) => [...g, VOCAB[pick]].slice(-40));
     setTick((t) => t + 1);
 
-    // Narrate the actual sampling decision on the bar chart.
+    // Conceptual audio tutor. One INTRO per decoding configuration, voicing the
+    // live math (softmax of logits over temperature, then truncate, then renorm,
+    // then sample) and what to watch; a short CONCLUSION when a sentence ends.
+    const presetLabel = preset || 'a custom setting';
+    const intro =
+      `Generation is just next-token prediction in a loop. The model's raw scores become probabilities through a softmax, ` +
+      `and temperature, set here near ${temp.toFixed(1)}, divides those scores first: low temperature sharpens toward the single best token, ` +
+      `high temperature flattens the distribution and invites surprise. ` +
+      (topk > 0 ? `Top-k then keeps only the ${topk} most likely tokens. ` : '') +
+      (topp < 1 ? `Top-p, or nucleus sampling, keeps the smallest set of tokens whose probabilities add up to ${topp.toFixed(2)}. ` : '') +
+      (minp > 0 ? `Min-p keeps every token at least ${minp.toFixed(2)} times as likely as the top one, so the floor scales with the model's confidence. ` : '') +
+      (rep !== 1 ? `A repetition penalty discounts tokens already generated to break loops. ` : '') +
+      `Whatever survives is renormalised and one token is drawn at random. With ${presetLabel}, watch the bars: greyed bars were cut from the tail, the highlighted bar is the one sampled.`;
+    narration.narratePhase(
+      `run:${temp.toFixed(2)}:${topk}:${topp.toFixed(2)}:${minp.toFixed(2)}:${rep.toFixed(2)}`,
+      intro,
+    );
+
+    // CONCLUSION: when a full stop is drawn the sentence is complete — interpret it.
     if (VOCAB[pick] === '.') {
-      narration.narrate('Sampled a full stop — sentence ended.', { interrupt: true });
-    } else if (nKept <= 1) {
-      narration.narrate(`Only one survivor — forced to pick "${VOCAB[pick]}".`, { interrupt: true });
-    } else {
-      const how = wasArgmax ? 'the top candidate' : repeat ? 'a repeat token' : 'a tail token';
-      narration.narrate(`Sampled "${VOCAB[pick]}", ${how}, from ${nKept} kept of ${VOCAB.length}.`);
+      narration.narratePhase(
+        `done:${temp.toFixed(2)}:${topk}:${topp.toFixed(2)}:${minp.toFixed(2)}:${rep.toFixed(2)}`,
+        nKept <= 2
+          ? `A full stop ended the sentence. With so few candidates surviving each step, this setting stayed coherent and safe, but it risks repeating itself.`
+          : `A full stop ended the sentence. A broad candidate set made the output more varied and creative, at a higher risk of an off topic token.`,
+      );
     }
 
     setLastLog({

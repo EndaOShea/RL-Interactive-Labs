@@ -87,15 +87,54 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     },
   });
 
+  // Conceptual INTRO narration: paraphrase this algorithm's Context + voice its live-math, said once per run/algorithm.
+  const introNarration = (): string => {
+    if (isBi) {
+      return 'Bi-directional search grows two frontiers at once, one outward from the start and one backward from the goal, and stops the moment they meet in the middle. '
+        + 'Because each half only has to reach the midpoint, together they settle far fewer cells than a single search would. Watch the two coloured waves spread toward each other.';
+    }
+    const hWords = HEURISTIC_LABEL[heuristic].toLowerCase();
+    switch (algo) {
+      case 'astar':
+        return `A-star expands the frontier cell with the smallest f, where f equals g plus h: the real cost travelled from the start plus the ${hWords} estimate of the distance still to go. `
+          + 'Because that estimate never overshoots, A-star is guaranteed to find the shortest path while exploring far less than a blind flood. Watch the visited cells lean toward the goal.';
+      case 'wastar':
+        return `Weighted A-star expands by f equals g plus epsilon times h, inflating the ${hWords} estimate so the search commits toward the goal sooner. `
+          + 'It expands far fewer cells, and the path it returns is provably at most epsilon times the optimal cost. Watch how few cells it touches compared with plain A-star.';
+      case 'greedy':
+        return `Greedy search expands whichever frontier cell has the smallest h, the ${hWords} estimate to the goal, ignoring the cost already paid. `
+          + 'It rushes straight at the target, so it is fast, but walls can fool it into a longer path. Watch it charge toward the goal and sometimes get trapped.';
+      case 'dijkstra':
+        return 'Dijkstra always expands the cell with the smallest g, the cheapest cost found so far from the start, using no goal information at all. '
+          + 'That guarantees the shortest path, but the frontier floods outward in every direction. Watch it spread evenly like ripples on water.';
+      case 'bfs':
+        return 'Breadth-first search expands the oldest cell on the frontier first, a simple first-in first-out queue, so it explores in rings of equal step-count. '
+          + 'On an unweighted grid that finds the path with the fewest steps. Watch the visited region grow as even rings around the start.';
+      case 'dfs':
+      default:
+        return 'Depth-first search expands the newest cell first, a last-in first-out stack, so it plunges deep down one branch before backing up. '
+          + 'It uses very little memory but the path it returns is rarely the shortest. Watch it snake far in one direction before turning back.';
+    }
+  };
+
+  // Conceptual CONCLUSION narration: interpret the result, not a step count.
+  const doneNarration = (cost: number, steps: number): string => {
+    if (isBi) return `The two frontiers met and the path was stitched together at the meeting point, for a total cost of about ${cost.toFixed(0)} over ${steps} steps. Meeting in the middle saved exploring the whole map.`;
+    if (algo === 'greedy') return `Goal reached for a cost of about ${cost.toFixed(0)}. Greedy got there quickly, but because it ignored cost-so-far this path is not guaranteed to be the shortest.`;
+    if (algo === 'dfs') return `Goal reached for a cost of about ${cost.toFixed(0)}. Depth-first found a path, but as expected it is usually longer than the optimal one.`;
+    if (algo === 'wastar') return `Goal reached for a cost of about ${cost.toFixed(0)}, found with far fewer expansions. The inflated heuristic traded a little optimality for a lot of speed, staying within the epsilon bound.`;
+    return `Shortest path found, with a total cost of about ${cost.toFixed(0)} over ${steps} steps. Because the heuristic guided the search, it settled far fewer cells than an uninformed flood would.`;
+  };
+
   const step = () => {
     if (isBi) {
       const next = stepBiSearch(bi, { start: START, goal: GOAL, neighbors });
       setBi(next);
       setFrontierSeries((s) => [...s, next.openF.length + next.openB.length].slice(-60));
       if (next.current != null || next.status !== 'running') setLastLog(buildBiLog(next));
-      if (next.status === 'done') narration.narrate(`Frontiers met. Shortest path found, cost ${next.bestCost.toFixed(0)}, ${next.path.length - 1} steps.`, { interrupt: true });
-      else if (next.status === 'nopath') narration.narrate('A frontier emptied. No path exists.', { interrupt: true });
-      else if (next.current != null) narration.narrate(`${next.side === 'B' ? 'Forward' : 'Backward'} side expanded cell ${next.current}. Settled ${next.visF.size} forward, ${next.visB.size} backward.`);
+      narration.narratePhase(`run:bidir`, introNarration());
+      if (next.status === 'done') narration.narratePhase(`done:bidir`, doneNarration(next.bestCost, next.path.length - 1));
+      else if (next.status === 'nopath') narration.narratePhase(`nopath:bidir`, 'A frontier emptied with nowhere left to expand, so no path exists between the start and goal on this map.');
       if (next.status !== 'running') sim.pause();
       return;
     }
@@ -103,9 +142,9 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     setSearch(next);
     setFrontierSeries((s) => [...s, next.open.length].slice(-60));
     if (next.current != null || next.status !== 'running') setLastLog(buildLog(next));
-    if (next.status === 'done') narration.narrate(`Goal reached. Shortest path cost ${(next.g.get(GOAL) ?? 0).toFixed(0)}, ${next.path.length - 1} steps, after ${next.expansions} expansions.`, { interrupt: true });
-    else if (next.status === 'nopath') narration.narrate('Frontier empty. No path exists on this map.', { interrupt: true });
-    else if (next.current != null) narration.narrate(`Expanding cell ${next.current}. g ${next.lastG.toFixed(0)}, frontier ${next.open.length}.`);
+    narration.narratePhase(`run:${algo}:${heuristic}:${diagonal ? 8 : 4}`, introNarration());
+    if (next.status === 'done') narration.narratePhase(`done:${algo}`, doneNarration(next.g.get(GOAL) ?? 0, next.path.length - 1));
+    else if (next.status === 'nopath') narration.narratePhase(`nopath:${algo}`, 'The frontier emptied with nowhere left to expand, so no path exists between the start and goal on this map.');
     if (next.status !== 'running') sim.pause();
   };
 

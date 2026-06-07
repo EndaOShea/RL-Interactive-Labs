@@ -73,15 +73,20 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     const e = epoch + 3;
     setEpoch(e); setLoss((s) => [...s, l].slice(-60)); setAcc(a); setVersion((v) => v + 1);
 
-    // narration: loss trend, boundary bending, convergence milestone
-    const prev = prevLossRef.current;
+    // Conceptual audio tutor: one INTRO per architecture/data/optimizer choice,
+    // one CONCLUSION when the boundary separates the classes. The per-epoch
+    // numbers stay on screen; the voice explains what the net and live math mean.
+    const optWords = optimizer === 'adam'
+      ? 'Adam, which gives every weight its own adaptive step from the first and second moments of its gradient'
+      : optimizer === 'momentum'
+        ? 'momentum, which builds up velocity along consistent slopes to roll through small bumps'
+        : 'plain gradient descent, stepping each weight downhill by the learning rate times its gradient';
+    const introSentence = `This is a multilayer perceptron with ${hlayers} hidden ${hlayers === 1 ? 'layer' : 'layers'} of ${hidden} ${act} neurons, learning the ${kind} pattern. Each layer takes a weighted sum of the layer before it, adds a bias, and bends it through ${act}, so the hidden layers warp the input space until one final straight cut can separate the classes. Backprop sends the error backward by the chain rule and the weights step downhill using ${optWords}${l2 > 0 ? ', while the L2 penalty gently shrinks the weights toward zero for a smoother boundary' : ''}. Watch the coloured decision region bend around the points and the network edges light up as the weights, teal for positive and red for negative, take shape.`;
+    narration.narratePhase(`run:${kind}:${act}:${optimizer}:${hlayers}x${hidden}:${l2}`, introSentence);
     if (a >= 0.98 && !milestoneRef.current) {
       milestoneRef.current = true;
-      narration.narrate(`Converged at epoch ${e}, accuracy ${(a * 100).toFixed(0)} percent.`, { interrupt: true });
-    } else if (prev != null) {
-      if (l < prev - 0.02) narration.narrate(`Loss falling to ${l.toFixed(2)}, boundary bending around the classes.`);
-      else if (l > prev + 0.05) narration.narrate(`Loss ticked up to ${l.toFixed(2)} — step may be too large.`);
-      else if (e % 60 < 3) narration.narrate(`Epoch ${e}, loss ${l.toFixed(2)}, accuracy ${(a * 100).toFixed(0)} percent.`);
+      narration.narratePhase(`done:${kind}:${act}:${optimizer}`,
+        `The network has converged at about ${(a * 100).toFixed(0)} percent accuracy. The non-linear boundary now follows the shape of the ${kind} data, which a single straight line never could. That is the whole point of hidden layers and backpropagation.`);
     }
     prevLossRef.current = l;
 

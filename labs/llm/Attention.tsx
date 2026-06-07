@@ -71,6 +71,23 @@ const AttentionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
     const row = A[i];
     const best = row.indexOf(Math.max(...row));
     const visible = causal ? i + 1 : N;
+
+    // Conceptual audio tutor: one INTRO per attention configuration, voicing the
+    // live math (softmax of Q dot K over root d, times V) and what to watch; plus
+    // a CONCLUSION when a full sweep over every query row finishes.
+    const intro =
+      `Self-attention lets every word look at every other word and pull in what it needs. ` +
+      `For each token we take its query, dot it against every key, divide by the square root of the head dimension to keep the scores stable, ` +
+      `then a softmax turns each row into weights that sum to one, and those weights mix the values. ` +
+      (causal
+        ? `This run is causal, like a GPT decoder: the future is set to minus infinity before the softmax, so a token only sees itself and the past, and the heatmap stays lower triangular. `
+        : `This run is bidirectional, like an encoder, so every token may attend to the whole sentence. `) +
+      (heads > 1
+        ? `With ${heads} heads the four embedding dimensions split into separate subspaces, and you are watching one head; each head can specialise in a different relation. `
+        : `A single head is shown; real Transformers run many heads in parallel and stack dozens of layers. `) +
+      `Watch each row light up to see where that word is looking; a lower scale sharpens the focus, a higher scale spreads it out.`;
+    narration.narratePhase(`run:${causal ? 'causal' : 'full'}:${heads}:${head}:${scale.toFixed(2)}`, intro);
+
     setLastLog({
       algorithm: `${heads > 1 ? `Head ${head + 1}/${heads}` : 'Self-attention'}${causal ? ' · causal' : ''} · scale=${scale.toFixed(2)}`,
       stepDescription: `Query token "${TOKENS[i]}" attends over ${causal ? `itself + ${i} past token(s)` : 'the sequence'}`,
@@ -96,11 +113,17 @@ const AttentionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
       },
     });
 
-    // Narrate where this query token looks on the heatmap.
+    // When a full sweep over every row completes, interpret what the map shows.
     if (i === N - 1) {
-      narration.narrate(`Last token "${TOKENS[i]}" focuses on "${TOKENS[best]}", ${(row[best] * 100).toFixed(0)} percent. Full pass complete.`, { interrupt: true });
-    } else {
-      narration.narrate(`"${TOKENS[i]}" attends to "${TOKENS[best]}" at ${(row[best] * 100).toFixed(0)} percent${causal ? `, ${visible} keys visible` : ''}.`);
+      const focusedRows = A.filter((r) => Math.max(...r) > 0.4).length;
+      narration.narratePhase(
+        `done:${causal ? 'causal' : 'full'}:${heads}:${head}:${scale.toFixed(2)}`,
+        `That completes one full pass over the sentence. ` +
+          (focusedRows >= N / 2
+            ? `Most rows concentrate their weight on a single token, so this head is sharply focused. `
+            : `The weight is spread across several tokens in most rows, so this head is diffuse. `) +
+          `Each row is one word's attention distribution, and stacking many such heads and layers is how a Transformer builds meaning.`,
+      );
     }
     setQueryRow((q) => (q + 1) % N);
   };

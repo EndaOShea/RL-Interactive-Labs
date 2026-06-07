@@ -80,9 +80,10 @@ const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
     const k = res.order[cursor]; const node = res.nodes.get(k)!;
     const depth = res.dist.get(k) ?? 0;
     setCursor(cursor + 1);
-    if (node.goal) narration.narrate(`Goal reached — everyone is across at depth ${depth}.`, { interrupt: true });
-    else if (node.bad) narration.narrate(`Unsafe state ${node.label} pruned — something would be eaten.`);
-    else narration.narrate(`Safe state. Far bank holds ${node.label || 'nobody'}.`);
+    narration.narratePhase(
+      `run:${scenario}:${mode}`,
+      `This puzzle is a reachability question, the same idea as model checking: starting from everyone on the near bank, can we reach the goal where everyone is across, while never passing through an unsafe state? The live property says reach the start, stay always safe, and eventually find the goal. Unsafe states, where a predator is left with its prey and no farmer, are coloured red and never explored. We're searching in ${mode === 'bfs' ? 'breadth first order, which finds the shortest crossing schedule' : 'depth first order, which dives deep for any valid schedule'}. Watch the safe region grow until a path to the goal appears.`,
+    );
     setLastLog({
       algorithm: `Model Checking · ${mode.toUpperCase()} reachability`,
       stepDescription: node.goal ? 'Goal reached — everyone is across!' : node.bad ? `Unsafe state ${node.label} (someone gets eaten) — pruned` : `Reachable safe state · right bank = ${node.label}`,
@@ -123,10 +124,20 @@ const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
   const edges: GEdge[] = res.edges.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to, state: solFound && sol.has(e.from) && sol.has(e.to) ? 'path' : 'idle' }));
   const done = cursor >= res.order.length || solFound;
 
+  // conclusion narration when the search finishes — one conceptual remark per outcome.
   useEffect(() => {
     if (!done) return;
-    if (solFound) narration.narrate(`Solution found in ${res.trace(res.goalKey!).length - 1} crossings.`, { interrupt: true });
-    else if (!res.goalKey) narration.narrate('No safe crossing exists for this puzzle.', { interrupt: true });
+    if (solFound) {
+      narration.narratePhase(
+        `done:${scenario}:${mode}:goal`,
+        `A safe schedule exists, and the search found it as a reachability witness — the gold path crossing in ${res.trace(res.goalKey!).length - 1} moves. ${mode === 'bfs' ? 'Because we searched breadth first, this is the shortest possible solution.' : 'Depth first returned a valid path, though not necessarily the shortest.'} No cleverness was needed: just exploring the safe reachable region revealed the answer.`,
+      );
+    } else if (!res.goalKey) {
+      narration.narratePhase(
+        `done:${scenario}:nopath`,
+        `The whole safe reachable region was explored and the goal was never reached, so no safe crossing exists for this puzzle. The search proved it by exhaustion rather than by guessing.`,
+      );
+    }
   }, [done, solFound]);
 
   const curKey = revealed[revealed.length - 1];

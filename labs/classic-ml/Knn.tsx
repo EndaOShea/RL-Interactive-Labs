@@ -68,9 +68,11 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setQuery({ x: nx, y: ny });
     setConf((c) => [...c, res.conf].slice(-50));
     const pct = Math.round(res.conf * 100);
-    if (res.conf >= 0.85) narration.narrate(`Deep in class ${res.cls} territory, ${pct} percent of ${kk} neighbours agree.`);
-    else if (res.conf <= 0.55) narration.narrate(`Query straddles a boundary — neighbours split, class ${res.cls} edges it at ${pct} percent.`);
-    else narration.narrate(`Query moves into class ${res.cls}, ${pct} percent vote.`);
+    const metricWord = metric === 'l1' ? 'Manhattan' : metric === 'cheb' ? 'Chebyshev' : 'Euclidean';
+    const intro = weighted
+      ? `Nearest-neighbours classifies the white query point by a distance-weighted vote: each of its ${kk} closest points votes with weight one over its distance, so nearer neighbours count for more. We measure closeness with the ${metricWord} distance. There is no training — the data itself is the model. Watch the shaded regions: those are the predicted class everywhere, and the boundary smooths as you raise k.`
+      : `Nearest-neighbours classifies the white query point by a plain majority vote of its ${kk} closest neighbours, with closeness measured by the ${metricWord} distance. There is no training phase — the stored data is the model. Watch the shaded regions, which show the predicted class everywhere: a small k hugs individual points while a large k smooths the boundary.`;
+    narration.narratePhase(`run:${k}:${metric}:${weighted}`, intro);
     setLastLog({
       algorithm: `k-NN · k=${k} · ${METRIC_LABEL[metric]}${weighted ? ' · weighted' : ''}`,
       stepDescription: weighted ? 'Classify by distance-weighted vote of nearest neighbours' : 'Classify query by majority vote of nearest neighbours',
@@ -93,7 +95,7 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const regen = (n = perClass) => { setPoints(makeBlobs(CENTERS, SPREAD, n)); setVersion((v) => v + 1); setConf([]); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); setQuery({ x: 0.5, y: 0.5 }); setConf([]); setLastLog(null); narration.cancel(); };
   const addPoint = (x: number, y: number) => { setPoints((p) => [...p, { x: clamp01(x), y: clamp01(y), cls: paintClass }]); setVersion((v) => v + 1); };
-  const applyPreset = (p: Preset<KnnCfg>) => { setK(p.values.k); setMetric(p.values.metric); setWeighted(p.values.weighted); setPresetId(p.id); setVersion((v) => v + 1); setConf([]); narration.cancel(); narration.narrate(p.hint, { interrupt: true }); };
+  const applyPreset = (p: Preset<KnnCfg>) => { setK(p.values.k); setMetric(p.values.metric); setWeighted(p.values.weighted); setPresetId(p.id); setVersion((v) => v + 1); setConf([]); narration.cancel(); narration.narratePhase(`preset:${p.id}`, p.hint); };
 
   // Richer visuals: ring radius scales with each neighbour's vote weight (closer = bigger when weighted).
   const maxD = current.neighbors.reduce((m, n) => Math.max(m, n.d), 1e-6);

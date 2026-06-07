@@ -69,9 +69,14 @@ const LogisticRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
     setEpoch((e) => e + 1);
     setAccSeries((a) => [...a, acc].slice(-60));
 
-    if (acc >= 0.99 && !milestone) { setMilestone(true); narration.narrate('Boundary separates every point — 100 percent accuracy.', { interrupt: true }); }
-    else if (acc < 0.99 && milestone) setMilestone(false);
-    else if (epoch % 6 === 0) narration.narrate(`Epoch ${epoch + 1}, accuracy ${(acc * 100).toFixed(0)} percent, the line is still tilting.`);
+    const intro = l2 > 0
+      ? `Logistic regression draws a straight decision boundary, but with L2 regularisation. It passes a weighted sum of the features through the sigmoid to get a probability, then minimises cross-entropy plus a penalty lambda times the squared weights. On separable data that penalty matters: without it the weights run off to infinity, so the penalty caps the weight norm and keeps the probabilities calibrated. The solid white line is where the probability is one half; the dashed lines are the quarter and three-quarter band, and it narrows as the weight norm grows.`
+      : `Logistic regression draws a straight decision boundary. It passes a weighted sum of the features through the sigmoid — one over one plus e to the minus z — turning the score into a probability, and trains by minimising cross-entropy. Each step moves the weights along the clean gradient, the average of the prediction minus the label times the input. Watch the solid white line, where the probability is one half, tilt to split the two classes, with the dashed quarter and three-quarter contours forming the confidence band.`;
+    narration.narratePhase(`run:${l2 > 0}`, intro);
+    if (acc >= 0.99 && !milestone) {
+      setMilestone(true);
+      narration.narratePhase('done:separated', `The boundary now separates every point — accuracy has reached one hundred percent. On perfectly separable data the cross-entropy loss has no finite minimum, so ${l2 > 0 ? 'the L2 penalty is what holds the weights, and the confidence band, in check' : 'the weight norm will keep growing and the confidence band keep narrowing unless you add an L2 penalty'}.`);
+    } else if (acc < 0.99 && milestone) setMilestone(false);
 
     setLastLog({
       algorithm: `Logistic Regression · Cross-Entropy GD${l2 > 0 ? ' · L2' : ''}`,
@@ -99,7 +104,7 @@ const LogisticRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
     setAlpha(p.values.alpha); setSeparation(p.values.separation); setL2(p.values.l2);
     setData(makeTwoClass(perClass, p.values.separation));
     setW1(0); setW2(0); setB(0); setEpoch(0); setAccSeries([]); setMilestone(false); setPresetId(p.id);
-    narration.narrate(p.hint, { interrupt: true });
+    narration.cancel(); narration.narratePhase(`preset:${p.id}`, p.hint);
   };
 
   // p = t  ⇒  w·x + b = logit(t). Solve y as a function of x for each contour.

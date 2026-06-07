@@ -117,14 +117,29 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     return { name: FILTERS[idx].name, v: best };
   }, [pipe]);
 
+  // Conceptual audio tutor for the CNN pipeline. Three phases keyed on the run
+  // config: an INTRO when convolution begins (what the whole stack does + the
+  // live conv formula), a MID insight at the pooling stage (max vs average), and
+  // a CONCLUSION interpreting the softmax prediction. No per-stage chatter.
+  const runKey = `${cls}:${poolMode}`;
+  const introNarration =
+    `This is a tiny convolutional pipeline running forward on the glyph ${cls}: convolution, then ReLU, then pooling, then a classifier. Three fixed filters — a vertical edge, a horizontal edge, and a blob — slide over the image, and each produces a feature map showing where its pattern occurs. That is the formula I times K, a weighted sum of the patch under each filter. Here the ${peakFilter.name} filter fires hardest. Then ReLU, the maximum of zero and the value, keeps only the positive responses, so each map shows where its feature is actually present. Watch the three feature maps light up.`;
+  const midNarration =
+    poolMode === 'max'
+      ? 'Now max pooling. Each two by two block is replaced by its single strongest activation, so the maps halve in size while keeping the sharpest peaks. Because it keeps the peak wherever it sits in the block, this adds tolerance to small shifts of the feature.'
+      : 'Now average pooling. Each two by two block is replaced by its mean, so the maps halve in size and come out smoother than with max pooling. Averaging keeps more of the overall energy and is gentler on noise, which can nudge the final match.';
+  const doneNarration =
+    (pred === cls
+      ? `The pooled maps are flattened into one vector and compared to a stored template for each class with cosine similarity, then softmax turns those scores into probabilities. It predicts ${pred}, correctly, with about ${(probs[predIdx] * 100).toFixed(0)} percent confidence — the feature vector landed closest to its own template. Remember, the filters are hand picked and this is template matching, not learning; a real network would train both.`
+      : `The pooled maps are flattened and matched to each class template by cosine similarity, then softmax turns those into probabilities. It predicts ${pred}, which is a mismatch — a reminder that fixed filters plus template matching are brittle. A trained network would learn the filters and the classifier instead.`);
+
   const step = () => {
     const next = (stage + 1) as Stage;
     if (stage >= 4) { sim.pause(); return; }
     setStage(next);
-    if (next === 1) narration.narrate(`Convolving with three filters. ${peakFilter.name} fires hardest at ${peakFilter.v.toFixed(1)}.`);
-    else if (next === 2) narration.narrate('ReLU clamps negatives — only positive activations remain.');
-    else if (next === 3) narration.narrate(`${poolMode === 'max' ? 'Max' : 'Average'} pooling, maps shrink to six by six.`);
-    else if (next === 4) narration.narrate(`Prediction ${pred}, confidence ${(probs[predIdx] * 100).toFixed(0)} percent.`, { interrupt: true });
+    if (next === 1) narration.narratePhase(`run:${runKey}`, introNarration);
+    else if (next === 3) narration.narratePhase(`pool:${runKey}`, midNarration);
+    else if (next === 4) narration.narratePhase(`done:${runKey}`, doneNarration);
     const logs: Record<number, SimulationUpdate> = {
       1: {
         algorithm: 'CNN · conv layer',

@@ -99,9 +99,16 @@ const GmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setLlSeries((s) => [...s, e.logLik].slice(-60));
     const gain = e.logLik - prevLL;
     const converged = gain < 1e-4 && iter > 2;
-    if (converged) narration.narrate(`EM converged after ${iter + 1} iterations, log-likelihood ${e.logLik.toFixed(1)}.`, { interrupt: true });
-    else if (iter === 0) narration.narrate(`First EM step. ${K2} ${covType} components seeded.`);
-    else narration.narrate(`Iteration ${iter + 1}, log-likelihood up ${gain >= 0 ? '+' : ''}${gain.toFixed(2)} to ${e.logLik.toFixed(1)}.`);
+    narration.narratePhase(
+      `run:${covType}:${K2}`,
+      `This is a Gaussian mixture fitted by expectation maximisation. It models the data as a blend of ${K2} Gaussian blobs, and alternates two moves: the E step gives every point a soft responsibility, the probability that it belongs to each component, and the M step refits each blob to its responsibility-weighted points. With ${covType} covariance the blobs are ${covType === 'spherical' ? 'plain circles, essentially soft k-means' : covType === 'diag' ? 'axis-aligned ellipses that stretch but do not rotate' : 'full ellipses that can stretch and rotate to follow correlated data'}. Watch the ellipses and the log-likelihood, which EM is guaranteed never to decrease.`,
+    );
+    if (converged) {
+      narration.narratePhase(
+        `done:${covType}:${K2}`,
+        `The log-likelihood has plateaued, so EM has converged to a local optimum. Judge this fit by BIC rather than raw likelihood, since BIC penalises extra parameters and is the honest way to compare the number of components and the covariance family.`,
+      );
+    }
     setLastLog({
       algorithm: `Gaussian Mixture · EM · ${covType}`,
       stepDescription: `Iteration ${iter + 1} — E-step (responsibilities) then M-step (refit)`,

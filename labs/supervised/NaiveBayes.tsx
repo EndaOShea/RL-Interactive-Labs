@@ -97,9 +97,30 @@ const NaiveBayesLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     setConfSeries((s) => [...s, post[pred]].slice(-60));
 
     const conf = Math.round(post[pred] * 100);
-    narration.narrate(`Query at ${nx.toFixed(2)}, ${ny.toFixed(2)}. ${variant === 'gaussian' ? 'Gaussian' : 'Multinomial'} posterior favours class ${pred} at ${conf} percent.`);
-    if (conf >= 90) narration.narrate(`Confident: class ${pred}.`, { interrupt: true });
-    else if (conf < 50) narration.narrate('Classes are nearly tied here.', { interrupt: true });
+
+    // Conceptual audio tutor — one explanation per phase (keyed on the model variant).
+    if (variant === 'gaussian') {
+      narration.narratePhase(
+        'run:gaussian',
+        `This is Gaussian naive bayes. It applies Bayes rule with one strong shortcut, that the features are independent given the class, so the posterior probability of a class is its prior times the product of a one dimensional Gaussian likelihood for each feature, all normalised. On screen each ellipse is one class fitted as an axis aligned Gaussian at plus or minus two sigma, and the white point is a roaming query coloured by whichever class wins. The boundaries here are curved, not straight lines.`
+      );
+    } else {
+      narration.narratePhase(
+        `run:multinomial:${alpha < 0.01 ? 'noalpha' : alpha > 2 ? 'high' : 'std'}`,
+        `This is multinomial naive bayes. Instead of fitting a Gaussian, it bins each axis into cells and learns how often each class lands in each cell, so the likelihood of a feature is the smoothed cell frequency, the count plus alpha over the total plus alpha times the number of bins. That gives blocky decision regions rather than smooth ellipses. The Laplace alpha, currently ${alpha}, decides how unseen cells are handled, a large alpha smooths and blurs while alpha near zero turns brittle.`
+      );
+    }
+    if (conf >= 90) {
+      narration.narratePhase(
+        `done:${variant}:high`,
+        `The query now sits firmly inside one class, so the winning posterior is very high. Remember though, the naive independence assumption tends to make these probabilities over confident, so trust the ranking more than the exact number.`
+      );
+    } else if (conf < 50) {
+      narration.narratePhase(
+        `done:${variant}:tie`,
+        `Here the query lands where the class likelihoods overlap, so the top posterior barely beats the others and the classes are nearly tied. This contested middle is exactly where naive bayes is least sure.`
+      );
+    }
 
     setLastLog({
       algorithm: variant === 'gaussian' ? 'Gaussian Naive Bayes' : 'Multinomial Naive Bayes',

@@ -90,14 +90,16 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     const kind = result.core[i] ? 'core' : lab >= 0 ? 'border' : 'noise';
     setCursor(i + 1);
     setNeighborSeries((s) => [...s, nbc].slice(-60));
-    narration.narrate(
-      kind === 'core'
-        ? `Core point ${i + 1}, ${nbc} neighbours, growing cluster ${lab}.`
-        : kind === 'border'
-          ? `Border point joins cluster ${lab}, ${nbc} neighbours.`
-          : `Point ${i + 1} is noise, only ${nbc} neighbours.`,
+    narration.narratePhase(
+      `run:dbscan:${minPts}`,
+      `DBSCAN groups points by density rather than by counting clusters in advance. A point is a core point when at least minPts neighbours fall inside the radius epsilon; clusters then grow by chaining core points together, and lonely points are left as noise. Watch the dashed epsilon ball sweep each point, and notice that DBSCAN can trace clusters of any shape and flag outliers on its own.`,
     );
-    if (i + 1 >= total) narration.narrate(`Scan complete. ${result.nClusters} clusters, ${result.labels.filter((l) => l === -1).length} noise.`, { interrupt: true });
+    if (i + 1 >= total) {
+      narration.narratePhase(
+        `done:dbscan`,
+        `The scan settled into ${result.nClusters} clusters with ${result.labels.filter((l) => l === -1).length} points left as noise. With no number of clusters given up front, the choice of epsilon and minPts alone decided the density that counts as a cluster.`,
+      );
+    }
     setLastLog({
       algorithm: 'DBSCAN · Density Clustering',
       stepDescription: `Point ${i + 1}/${points.length} — ${nbc} points within ε`,
@@ -125,9 +127,16 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setCursor(k + 1);
     setNeighborSeries((s) => [...s, nbc].slice(-60));
     const rTxt = Number.isFinite(r) ? r.toFixed(3) : '∞';
-    if (!Number.isFinite(r) || r > xi) narration.narrate(`Reachability spike ${rTxt}, cluster boundary at position ${k + 1}.`);
-    else narration.narrate(`Position ${k + 1} in valley of cluster ${lab}, reach ${rTxt}.`);
-    if (k + 1 >= total) narration.narrate(`Reachability plot built. ${opt.nClusters} valleys below ξ.`, { interrupt: true });
+    narration.narratePhase(
+      `run:optics:${minPts}`,
+      `OPTICS fixes DBSCAN's biggest weakness, that one global epsilon can't describe clusters of different densities. Instead of fixing epsilon, it visits points in a reachability ordering and records each point's reachability distance, the cost to reach it from the already-processed frontier. Read the plot below the scatter as a landscape: deep valleys are dense clusters and tall peaks are the boundaries between them.`,
+    );
+    if (k + 1 >= total) {
+      narration.narratePhase(
+        `done:optics`,
+        `The reachability plot is complete, and a flat cut at height xi carves out ${opt.nClusters} valleys as clusters. From a single run you can read off many DBSCAN-like results at different densities, without ever committing to one epsilon.`,
+      );
+    }
     setLastLog({
       algorithm: 'OPTICS · Reachability Ordering',
       stepDescription: `Ordering ${k + 1}/${total} — reachability-distance ${rTxt}`,

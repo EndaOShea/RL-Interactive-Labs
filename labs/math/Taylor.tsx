@@ -147,6 +147,18 @@ function solveLinear(A: number[][], rhs: number[]): number[] | null {
   return M.map((row, i) => row[n] / row[i]);
 }
 
+// INTRO narration: paraphrase the Context + the live formula in plain English (for the ear).
+function introNarration(fn: Fn, mode: Mode, def: FnDef): string {
+  const entire = fn === 'sin' || fn === 'cos' || fn === 'exp';
+  const radius = entire
+    ? `${def.label} is an entire function, so its series converges over the whole real line — you just need more terms far from the centre.`
+    : `${def.label} has a finite radius of convergence: ${def.roc}. Beyond it, adding terms makes the approximation worse, not better.`;
+  if (mode === 'pade') {
+    return `A Padé approximant replaces the truncated polynomial with a ratio of two polynomials, P over Q, matched to the same Taylor coefficients. Because the denominator can vanish, it can model the function's poles, so it often stays accurate far past where the plain series diverges. ${radius} Watch the purple rational curve track ${def.label} where a polynomial would run off.`;
+  }
+  return `A Taylor series rewrites a smooth function as a polynomial about a centre a, summing f-of-n at a, over n factorial, times x minus a to the n. Truncating at degree n matches the function and its first n derivatives exactly at a, and hugs the curve more widely as n grows. ${radius} Watch the gold polynomial snap onto the true curve as the degree climbs, and the error trace fall.`;
+}
+
 const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
   const [fn, setFn] = useState<Fn>('sin');
@@ -229,11 +241,17 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setErrSeries((s) => [...s, e].slice(-60));
 
     const m = Math.max(1, Math.floor(nn / 2));
-    const orderLabel = mode === 'pade' ? `Padé[${m}/${m}]` : `degree ${nn}`;
+
+    // INTRO: explain the method + voice the live formula once per function/mode.
+    narration.narratePhase(`run:${fn}:${mode}`, introNarration(fn, mode, def));
+    // CONCLUSION: interpret the final accuracy versus the radius of convergence.
     if (nn >= cap) {
-      narration.narrate(`${orderLabel} reached. Error at x ${evalX.toFixed(1)} is ${e.toExponential(1)}.`, { interrupt: true });
-    } else {
-      narration.narrate(`${mode === 'pade' ? `Padé order ${m}` : `Added the degree ${nn} term`}. Error now ${e.toExponential(1)}.`);
+      const insideRadius = e < 0.05;
+      narration.narratePhase(`done:${fn}:${mode}`, mode === 'pade'
+        ? `At the highest order the rational approximant settles. Because its denominator can model the function's poles, Padé stays accurate out where the plain Taylor series would diverge — here the error at the eval point is around ${e.toExponential(1)}.`
+        : insideRadius
+          ? `At the highest degree the polynomial hugs the curve and the error at the eval point is tiny, about ${e.toExponential(1)}. The eval point sits inside the radius of convergence, so every extra term helps.`
+          : `Adding terms is not closing the gap — the error stays around ${e.toExponential(1)}. The eval point lies beyond the radius of convergence, so the Taylor series cannot reach it no matter how many terms you add; re-centre, or switch to Padé.`);
     }
 
     setLastLog({

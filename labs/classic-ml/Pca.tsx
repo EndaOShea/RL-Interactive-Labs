@@ -73,7 +73,13 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const step = () => {
     setAngle((a) => a + 0.05);
     setE1Series((arr) => [...arr, pca.e1].slice(-60));
-    narration.narrate(`Cloud at ${thetaDeg.toFixed(0)} degrees, PC1 captures ${(pca.e1 * 100).toFixed(0)} percent.`);
+    const base = whiten
+      ? `Principal component analysis finds the orthogonal directions along which the data varies most by eigen-decomposing its covariance matrix; the eigenvectors are the components and the eigenvalues are the variance along each. Whitening is on, so after projecting onto the components we divide each by the square root of its eigenvalue, rescaling to unit variance so the cloud becomes isotropic. The white axis is the first component, the maximum-variance direction; the green ellipse is the two-sigma shape.`
+      : `Principal component analysis finds the orthogonal directions along which the data varies most. It eigen-decomposes the covariance matrix: the white axis is the first component, the direction of greatest variance, and the green axis is the second, perpendicular to it. Each component's share of the total variance is its eigenvalue over the sum of eigenvalues, and the first component stays locked to the cloud's longest axis as it rotates.`;
+    const keepMsg = kComp === 1
+      ? ` Right now the first component alone clears your variance threshold, so the data is effectively one-dimensional — you could project onto that single axis and discard the other with almost no loss.`
+      : ` Right now the first component does not clear your threshold on its own, so you need to keep both components; a rounder cloud carries real information on both axes and compresses less.`;
+    narration.narratePhase(`run:${whiten}:${kComp}`, base + keepMsg);
     setLastLog({
       algorithm: `PCA · Principal Components${whiten ? ' · whitened' : ''}`,
       stepDescription: 'Eigen-decompose the covariance matrix',
@@ -98,7 +104,7 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const reset = () => { sim.stop(); setAngle(0.5); setE1Series([]); setLastLog(null); narration.cancel(); };
   const applyPreset = (p: Preset<Cfg>) => {
     setThreshold(p.values.threshold); setWhiten(p.values.whiten); setElong(p.values.elongation); setPresetId(p.id);
-    narration.narrate(p.hint, { interrupt: true });
+    narration.cancel(); narration.narratePhase(`preset:${p.id}`, p.hint);
   };
 
   const projected = points.map((p) => {

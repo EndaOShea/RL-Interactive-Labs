@@ -913,19 +913,33 @@ for episode in range(200):
         }
     }
 
-    // --- NARRATION: describe the live event on the grid ---------------------
-    if (narration.enabled) {
-        if (done) {
-            narration.narrate(`Goal reached in ${steps + 1} steps, episode ${episode + 1} complete.`, { interrupt: true });
-        } else if (reward === -1) {
-            narration.narrate(`Blocked moving ${DIR_WORDS[action]}, penalty taken.`);
-        } else if (algoMode === 'based' && flashCells.length > 0) {
-            narration.narrate(`Planning: replaying ${flashCells.length} remembered transitions.`);
-        } else if (isExploration) {
-            narration.narrate(`Exploring ${DIR_WORDS[action]} at random.`);
-        } else {
-            narration.narrate(`Moving ${DIR_WORDS[action]}, greedy choice.`);
-        }
+    // --- NARRATION: conceptual audio tutor (phase-keyed, not per-move) -------
+    // INTRO explains the chosen method overall and voices its live update in
+    // words; it re-speaks when the architecture or algorithm changes. CONCLUSION
+    // interprets what an episode taught when the agent reaches the goal.
+    const algoKey = algoMode === 'based' ? 'dyna' : subAlgo;
+    const intro: Record<string, string> = {
+        q: 'Q-learning is value-based and off-policy. Each step it nudges the quality of an action toward the reward plus the discounted best value of the next square. Watch the heat map fill in as good paths back up their value toward the start.',
+        sarsa: 'SARSA is on-policy: it backs up the value of the action it actually takes next, exploration mistakes and all. So its value map stays a little more cautious than Q-learning around the obstacles. Watch the heat spread along the path it really walks.',
+        esarsa: 'Expected SARSA backs up the average value over the whole epsilon-greedy distribution instead of one sampled next action. Same target as SARSA, but far smoother, so the heat map settles with less jitter. Watch the values climb steadily toward the goal.',
+        doubleq: 'Double Q-learning keeps two value tables. One picks the best next action, the other scores it, so noisy luck cannot confirm itself. This removes the optimistic bias of plain Q-learning. Watch the heat grow calmer and less inflated.',
+        reinforce: 'REINFORCE is a Monte-Carlo policy gradient. It learns instructions, not values, and only updates at the end of an episode using the total discounted return to push up the probability of every action that was taken. Watch the policy arrows emerge before any heat does.',
+        ac: 'Actor-Critic blends both ideas. The critic learns how good each state is, and its surprise, the temporal-difference error, tells the actor whether to make the chosen action more or less likely. Watch the value heat and the policy arrows grow together.',
+        dyna: 'Dyna-Q is model-based. It learns a model of the world and then dreams, replaying remembered transitions to back up value without real moves, so it learns from far less experience. Watch the purple planning flashes spread value across the grid.',
+    };
+    const conclude: Record<string, string> = {
+        q: 'The agent reached the goal. Because Q-learning chases the best possible future, its map now points greedily down the shortest path it has found.',
+        sarsa: 'Goal reached. SARSA learned from the path it truly walked, so its route tends to keep a safer margin from the penalties than the purely greedy plan.',
+        esarsa: 'Goal reached. By averaging over its action distribution, Expected SARSA converged on a stable value map with much less run-to-run noise.',
+        doubleq: 'Goal reached. With its bias removed, Double Q-learning settled on more honest values rather than the inflated estimates a single table would chase.',
+        reinforce: 'Episode complete, and now the policy updates. A successful run raises the probability of every action it took; a poor run lowers them. Over many episodes the arrows sharpen toward the goal.',
+        ac: 'Goal reached. Each step the critic graded the move and steered the actor, so policy and value improved together rather than waiting for the episode to end.',
+        dyna: 'Goal reached. Thanks to planning, Dyna-Q propagated this success through its model immediately, learning more per real step than a model-free agent would.',
+    };
+    if (done) {
+        narration.narratePhase(`done:${algoKey}`, conclude[algoKey] || conclude.q);
+    } else {
+        narration.narratePhase(`run:${algoKey}`, intro[algoKey] || intro.q);
     }
 
     setAgentPos(done ? startPos : nextPos);
@@ -1002,8 +1016,9 @@ for episode in range(200):
         if (valueBasedStep) {
             setEpsilon(prev => {
                 const next = Math.max(0.01, prev * epsilonDecay);
-                if (narration.enabled && prev > 0.05 && next <= 0.05) {
-                    narration.narrate('Exploration nearly exhausted, policy is locking in.', { interrupt: true });
+                // MID phase: the shift from exploring to exploiting as epsilon decays.
+                if (prev > 0.05 && next <= 0.05) {
+                    narration.narratePhase(`exploit:${algoKey}`, 'Epsilon has decayed almost to zero, so the agent has stopped trying random actions and now trusts its learned values. From here it exploits the best path it knows rather than searching for new ones.');
                 }
                 return next;
             });
@@ -1415,19 +1430,29 @@ for episode in range(100):
             setLastLog(log);
         }
 
-        // --- NARRATION ---
-        if (narration.enabled) {
-            if (done) {
-                narration.narrate(`Reached the goal in ${steps + 1} steps despite ${(slipChance * 100).toFixed(0)} percent slip.`, { interrupt: true });
-            } else if (slipped) {
-                narration.narrate(`Slipped! Tried ${DIR_WORDS[action]} but went ${DIR_WORDS[actualAction]}.`);
-            } else if (reward === -1) {
-                narration.narrate(`Bumped a wall heading ${DIR_WORDS[action]}.`);
-            } else if (policyType === 'stochastic') {
-                narration.narrate(`Sampled ${DIR_WORDS[action]} at temperature ${temperature.toFixed(1)}.`);
-            } else {
-                narration.narrate(`Greedy move ${DIR_WORDS[action]}.`);
-            }
+        // --- NARRATION: conceptual phase tutor (policy x environment) -------
+        // INTRO explains the chosen policy against the current slip level and
+        // voices the idea behind the live update. It re-speaks when the policy
+        // type or the world's stochasticity changes. CONCLUSION interprets the run.
+        const slipOn = slipChance > 0.001;
+        const sceneKey = `${policyType}:${slipOn ? 'noisy' : 'clean'}`;
+        let intro: string;
+        if (policyType === 'deterministic') {
+            intro = slipOn
+                ? 'This is a deterministic policy: it always takes the single highest-value action. But the world is stochastic now, so the agent sometimes slips sideways even when it chooses well. Watch how a rigid policy can be punished for outcomes it did not actually choose, and why a high learning rate then becomes risky.'
+                : 'This is a deterministic policy in a clean, predictable world. It simply takes the highest-value action every time, and one observation is the truth. Watch it commit to a single sharp route toward the goal.';
+        } else {
+            intro = slipOn
+                ? 'This is a stochastic, softmax policy in a noisy world. It samples actions by a Boltzmann distribution over their values, warmer temperatures explore more and cooler ones sharpen toward greedy. Because it keeps its options open, it copes with slips more gracefully than a rigid policy. Watch the temperature cool over episodes.'
+                : 'This is a stochastic, softmax policy. Instead of always taking the best action, it samples in proportion to value, with temperature controlling how random the choice is. Watch it explore several routes before settling toward the goal.';
+        }
+        if (done) {
+            narration.narratePhase(`done:${sceneKey}`,
+                slipOn
+                    ? 'The agent reached the goal despite the slip. The lesson is that under noise you should judge a policy by its average over many runs, not one lucky or unlucky episode.'
+                    : 'The agent reached the goal. In a deterministic world the policy can lock onto an exact optimal route, since every step plays out exactly as intended.');
+        } else {
+            narration.narratePhase(`run:${sceneKey}`, intro);
         }
 
         setAgentPos(done ? startPos : nextPos);
@@ -1448,8 +1473,9 @@ for episode in range(100):
             if (policyType === 'stochastic' && tempDecay < 1) {
                 setTemperature(prev => {
                     const next = Math.max(TEMP_MIN, prev * tempDecay);
-                    if (narration.enabled && prev > 0.4 && next <= 0.4) {
-                        narration.narrate('Temperature cooled, policy is sharpening toward greedy.', { interrupt: true });
+                    // MID phase: annealing turns the soft, exploratory policy greedy.
+                    if (prev > 0.4 && next <= 0.4) {
+                        narration.narratePhase(`cool:${policyType}`, 'The temperature has cooled, so the softmax policy is now sharpening toward greedy. Early high temperatures let it explore; this low temperature makes it commit to the best action it has learned.');
                     }
                     return next;
                 });
@@ -1970,19 +1996,26 @@ for episode in range(200):
             setLastLog(log);
         }
 
-        // --- NARRATION ---
-        if (narration.enabled) {
-            if (done) {
-                narration.narrate(`Goal reached, episode ${episode + 1} done.`, { interrupt: true });
-            } else if (mode === 'deep' && Math.abs(tdError) > 0.5) {
-                narration.narrate(featureType === 'tile'
-                    ? `Update spread across the whole ${tileSize} by ${tileSize} tile.`
-                    : `Lesson bled to neighbours, radius ${genRadius.toFixed(1)}.`);
-            } else if (isExploration) {
-                narration.narrate(`Exploring ${DIR_WORDS[action]}.`);
-            } else {
-                narration.narrate(`Moving ${DIR_WORDS[action]}.`);
-            }
+        // --- NARRATION: conceptual phase tutor (tabular vs deep) ------------
+        // INTRO contrasts exact lookup with function approximation and voices
+        // what the update does. It re-speaks when the mode or feature type
+        // changes. CONCLUSION interprets what generalization bought or cost.
+        const reprKey = mode === 'tabular' ? 'tabular' : `deep:${featureType}`;
+        let intro: string;
+        if (mode === 'tabular') {
+            intro = 'This is tabular learning: one value stored per square, looked up exactly. Each update touches only the cell you are in, so learning is precise but it never generalizes, knowing one square tells you nothing about its neighbours. Watch the heat appear one cell at a time.';
+        } else if (featureType === 'tile') {
+            intro = 'This is deep, approximate learning with tile coding. Instead of one value per square, the agent learns weights on features that cover blocks of cells, so each update spreads across a whole tile at once. Learning generalizes and speeds up, but sharp tile edges can blur the true values. Watch a single lesson light up a block of squares.';
+        } else {
+            intro = 'This is deep, approximate learning with radial basis features, a stand-in for a neural network. Each update bleeds smoothly into nearby states by a Gaussian, so the agent generalizes from a few visits to many squares. That is faster but can introduce errors where the smoothing is wrong. Watch one lesson glow outward to its neighbours.';
+        }
+        if (done) {
+            narration.narratePhase(`done:${reprKey}`,
+                mode === 'tabular'
+                    ? 'Goal reached. The tabular map is exact wherever it has been visited, but stays blank everywhere it has not, which is why tables do not scale to huge state spaces.'
+                    : 'Goal reached. Because the agent generalized across nearby states, it filled in a useful value map from relatively few visits, the core advantage of function approximation in deep RL.');
+        } else {
+            narration.narratePhase(`run:${reprKey}`, intro);
         }
 
         setAgentPos(done ? startPos : nextPos);
@@ -2420,17 +2453,25 @@ for t in range(1, 501):
         setTotalReward(r => r + reward);
         batchRewardRef.current += reward;
 
-        // --- NARRATION: describe the pull on the bars ---
-        if (narration.enabled) {
-            const best = arms.indexOf(arms.reduce((m, a) => a.q > m.q ? a : m, arms[0]));
-            if (reward === 1) {
-                narration.narrate(`Arm ${action + 1} paid out. Estimate now ${newQ.toFixed(2)}.`);
-            } else {
-                narration.narrate(`Arm ${action + 1} missed. ${newCount} plays so far.`);
-            }
-            // Milestone: a fresh arm just became the leader.
-            if ((totalSteps + 1) % 25 === 0 && best === 3) {
-                narration.narrate('Best arm is now leading, exploitation taking over.', { interrupt: true });
+        // --- NARRATION: conceptual phase tutor (per strategy) ---------------
+        // INTRO explains how this strategy trades exploration for exploitation
+        // and voices its selection rule; it re-speaks when the strategy changes.
+        // CONCLUSION fires once the truly best arm (arm 4) has clearly taken the
+        // lead, interpreting it as regret going down.
+        const intro: Record<string, string> = {
+            greedy: 'Pure greedy always pulls the arm with the highest current estimate. It exploits relentlessly and never deliberately explores, so if it gets lucky on a weak arm early it can lock onto it forever. Watch how it can get stuck on the wrong bar.',
+            epsilon: 'Epsilon-greedy mostly pulls its current best arm but, with probability epsilon, tries a random arm instead. That small constant exploration is usually enough to discover the true best arm. Watch the estimates on each bar climb toward their hidden true rates.',
+            optimistic: 'Optimistic initial values start every arm with an inflated estimate. Disappointment from each pull drives the agent to try every arm at least once, so exploration happens automatically without randomness. Watch the inflated bars deflate toward their real values.',
+            ucb: 'Upper Confidence Bound adds an exploration bonus to each estimate that grows for arms tried less often. It picks the arm with the best optimistic upper bound, balancing what looks good against what is still uncertain. Watch rarely-pulled arms get revisited as their uncertainty bonus rises.',
+            thompson: 'Thompson sampling keeps a probability distribution of belief for each arm and pulls the arm that wins a random draw from those beliefs. It explores arms it is unsure about in proportion to the chance they are best. Watch the belief over the strongest arm sharpen as evidence accumulates.',
+            boltzmann: 'Boltzmann, or softmax, exploration pulls each arm with probability proportional to the exponential of its estimated value over a temperature. Higher value means more pulls, but every arm keeps some chance. Watch the pulls concentrate on the better bars over time.',
+        };
+        narration.narratePhase(`run:${strategy}`, intro[strategy] || intro.epsilon);
+        // CONCLUSION: the true best arm (index 3, mean 0.85) has clearly led.
+        {
+            const leader = newArms.indexOf(newArms.reduce((m, a) => a.q > m.q ? a : m, newArms[0]));
+            if (leader === 3 && newArms[3].count >= 20) {
+                narration.narratePhase(`done:${strategy}`, 'The agent has settled on the arm with the highest true payout, so it is now mostly exploiting the winner. From here the extra reward lost to exploration, the regret, grows only slowly, which is exactly what a good bandit strategy achieves.');
             }
         }
 
@@ -2900,23 +2941,25 @@ for episode in range(100):
             setLastLog(log);
         }
 
-        // --- NARRATION: describe the joint event on the grid ---
-        if (narration.enabled) {
-            if (mode === 'comp' && done) {
-                narration.narrate('Predator captured the prey!', { interrupt: true });
-            } else if (mode === 'coop' && done) {
-                narration.narrate('Both agents reached their goals together.', { interrupt: true });
-            } else if (mode === 'congestion' && collided) {
-                narration.narrate('Collision — both agents hit the same cell.', { interrupt: true });
-            } else if (mode === 'congestion' && done) {
-                narration.narrate('An agent reached the shared goal cleanly.', { interrupt: true });
-            } else if (mode === 'single' && done) {
-                narration.narrate(`Agent A reached the goal in ${steps + 1} steps.`, { interrupt: true });
-            } else if (mode !== 'single') {
-                narration.narrate(`Agent A goes ${DIR_WORDS[actionA]}, agent B goes ${DIR_WORDS[actionB]}.`);
-            } else {
-                narration.narrate(`Agent A moves ${DIR_WORDS[actionA]}.`);
-            }
+        // --- NARRATION: conceptual phase tutor (per scenario) ---------------
+        // INTRO explains the multi-agent setting and voices the joint-state idea
+        // behind the live update; it re-speaks when the scenario changes.
+        // CONCLUSION interprets the outcome of an episode.
+        const intro: Record<string, string> = {
+            single: 'This is the single-agent baseline. One agent learns over its own position with ordinary Q-learning, in a world whose rules stay fixed. Watch its value map settle, then compare it with the multi-agent cases where the ground keeps shifting.',
+            coop: 'This is cooperative multi-agent learning. Both agents key their values on the joint state, the pair of positions, because each must account for what the other is doing. Their rewards are shared, so the hard part is credit assignment, deciding which agent earned the team success. Watch them learn to coordinate.',
+            comp: 'This is a competitive, zero-sum chase. The predator is rewarded for closing in and the prey for escaping, and each learns over the joint state of both positions. Because the opponent is also learning, the environment is non-stationary, a moving target. Watch the strategies co-evolve.',
+            congestion: 'This is a congestion or social-dilemma scenario. Both agents want the same shared goal, but colliding in one cell hurts them, so greedy self-interest can hurt the collective. Each reasons over the joint state. Watch whether they learn to take turns rather than clash.',
+        };
+        narration.narratePhase(`run:${mode}`, intro[mode] || intro.single);
+        if (done || (mode === 'comp' && done)) {
+            const conclude: Record<string, string> = {
+                single: 'The agent reached its goal. With fixed rules, ordinary single-agent learning converges cleanly, which is exactly the comfort the multi-agent cases lose.',
+                coop: 'The agents reached their goals together. By learning over the joint state they coordinated rather than working at cross purposes, which is the central challenge of cooperative multi-agent RL.',
+                comp: 'The predator caught the prey. In this zero-sum game neither policy can rest, since every improvement by one agent reshapes the problem the other faces.',
+                congestion: 'An agent reached the shared goal without a costly collision. When agents share a bottleneck, learning to yield instead of clash is what protects the collective outcome.',
+            };
+            narration.narratePhase(`done:${mode}`, conclude[mode] || conclude.single);
         }
 
         setAgentAPos(nextA);

@@ -158,12 +158,16 @@ const GradientDescentLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     const { v, nx } = optimiserStep(g);
     velRef.current = v;
 
+    // INTRO: explain the method + voice the live update rule once per run/optimiser/function.
+    narration.narratePhase(`run:${fn}:${opt}`, introNarration(fn, opt));
+
     // guard divergence so the plot stays readable
     const [lo, hi] = def.domain;
     const diverged = !Number.isFinite(nx) || nx < lo - 5 || nx > hi + 5;
     if (diverged) {
       sim.pause();
-      narration.narrate(`Diverging. The iterate shot past x ${nx.toFixed(1)} — learning rate too large.`, { interrupt: true });
+      narration.narratePhase(`done:${fn}:${opt}:diverge`,
+        'The iterate is blowing up instead of settling. That is divergence: the learning rate is too large, so each step overshoots the bottom and the value climbs. Shrink alpha to make descent stable.');
     }
 
     setX(nx);
@@ -175,11 +179,10 @@ const GradientDescentLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     const converged = Math.abs(gNext) < 1e-3 && Math.abs(v) < 1e-3;
     if (converged) {
       sim.pause();
-      const kind = def.d2f(nx) > 0 ? 'minimum' : 'stationary point';
-      narration.narrate(`Converged to a ${kind} at x ${nx.toFixed(2)}, f equals ${def.f(nx).toFixed(2)}.`, { interrupt: true });
-    } else if (!diverged) {
-      const dir = nx < x ? 'left' : 'right';
-      narration.narrate(`Step ${stepNo.current}: moving ${dir} to x ${nx.toFixed(2)}, slope ${gNext.toFixed(2)}.`);
+      const isMin = def.d2f(nx) > 0;
+      narration.narratePhase(`done:${fn}:${opt}:converge`, isMin
+        ? `The gradient has reached zero, so the updates stop: the point has settled in a minimum where f is about ${def.f(nx).toFixed(2)}. The curvature is positive, confirming a valley, though on a non-convex surface it may only be a local one, not the global best.`
+        : `The slope has reached zero, but the curvature is not positive, so this is a saddle or a maximum rather than a true minimum. Gradient descent stops wherever the slope vanishes, which is why the shape of the surface matters.`);
     }
 
     setLastLog({
@@ -347,6 +350,23 @@ const GradientDescentLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     />
   );
 };
+
+// INTRO narration: paraphrase the Context + the live update rule in plain English (for the ear).
+function introNarration(fn: Fn, opt: Opt): string {
+  const shape = fn === 'quadratic'
+    ? 'On this convex bowl there is a single global minimum, so descent from anywhere should slide smoothly to the bottom.'
+    : fn === 'doublewell'
+      ? 'This is a non-convex double well with two minima and a hump between them, so where the point lands depends on the start and on momentum.'
+      : 'This wavy surface is a bowl rippled with many shallow dips, so the point can get caught in a local minimum depending on where it starts.';
+  const rule = opt === 'newton'
+    ? "Newton's method is second order: it divides the gradient by the curvature, x becomes x minus f-prime over f-double-prime, which jumps straight to the bottom of the local parabola, and on an exact quadratic it lands in a single step."
+    : opt === 'adam'
+      ? 'Adam blends a momentum-like average of the gradient with an average of its square, then divides one by the square root of the other, giving each direction its own adaptive, scale-free step.'
+      : opt === 'rmsprop'
+        ? 'RMSProp keeps a running mean of the squared gradient and divides the step by its square root, so steep directions are damped and flat ones amplified.'
+        : 'Plain gradient descent moves the point opposite the slope, x becomes x minus alpha times the gradient; with momentum it also carries a velocity that rolls it across shallow dips.';
+  return `Gradient descent is just optimisation: it keeps stepping downhill until the slope is zero. ${rule} ${shape} Watch the gold point ride the curve, the red tangent show the current slope, and the loss trace fall as it descends.`;
+}
 
 // per-optimiser math detail rows
 function optDetails(opt: Opt, def: FnDef) {

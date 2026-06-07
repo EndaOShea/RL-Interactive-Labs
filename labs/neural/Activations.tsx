@@ -86,15 +86,31 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     setQx(nx);
     const grad = D[fn](nx);
     const healthy = Math.abs(grad) >= 0.05;
-    // narrate gradient-health transitions and the saturated tails
-    if (prevHealthyRef.current !== null && healthy !== prevHealthyRef.current) {
-      narration.narrate(healthy
-        ? `Gradient wakes up near x ${nx.toFixed(1)}, slope ${grad.toFixed(2)}.`
-        : `Gradient flattens near x ${nx.toFixed(1)} — this neuron would stall here.`);
-    } else if (Math.abs(nx) >= 4.9) {
-      narration.narrate(`At the ${nx > 0 ? 'right' : 'left'} tail, slope ${grad.toFixed(2)}.`);
-    }
     prevHealthyRef.current = healthy;
+    // Conceptual audio tutor: one explanation per chosen function (or for the
+    // overlay view). The teal marker sweeping x stays purely visual; the voice
+    // explains what the activation is for and why its gradient, the gold curve,
+    // matters for training.
+    if (overlay) {
+      narration.narratePhase('run:overlay',
+        'This view overlays every activation function on the same axes. The flat, saturating curves like sigmoid and tanh squash their inputs into a fixed range, while the ReLU family stays a straight line for positive inputs. Compare how quickly each one flattens, because wherever the curve goes flat its gradient dies and learning stalls.');
+    } else {
+      const teach = fn === 'sigmoid'
+        ? 'Sigmoid squashes any input into the range zero to one, but both tails go flat, so their gradient, the gold curve, falls to nearly zero and neurons out there barely learn. Chaining many of these is why deep sigmoid networks were historically so hard to train.'
+        : fn === 'tanh'
+          ? 'Tanh is the zero-centred cousin of sigmoid, squashing into minus one to one. It still saturates at both ends where the gradient vanishes, but being centred on zero it usually trains better than sigmoid.'
+          : fn === 'relu'
+            ? 'ReLU is just the maximum of zero and x. For positive inputs its gradient is exactly one, so nothing shrinks and deep nets train well, which is why it became the default. The catch is the flat left half, where the gradient is zero and a neuron can get stuck dead.'
+            : fn === 'leaky'
+              ? 'Leaky ReLU keeps a small slope for negative inputs instead of going completely flat, so its gradient never drops fully to zero. That small leak keeps neurons alive that plain ReLU would let die.'
+              : fn === 'elu'
+                ? 'ELU behaves like ReLU for positive inputs but has a smooth negative tail that bends down to minus one, pulling the average activation toward zero and keeping a gradient alive on the negative side.'
+                : fn === 'silu'
+                  ? 'SiLU, also called Swish, multiplies the input by its own sigmoid gate. The result dips slightly below zero before rising, a smooth self-gated curve whose gradient stays useful, used in networks like EfficientNet.'
+                  : 'GELU is a smooth, self-gated curve that weights each input by the chance it is positive. It is the activation inside Transformers, giving a softer, more trainable landscape than a hard ReLU corner.';
+      narration.narratePhase(`run:${fn}`,
+        `This is the ${fn} activation, the non-linearity applied at each neuron, and without it stacking layers would collapse to one plain linear map. ${teach} As the run sweeps the marker across x, watch the gold gradient curve, since that is exactly the signal backpropagation multiplies on the way back.`);
+    }
     setLastLog({
       algorithm: `Activation · ${fn}`,
       stepDescription: 'Evaluate the activation and its gradient',
