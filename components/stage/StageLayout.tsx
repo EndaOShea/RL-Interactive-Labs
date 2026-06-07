@@ -3,6 +3,7 @@
 // cards + live-math ticker · right instrument column (Parameters / Math / Context)
 // with a docked AI tutor. Every lab renders one of these, feeding its own slots.
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ModuleId, SimulationUpdate, AITutorProps } from '../../types';
 import { MODULE_CONTENT, LIFECYCLE_CONTEXTS } from '../../constants';
 import {
@@ -21,9 +22,10 @@ const NAV: { id: ModuleId; d: string; label: string }[] = [
 
 const StageNav: React.FC<{ active: ModuleId; onSelect: (m: ModuleId) => void }> = ({ active, onSelect }) => (
   <nav style={{ width: 64, background: 'var(--bg0)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '14px 0', gap: 6, flexShrink: 0 }}>
-    <div style={{ width: 38, height: 38, borderRadius: 11, background: 'linear-gradient(135deg,var(--acc),#6d28d9)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, boxShadow: '0 0 18px -4px var(--acc)' }}>
+    <Link to="/" className="sb-navitem" aria-label="Home" style={{ position: 'relative', width: 38, height: 38, borderRadius: 11, background: 'linear-gradient(135deg,var(--acc),#6d28d9)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, boxShadow: '0 0 18px -4px var(--acc)', textDecoration: 'none', flexShrink: 0 }}>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2 2 7l10 5 10-5-10-5Z" /><path d="m2 17 10 5 10-5" /></svg>
-    </div>
+      <span className="sb-tip">Home</span>
+    </Link>
     {NAV.map((it) => {
       const on = it.id === active;
       return (
