@@ -9,25 +9,47 @@ const KERNELS: Record<string, string> = {
   'sobel-x': '[[-1,0,1],[-2,0,2],[-1,0,1]]',
   'sobel-y': '[[-1,-2,-1],[0,0,0],[1,2,1]]',
   emboss: '[[-2,-1,0],[-1,1,1],[0,1,2]]',
+  laplacian: '[[0,1,0],[1,-4,1],[0,1,0]]',
+  'gaussian-blur': '[[1/16,2/16,1/16],[2/16,4/16,2/16],[1/16,2/16,1/16]]',
 };
 
-export const convPython = (kernelName: string) => `import numpy as np
+// numpy `mode=` string for each border-padding choice in the lab.
+const PAD_MODE: Record<string, string> = {
+  zero: 'constant',
+  replicate: 'edge',
+  reflect: 'reflect',
+};
 
-# 2-D convolution with zero-padding (stride 1, "same" output) — mirrors the lab
-# Kernel preset: ${kernelName}
+export const convPython = (
+  kernelName: string,
+  padding: 'zero' | 'replicate' | 'reflect' = 'zero',
+  stride = 1,
+) => `import numpy as np
+
+# 2-D convolution — mirrors the lab configuration.
+# Kernel preset: ${kernelName}   padding: ${padding}   stride: ${stride}
 K = np.array(${KERNELS[kernelName] ?? KERNELS.identity}, dtype=float)
+PAD_MODE = "${PAD_MODE[padding] ?? 'constant'}"   # zero->constant, replicate->edge, reflect->reflect
+STRIDE = ${stride}
 
-def convolve2d(img, kernel):
-    """Cross-correlation form used by CNNs: (I*K)(i,j) = sum_mn I(i+m,j+n)*K(m,n)."""
+def convolve2d(img, kernel, pad_mode=PAD_MODE, stride=STRIDE):
+    """Cross-correlation form used by CNNs: (I*K)(i,j) = sum_mn I(i+m,j+n)*K(m,n).
+
+    Output side length = floor((W - F + 2P) / S) + 1 for input W, kernel F,
+    padding P = (F-1)//2, stride S.
+    """
     kh, kw = kernel.shape
     ph, pw = kh // 2, kw // 2
-    padded = np.pad(img, ((ph, ph), (pw, pw)), mode="constant")
-    out = np.zeros_like(img, dtype=float)
+    padded = np.pad(img, ((ph, ph), (pw, pw)), mode=pad_mode)
     H, W = img.shape
-    for i in range(H):
-        for j in range(W):
-            region = padded[i:i + kh, j:j + kw]
-            out[i, j] = np.sum(region * kernel)
+    out_h = (H - kh + 2 * ph) // stride + 1
+    out_w = (W - kw + 2 * pw) // stride + 1
+    out = np.zeros((out_h, out_w), dtype=float)
+    for oi, i in enumerate(range(0, H, stride)):
+        for oj, j in enumerate(range(0, W, stride)):
+            if oi >= out_h or oj >= out_w:
+                continue
+            out[oi, oj] = np.sum(padded[i:i + kh, j:j + kw] * kernel)
     return out
 
 def normalise(x):
@@ -41,20 +63,21 @@ if __name__ == "__main__":
     img[2:12, 6:8] = 1.0   # vertical bar
 
     feat = convolve2d(img, K)
-    print("input range :", img.min(), img.max())
+    print("input  size :", img.shape)
+    print("output size :", feat.shape, "  (stride", STRIDE, "padding", PAD_MODE + ")")
     print("output range:", round(float(feat.min()), 3), round(float(feat.max()), 3))
     print("normalised feature map:\\n", np.round(normalise(feat), 2))
-    # Output size for input W, kernel F, padding P, stride S:
-    #   floor((W - F + 2P) / S) + 1
 `;
 
-export const featureMapsPython = () => `import numpy as np
+export const featureMapsPython = (pooling: 'max' | 'avg' = 'max') => `import numpy as np
 
 # Tiny CNN forward pass on a small glyph — mirrors the lab.
-# Pipeline: input -> conv (3 FIXED filters) -> ReLU -> 2x2 max-pool
+# Pipeline: input -> conv (3 FIXED filters) -> ReLU -> 2x2 ${pooling}-pool
 #           -> flatten -> cosine match to class templates -> softmax.
 # Honest note: filters are hand-picked and the classifier is template matching
 # (no training). A real CNN learns both by backpropagation.
+
+POOLING = "${pooling}"   # "max" keeps the strongest activation; "avg" smooths the block
 
 FILTERS = {
     "vertical-edge":   np.array([[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]], dtype=float),
@@ -76,17 +99,18 @@ def convolve2d(img, kernel):
 def relu(x):
     return np.maximum(0.0, x)
 
-def max_pool2x2(x):
+def pool2x2(x, mode=POOLING):
     H, W = x.shape
     H2, W2 = H // 2, W // 2
     out = np.zeros((H2, W2))
     for i in range(H2):
         for j in range(W2):
-            out[i, j] = x[2 * i:2 * i + 2, 2 * j:2 * j + 2].max()
+            block = x[2 * i:2 * i + 2, 2 * j:2 * j + 2]
+            out[i, j] = block.max() if mode == "max" else block.mean()
     return out
 
 def forward(img):
-    maps = [max_pool2x2(relu(convolve2d(img, k))) for k in FILTERS.values()]
+    maps = [pool2x2(relu(convolve2d(img, k))) for k in FILTERS.values()]
     return np.concatenate([m.ravel() for m in maps])  # flatten
 
 def cosine(a, b):

@@ -20,6 +20,24 @@ export const MLP_CONTENT: LabContent = {
         { label: 'Init & activation', text: 'ReLU + good init keep gradients alive in deep nets.' },
       ],
     },
+    {
+      heading: 'Optimizers',
+      body: 'Plain SGD takes a fixed step along the raw gradient. Momentum accumulates a velocity v ← βv + g so consistent slopes accelerate and noisy ones cancel. Adam goes further: it tracks per-weight first and second moments of the gradient and divides the step by √(2nd moment), giving each weight its own adaptive learning rate — fast and forgiving of α.',
+      details: [
+        { label: 'Momentum', text: 'v ← βv + g; W ← W − α·v. Rolls through small bumps and shallow ravines.' },
+        { label: 'Adam', text: 'm̂, v̂ are bias-corrected moment estimates; W ← W − α·m̂/(√v̂+ε).' },
+        { label: 'When', text: 'Adam is the default for deep/awkward losses; tuned SGD+momentum can generalise better.' },
+      ],
+    },
+    {
+      heading: 'Regularisation (L2)',
+      body: 'L2 weight decay adds ½λ‖W‖² to the loss, so every step also pulls weights toward zero (W ← W − α(g + λW)). Smaller weights mean a smoother decision boundary that is less likely to memorise noise — the classic bias/variance trade-off you can watch by raising λ.',
+      details: [
+        { label: 'Effect', text: 'Shrinks weights each step; the boundary gets simpler as λ grows.' },
+        { label: 'vs dropout', text: 'Dropout randomly zeroes units instead; both fight overfitting.' },
+        { label: 'Tuning', text: 'Too much λ underfits (boundary too straight); validate to pick it.' },
+      ],
+    },
   ],
   lifecycle: [
     { category: 'METHODOLOGY', title: 'Overfitting', description: 'A big MLP can memorise the training points, including noise.', recommendation: 'Use a validation set, early stopping, weight decay or dropout.' },
@@ -35,7 +53,8 @@ export const ACT_CONTENT: LabContent = {
       details: [
         { label: 'sigmoid / tanh', text: 'Smooth and bounded, but saturate — their gradient vanishes for large |x|.' },
         { label: 'ReLU', text: 'max(0,x): cheap, non-saturating for x>0; the deep-learning default.' },
-        { label: 'Leaky / GELU', text: 'Fix ReLU\'s dead units / give a smooth gated curve (Transformers).' },
+        { label: 'Leaky / ELU', text: 'Keep a slope (0.1x) or smooth tail (eˣ−1) for x<0 to avoid dead units.' },
+        { label: 'GELU / SiLU', text: 'Self-gated smooth curves (x·Φ(x), x·σ(x)) — Transformers / EfficientNet.' },
       ],
     },
     {
@@ -69,6 +88,15 @@ export const PERCEPTRON_CONTENT: LabContent = {
       details: [
         { label: 'Not separable', text: 'With overlapping classes it never stops updating (no perfect line).' },
         { label: 'Lineage', text: 'Stack perceptrons + non-linear activations ⇒ the MLP.' },
+      ],
+    },
+    {
+      heading: 'Pocket & margin variants',
+      body: 'Two upgrades tackle the perceptron’s weaknesses. The pocket algorithm runs the same rule but keeps the best-accuracy weights it has ever seen — so even on noisy, non-separable data you walk away with a good line instead of whatever the wandering weights happen to hold. The margin perceptron updates whenever y(w·x+b) ≤ γ, pushing points a clear distance γ off the boundary — a first step toward the max-margin objective the SVM optimises directly.',
+      details: [
+        { label: 'Pocket', text: 'Snapshot the highest-accuracy weights; robust to overlap/noise.' },
+        { label: 'Margin γ', text: 'Update inside a band, not just on the wrong side — fatter, safer boundary.' },
+        { label: 'Toward SVM', text: 'A fixed γ approximates what an SVM maximises end-to-end.' },
       ],
     },
   ],

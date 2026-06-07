@@ -2,67 +2,110 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import GraphCanvas, { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
-import { RunControls, Legend, GOOD, BAD } from '../../components/stage/primitives';
+import { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
+import { AlgoPill, RunControls, Legend, MonoLabel, GOOD, BAD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
+import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
-import { TS, explore, layeredLayout } from './ts';
+import { TS, explore, layeredLayout, SearchMode } from './ts';
 import { riverPython } from './python';
+import { StateSpace, RiverSchematic } from './viz';
 
 const ACCENT = '#fb7185';
-interface RS { F: number; W: number; G: number; C: number; }
-const items = ['F', 'W', 'G', 'C'] as const;
-const vals = (s: RS) => [s.F, s.W, s.G, s.C];
-const flip = (b: number) => (b === 0 ? 1 : 0);
 
-const TS_RIVER: TS<RS> = {
-  init: { F: 0, W: 0, G: 0, C: 0 },
-  key: (s) => `${s.F}${s.W}${s.G}${s.C}`,
-  label: (s) => items.filter((_, i) => vals(s)[i] === 1).join('') || '·',
-  bad: (s) => (s.W === s.G && s.F !== s.G) || (s.G === s.C && s.F !== s.G),
-  goal: (s) => s.F === 1 && s.W === 1 && s.G === 1 && s.C === 1,
-  next: (s) => {
-    const out: RS[] = [{ F: flip(s.F), W: s.W, G: s.G, C: s.C }];
-    if (s.W === s.F) out.push({ F: flip(s.F), W: flip(s.W), G: s.G, C: s.C });
-    if (s.G === s.F) out.push({ F: flip(s.F), W: s.W, G: flip(s.G), C: s.C });
-    if (s.C === s.F) out.push({ F: flip(s.F), W: s.W, G: s.G, C: flip(s.C) });
-    return out;
-  },
+// A river puzzle is a chain of "predator → prey" conflicts. The farmer F rows
+// alone or with one item; any two items in a conflict pair must not be left on a
+// bank without F. Two scenarios share the same engine via a conflict list.
+export type Scenario = 'wgc' | 'snake';
+interface ScenDef { id: Scenario; label: string; items: string[]; conflicts: [string, string][]; }
+const SCENARIOS: Record<Scenario, ScenDef> = {
+  wgc: { id: 'wgc', label: 'Wolf · Goat · Cabbage', items: ['F', 'W', 'G', 'C'], conflicts: [['W', 'G'], ['G', 'C']] },
+  // Adds a Snake 🐍 to the chain: Wolf>Goat>Cabbage and Snake>Goat as well — a
+  // tighter 5-entity puzzle the BFS still solves automatically.
+  snake: { id: 'snake', label: 'Wolf · Snake · Goat · Cabbage', items: ['F', 'W', 'M', 'G', 'C'], conflicts: [['W', 'G'], ['G', 'C'], ['M', 'G']] },
 };
 
+type RS = Record<string, number>; // 0 = near bank, 1 = far bank, per item incl. F
+const flip = (b: number) => (b === 0 ? 1 : 0);
+
+const makeTS = (sc: ScenDef): TS<RS> => {
+  const init: RS = {}; sc.items.forEach((it) => (init[it] = 0));
+  return {
+    init,
+    key: (s) => sc.items.map((it) => s[it]).join(''),
+    label: (s) => sc.items.filter((it) => it !== 'F' && s[it] === 1).join('') || '·',
+    bad: (s) => sc.conflicts.some(([x, y]) => s[x] === s[y] && s[x] !== s.F),
+    goal: (s) => sc.items.every((it) => s[it] === 1),
+    next: (s) => {
+      const out: RS[] = [];
+      // F rows alone
+      out.push({ ...s, F: flip(s.F) });
+      // F takes one item that is on his bank
+      sc.items.forEach((it) => { if (it !== 'F' && s[it] === s.F) out.push({ ...s, F: flip(s.F), [it]: flip(s[it]) }); });
+      return out;
+    },
+  };
+};
+
+interface Preset { id: string; label: string; scenario: Scenario; mode: SearchMode; note: string; }
+const PRESETS: Preset[] = [
+  { id: 'classic', label: 'Classic 7-move', scenario: 'wgc', mode: 'bfs', note: 'Wolf–Goat–Cabbage, BFS — the optimal 7-move crossing.' },
+  { id: 'dfs', label: 'DFS detour', scenario: 'wgc', mode: 'dfs', note: 'Same puzzle, depth-first — a valid but possibly longer schedule.' },
+  { id: 'snake', label: 'Snake variant', scenario: 'snake', mode: 'bfs', note: 'A 5-entity chain (adds 🐍 vs 🐐) — tighter, but still solvable.' },
+];
+
 const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const [scenario, setScenario] = useState<Scenario>('wgc');
+  const [mode, setMode] = useState<SearchMode>('bfs');
   const [cursor, setCursor] = useState(1);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const narration = useNarration();
 
-  const res = useMemo(() => explore(TS_RIVER), []);
+  const sc = SCENARIOS[scenario];
+  const res = useMemo(() => explore(makeTS(sc), 400, mode), [sc, mode]);
   const layout = useMemo(() => layeredLayout(res.order, res.dist), [res]);
   const sol = useMemo(() => (res.goalKey ? new Set(res.trace(res.goalKey)) : new Set<string>()), [res]);
-  useEffect(() => { setCursor(1); }, [res]);
+  useEffect(() => { setCursor(1); setLastLog(null); narration.cancel(); }, [res]);
+
+  // current concrete state per reachable key (for the bank schematic).
+  const stateMap = useMemo(() => {
+    const ts = makeTS(sc); const stack: RS[] = [ts.init]; const seen = new Set<string>(); const found = new Map<string, RS>();
+    while (stack.length) { const s = stack.pop()!; const k = ts.key(s); if (seen.has(k)) continue; seen.add(k); found.set(k, s); if (!ts.bad!(s)) ts.next(s).forEach((t) => stack.push(t)); }
+    return found;
+  }, [sc]);
 
   const step = () => {
     if (cursor >= res.order.length) { sim.pause(); return; }
     const k = res.order[cursor]; const node = res.nodes.get(k)!;
+    const depth = res.dist.get(k) ?? 0;
     setCursor(cursor + 1);
+    if (node.goal) narration.narrate(`Goal reached — everyone is across at depth ${depth}.`, { interrupt: true });
+    else if (node.bad) narration.narrate(`Unsafe state ${node.label} pruned — something would be eaten.`);
+    else narration.narrate(`Safe state. Far bank holds ${node.label || 'nobody'}.`);
     setLastLog({
-      algorithm: 'Model Checking · reachability',
+      algorithm: `Model Checking · ${mode.toUpperCase()} reachability`,
       stepDescription: node.goal ? 'Goal reached — everyone is across!' : node.bad ? `Unsafe state ${node.label} (someone gets eaten) — pruned` : `Reachable safe state · right bank = ${node.label}`,
       formula: 'reach init  ∧  AG ¬unsafe  ∧  EF goal',
-      variables: { 'rightBank': node.label, 'explored': cursor, 'depth': res.dist.get(k) ?? 0 },
+      variables: { 'rightBank': node.label || '·', 'puzzle': scenario, 'explored': cursor, 'depth': depth },
       result: node.goal ? 'GOAL' : node.bad ? 'unsafe (pruned)' : 'safe',
       mathDetails: {
         params: [
+          { label: 'frontier', info: mode === 'bfs' ? 'BFS (FIFO queue) → the goal is reached by the shortest crossing schedule.' : 'DFS (LIFO stack) dives deep first → a valid but possibly longer schedule.' },
           { label: 'state', info: 'Who is on the far bank; the rest (plus 🧑 F) are on the near bank.' },
-          { label: 'unsafe', info: 'Wolf+Goat or Goat+Cabbage left alone — these red states are never expanded.' },
-          { label: 'solution', info: 'The shortest init→goal path through safe states is the puzzle solution (gold).' },
+          { label: 'unsafe', info: 'Any conflict pair left together without F — these red states are never expanded.' },
+          { label: 'witness', info: 'EF goal is witnessed by the actual init→goal path: the puzzle solution (gold).' },
         ],
-        implication: node.goal ? 'A safe schedule exists — model checking found it as a reachability witness.' : 'Searching the safe reachable state space breadth-first.',
+        implication: node.goal ? 'A safe schedule exists — model checking found it as a reachability witness.' : `Searching the safe reachable state space (${mode.toUpperCase()}); ${cursor} states seen.`,
       },
     });
     if (k === res.goalKey) sim.pause();
   };
   const sim = useSimLoop(step, { initialSpeed: 260 });
-  const reset = () => { sim.stop(); setCursor(1); setLastLog(null); };
+  const reset = () => { sim.stop(); setCursor(1); setLastLog(null); narration.cancel(); };
+  const setScenarioR = (s: Scenario) => { sim.stop(); narration.cancel(); setScenario(s); };
+  const setModeR = (m: SearchMode) => { sim.stop(); narration.cancel(); setMode(m); };
+  const applyPreset = (pr: Preset) => { sim.stop(); narration.cancel(); setScenario(pr.scenario); setMode(pr.mode); };
 
   const revealed = res.order.slice(0, cursor);
   const ids = new Set(revealed);
@@ -80,17 +123,46 @@ const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
   const edges: GEdge[] = res.edges.filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => ({ from: e.from, to: e.to, state: solFound && sol.has(e.from) && sol.has(e.to) ? 'path' : 'idle' }));
   const done = cursor >= res.order.length || solFound;
 
+  useEffect(() => {
+    if (!done) return;
+    if (solFound) narration.narrate(`Solution found in ${res.trace(res.goalKey!).length - 1} crossings.`, { interrupt: true });
+    else if (!res.goalKey) narration.narrate('No safe crossing exists for this puzzle.', { interrupt: true });
+  }, [done, solFound]);
+
+  const curKey = revealed[revealed.length - 1];
+  const curState = curKey ? stateMap.get(curKey) : undefined;
+  const schematic = curState
+    ? <RiverSchematic items={sc.items} far={sc.items.reduce((m, it) => { m[it] = curState[it] as 1 | 0; return m; }, {} as Record<string, 1 | 0>)} farmerFar={curState.F === 1} />
+    : undefined;
+
   return (
     <LabStage
       descriptor={descriptor}
       running={sim.isPlaying}
+      narration={narration}
       stats={[
+        { label: 'PUZZLE', value: scenario === 'wgc' ? 'WGC' : 'WSGC', color: ACCENT },
+        { label: 'SEARCH', value: mode.toUpperCase() },
         { label: 'STATES', value: `${cursor}/${res.order.length}` },
         { label: 'RESULT', value: done ? (res.goalKey ? 'SOLVABLE' : 'NO PATH') : '…', color: done ? (res.goalKey ? GOOD : BAD) : ACCENT },
         { label: 'SOLUTION', value: solFound ? `${res.trace(res.goalKey!).length - 1} moves` : '—', color: '#fbbf24' },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, riverPython())}
-      grid={<GraphCanvas width={640} height={440} radius={17} nodes={nodes} edges={edges} />}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, riverPython(scenario, mode))}
+      grid={<StateSpace width={620} height={440} radius={17} nodes={nodes} edges={edges} schematic={schematic} />}
+      algoDock={(
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Puzzle</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={scenario === 'wgc'} accent={ACCENT} onClick={() => setScenarioR('wgc')}>Wolf·Goat·Cabbage</AlgoPill>
+            <AlgoPill active={scenario === 'snake'} accent={ACCENT} onClick={() => setScenarioR('snake')}>+ Snake</AlgoPill>
+          </div>
+          <MonoLabel style={{ margin: '14px 0 9px' }}>Search order</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={mode === 'bfs'} accent={ACCENT} onClick={() => setModeR('bfs')}>BFS · shortest</AlgoPill>
+            <AlgoPill active={mode === 'dfs'} accent={ACCENT} onClick={() => setModeR('dfs')}>DFS · any path</AlgoPill>
+          </div>
+        </>
+      )}
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
       legend={(
         <Legend title="STATES" items={[
@@ -102,20 +174,32 @@ const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
         ]} />
       )}
       lastLog={lastLog}
-      contextInsight={`Farmer (F), Wolf (W), Goat (G), Cabbage (C) must all cross. The node label is who's on the far bank. Unsafe states (wolf+goat or goat+cabbage left without F) are red and pruned. Breadth-first reachability through safe states finds the goal — the gold path is the classic 7-move solution, discovered automatically.`}
+      contextInsight={`Farmer (F) plus the items must all cross. The node label is who's on the far bank; the schematic (top-right) shows both banks live. Unsafe states (a conflict pair left without F) are red and pruned. ${mode === 'bfs' ? 'BFS' : 'DFS'} reachability through safe states finds the goal — BFS yields the optimal schedule (the classic 7-move WGC solution), DFS any valid one.`}
       params={(
         <ParamsWrap>
           <ParamsHead title="River Crossing" hint="Reachability + safety as model checking." />
+
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Guided challenges</MonoLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {PRESETS.map((pr) => (
+                <AlgoPill key={pr.id} accent={ACCENT} active={scenario === pr.scenario && mode === pr.mode} onClick={() => applyPreset(pr)}>{pr.label}</AlgoPill>
+              ))}
+            </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6, margin: '9px 0 0' }}>
+              {PRESETS.find((pr) => pr.scenario === scenario && pr.mode === mode)?.note ?? 'Pick a puzzle + search order, then ▶ Run.'}
+            </p>
+          </div>
+
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t2)', lineHeight: 1.7 }}>
-            The farmer rows alone or with one item. Never leave together unattended:
-            <div style={{ marginTop: 6 }}>• Wolf + Goat</div>
-            <div>• Goat + Cabbage</div>
+            The farmer rows alone or with one item. Never leave a conflict pair unattended:
+            {sc.conflicts.map(([x, y], i) => <div key={i} style={{ marginTop: i === 0 ? 6 : 0 }}>• {x} + {y}</div>)}
             <div style={{ marginTop: 8 }}>Run to search the safe state space for a crossing schedule.</div>
           </div>
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ topic: 'Model checking — reachability (river crossing)', states: res.order.length, solutionMoves: res.goalKey ? res.trace(res.goalKey).length - 1 : null }}
+      currentParams={{ topic: 'Model checking — reachability (river crossing)', puzzle: scenario, search: mode, states: res.order.length, solutionMoves: res.goalKey ? res.trace(res.goalKey).length - 1 : null }}
       apiPanel={apiPanel}
     />
   );

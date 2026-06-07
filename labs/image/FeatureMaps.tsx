@@ -8,6 +8,7 @@ import { AlgoPill, ParamSlider, RunControls, MonoLabel, GOOD } from '../../compo
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { useNarration } from '../../hooks/useNarration';
 import { featureMapsPython } from './python';
 
 const ACCENT = '#60a5fa';
@@ -49,10 +50,14 @@ function conv(img: number[][], k: number[][]): number[][] {
 
 const relu = (m: number[][]) => m.map((row) => row.map((v) => Math.max(0, v)));
 
-function maxPool2(m: number[][]): number[][] {
+type PoolMode = 'max' | 'avg';
+
+function pool2(m: number[][], mode: PoolMode): number[][] {
   const H = m.length, W = m[0].length, H2 = H >> 1, W2 = W >> 1;
-  return Array.from({ length: H2 }, (_, i) => Array.from({ length: W2 }, (_, j) =>
-    Math.max(m[2 * i][2 * j], m[2 * i][2 * j + 1], m[2 * i + 1][2 * j], m[2 * i + 1][2 * j + 1])));
+  return Array.from({ length: H2 }, (_, i) => Array.from({ length: W2 }, (_, j) => {
+    const a = m[2 * i][2 * j], b = m[2 * i][2 * j + 1], c = m[2 * i + 1][2 * j], d = m[2 * i + 1][2 * j + 1];
+    return mode === 'max' ? Math.max(a, b, c, d) : (a + b + c + d) / 4;
+  }));
 }
 
 const flatten = (mats: number[][][]) => mats.flatMap((m) => m.flat());
@@ -71,13 +76,17 @@ function softmax(z: number[]): number[] {
 }
 
 // Pipeline for one glyph: per-filter post-ReLU and pooled maps + flattened vector.
-function pipeline(img: number[][]) {
+function pipeline(img: number[][], pool: PoolMode) {
   const relued = FILTERS.map((f) => relu(conv(img, f.k)));
-  const pooled = relued.map(maxPool2);
+  const pooled = relued.map((m) => pool2(m, pool));
   return { relued, pooled, vec: flatten(pooled) };
 }
 
-const TEMPLATES = Object.fromEntries(CLASSES.map((c) => [c, pipeline(makeGlyph(c)).vec])) as Record<ClassId, number[]>;
+// Templates must use the SAME pooling as the query for a fair cosine match.
+const TEMPLATES: Record<PoolMode, Record<ClassId, number[]>> = {
+  max: Object.fromEntries(CLASSES.map((c) => [c, pipeline(makeGlyph(c), 'max').vec])) as Record<ClassId, number[]>,
+  avg: Object.fromEntries(CLASSES.map((c) => [c, pipeline(makeGlyph(c), 'avg').vec])) as Record<ClassId, number[]>,
+};
 
 type Stage = 0 | 1 | 2 | 3 | 4; // 0 input, 1 conv, 2 relu, 3 pool, 4 classify
 const STAGE_NAMES = ['input', 'conv', 'relu', 'pool', 'classify'];
@@ -85,12 +94,14 @@ const STAGE_NAMES = ['input', 'conv', 'relu', 'pool', 'classify'];
 const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [cls, setCls] = useState<ClassId>('H');
   const [stage, setStage] = useState<Stage>(0);
+  const [poolMode, setPoolMode] = useState<PoolMode>('max');
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const narration = useNarration();
 
   const img = useMemo(() => makeGlyph(cls), [cls]);
-  const pipe = useMemo(() => pipeline(img), [img]);
+  const pipe = useMemo(() => pipeline(img, poolMode), [img, poolMode]);
 
-  const scores = useMemo(() => CLASSES.map((c) => cosine(pipe.vec, TEMPLATES[c])), [pipe]);
+  const scores = useMemo(() => CLASSES.map((c) => cosine(pipe.vec, TEMPLATES[poolMode][c])), [pipe, poolMode]);
   const probs = useMemo(() => softmax(scores.map((s) => s * 8)), [scores]);
   const predIdx = probs.indexOf(Math.max(...probs));
   const pred = CLASSES[predIdx];
@@ -99,10 +110,21 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   const showPooled = stage >= 3;
   const featMaps = showPooled ? pipe.pooled : pipe.relued.map((m, i) => stage >= 1 ? m : conv(img, FILTERS[i].k));
 
+  // Strongest-firing filter on the current maps (for narration colour).
+  const peakFilter = useMemo(() => {
+    let best = -Infinity, idx = 0;
+    pipe.relued.forEach((m, i) => { const mx = Math.max(...m.flat()); if (mx > best) { best = mx; idx = i; } });
+    return { name: FILTERS[idx].name, v: best };
+  }, [pipe]);
+
   const step = () => {
     const next = (stage + 1) as Stage;
     if (stage >= 4) { sim.pause(); return; }
     setStage(next);
+    if (next === 1) narration.narrate(`Convolving with three filters. ${peakFilter.name} fires hardest at ${peakFilter.v.toFixed(1)}.`);
+    else if (next === 2) narration.narrate('ReLU clamps negatives — only positive activations remain.');
+    else if (next === 3) narration.narrate(`${poolMode === 'max' ? 'Max' : 'Average'} pooling, maps shrink to six by six.`);
+    else if (next === 4) narration.narrate(`Prediction ${pred}, confidence ${(probs[predIdx] * 100).toFixed(0)} percent.`, { interrupt: true });
     const logs: Record<number, SimulationUpdate> = {
       1: {
         algorithm: 'CNN · conv layer',
@@ -121,12 +143,18 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
         mathDetails: { params: [{ label: 'ReLU', info: 'Discards negative activations so each map shows where its feature is positively present.' }], implication: 'Introduces the non-linearity that lets stacked layers compose features.' },
       },
       3: {
-        algorithm: 'CNN · max-pool 2×2',
-        stepDescription: 'Take the max in each 2×2 block',
-        formula: 'p(i,j) = max over 2×2 block',
-        variables: { 'in': `${N}×${N}`, 'out': `${N / 2}×${N / 2}`, 'stage': 'pool' },
+        algorithm: `CNN · ${poolMode}-pool 2×2`,
+        stepDescription: poolMode === 'max' ? 'Take the max in each 2×2 block' : 'Average each 2×2 block',
+        formula: poolMode === 'max' ? 'p(i,j) = max over 2×2 block' : 'p(i,j) = mean over 2×2 block',
+        variables: { 'in': `${N}×${N}`, 'out': `${N / 2}×${N / 2}`, 'pool': poolMode, 'stage': 'pool' },
         result: `maps downsampled to ${N / 2}×${N / 2}`,
-        mathDetails: { params: [{ label: 'pooling', info: 'Smaller maps, keeps strongest activations, adds translation tolerance.' }], implication: 'Pooling shrinks the representation while preserving the dominant features.' },
+        mathDetails: {
+          params: [
+            { label: 'pooling', info: poolMode === 'max' ? 'Max-pool keeps the single strongest activation per block — crisp, peak-preserving, the classic CNN choice.' : 'Average-pool blends all four — smoother, less spiky, used in some modern nets (and as global-avg-pool before the classifier).' },
+            { label: 'invariance', info: 'Either way the map halves, adding tolerance to small shifts of the feature within the block.' },
+          ],
+          implication: 'Pooling shrinks the representation while preserving the dominant features.',
+        },
       },
       4: {
         algorithm: 'CNN · classify',
@@ -147,8 +175,9 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   };
 
   const sim = useSimLoop(step, { initialSpeed: 700 });
-  const reset = () => { sim.stop(); setStage(0); setLastLog(null); };
-  const changeCls = (c: ClassId) => { sim.stop(); setCls(c); setStage(0); setLastLog(null); };
+  const reset = () => { sim.stop(); setStage(0); setLastLog(null); narration.cancel(); };
+  const changeCls = (c: ClassId) => { sim.stop(); setCls(c); setStage(0); setLastLog(null); narration.cancel(); };
+  const changePool = (p: PoolMode) => { sim.stop(); setPoolMode(p); setStage(0); setLastLog(null); narration.cancel(); };
 
   const bars = CLASSES.map((c, i) => ({
     label: c, value: probs[i], color: CLASS_COLORS[c],
@@ -162,9 +191,11 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       stats={[
         { label: 'INPUT', value: cls, color: CLASS_COLORS[cls] },
         { label: 'STAGE', value: STAGE_NAMES[stage], color: ACCENT },
+        { label: 'POOL', value: poolMode },
         { label: 'PRED', value: stage >= 4 ? pred : '—', color: stage >= 4 ? GOOD : 'var(--t2)' },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, featureMapsPython())}
+      narration={narration}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, featureMapsPython(poolMode))}
       grid={(
         <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
           <div style={{ textAlign: 'center' }}>
@@ -174,7 +205,7 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
           <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
             {FILTERS.map((f, i) => (
               <div key={f.name} style={{ textAlign: 'center', opacity: stage >= 1 ? 1 : 0.25, transition: 'opacity .2s' }}>
-                <MonoLabel style={{ marginBottom: 8, display: 'block', fontSize: 9 }}>{f.name}{showPooled ? ' ↓2' : ''}</MonoLabel>
+                <MonoLabel style={{ marginBottom: 8, display: 'block', fontSize: 9 }}>{f.name}{showPooled ? ` ↓2 ${poolMode}` : ''}</MonoLabel>
                 <Heatmap matrix={featMaps[i]} mode="heat" cell={showPooled ? 22 : 12} gap={1} accent={ACCENT} />
               </div>
             ))}
@@ -200,15 +231,34 @@ const FeatureMapsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       rewardValue={stage >= 4 ? probs[predIdx].toFixed(2) : '—'}
       rewardSeries={probs}
       lastLog={lastLog}
-      contextInsight={`Forward pass on glyph "${cls}": input → conv (3 fixed filters) → ReLU → 2×2 max-pool → flatten → cosine-match to templates → softmax. Honest caveat: filters are hand-picked and the final step is template matching — no training. Run advances one pipeline stage per tick.`}
+      contextInsight={`Forward pass on glyph "${cls}": input → conv (3 fixed filters) → ReLU → 2×2 ${poolMode}-pool → flatten → cosine-match to templates → softmax. Honest caveat: filters are hand-picked and the final step is template matching — no training. Run advances one pipeline stage per tick.`}
       params={(
         <ParamsWrap>
-          <ParamsHead title="CNN Feature Maps" hint="Pick an input glyph; Run steps the pipeline conv→relu→pool→classify." />
+          <ParamsHead title="CNN Feature Maps" hint="Pick an input glyph + pooling; Run steps conv→relu→pool→classify." />
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Try this · guided</MonoLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              <AlgoPill active={cls === 'H' && poolMode === 'max'} accent={ACCENT} onClick={() => { changeCls('H'); setPoolMode('max'); }}>H · max</AlgoPill>
+              <AlgoPill active={cls === 'O' && poolMode === 'avg'} accent={ACCENT} onClick={() => { changeCls('O'); setPoolMode('avg'); }}>O · avg</AlgoPill>
+              <AlgoPill active={cls === 'T' && poolMode === 'max'} accent={ACCENT} onClick={() => { changeCls('T'); setPoolMode('max'); }}>T · max</AlgoPill>
+            </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '7px 0 0', lineHeight: 1.45 }}>
+              Compare max vs avg pooling on the same glyph: max keeps sharp peaks, avg smooths the maps. Does the prediction still hold?
+            </p>
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Pooling</MonoLabel>
+            <div style={{ display: 'flex', gap: 7 }}>
+              {(['max', 'avg'] as PoolMode[]).map((p) => (
+                <AlgoPill key={p} active={poolMode === p} accent={ACCENT} onClick={() => changePool(p)}>{p}-pool</AlgoPill>
+              ))}
+            </div>
+          </div>
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={200} max={1500} step={50} current={sim.speed} onChange={sim.setSpeed} hint="one pipeline stage / tick" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'CNN feature maps (fixed filters + template match)', input: cls, stage: STAGE_NAMES[stage], pred, filters: FILTERS.map((f) => f.name) }}
+      currentParams={{ algorithm: 'CNN feature maps (fixed filters + template match)', input: cls, stage: STAGE_NAMES[stage], pooling: poolMode, pred, filters: FILTERS.map((f) => f.name) }}
       apiPanel={apiPanel}
     />
   );

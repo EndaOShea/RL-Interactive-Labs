@@ -2,18 +2,30 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import { AlgoPill, MonoLabel } from '../../components/stage/primitives';
+import { AlgoPill, MonoLabel, RunControls } from '../../components/stage/primitives';
+import { useSimLoop } from '../../hooks/useSimLoop';
+import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { ParamsWrap, ParamsHead, ParamSlider } from './shared';
 import { tokenizerPython } from './python';
+import { initBpe, applyMerge, BpeState, MergeStep } from './bpe';
 
 const ACCENT = '#a78bfa';
+
+type Mode = 'greedy' | 'bpe';
 
 const PRESETS = [
   'Tokenization powers transformers.',
   'The cat sat on the mat.',
   'Reinforcement learning is amazing!',
   'Unbelievable preprocessing pipelines',
+];
+
+// Small corpora for the "learn merges" (BPE) mode — repetition drives the merges.
+const CORPORA: { name: string; text: string }[] = [
+  { name: 'cats & mats', text: 'the cat sat on the mat the cat ran fast the dog sat' },
+  { name: 'low/lower/newest', text: 'low low low lower lowest newer newest newest wide wider' },
+  { name: 'ababab', text: 'ababab ababab abab abc abcabc cab cab' },
 ];
 
 const CHIP_COLORS = ['#a78bfa', '#22d3ee', '#34d399', '#f59e0b', '#f472b6', '#60a5fa'];
@@ -69,7 +81,64 @@ function tokenize(text: string): Tok[] {
 }
 
 const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const [mode, setMode] = useState<Mode>('greedy');
   const [text, setText] = useState('Tokenization powers transformers.');
+
+  // ---- BPE (learn merges) mode state ----
+  const [corpusIdx, setCorpusIdx] = useState(0);
+  const corpus = CORPORA[corpusIdx].text;
+  const [bpe, setBpe] = useState<BpeState>(() => initBpe(CORPORA[0].text));
+  const [maxMerges, setMaxMerges] = useState(15);
+  const [lastMerge, setLastMerge] = useState<MergeStep | null>(null);
+  const [bpeLog, setBpeLog] = useState<SimulationUpdate | null>(null);
+  const narration = useNarration();
+
+  const resetBpe = (idx = corpusIdx) => {
+    bpeSim.stop();
+    setBpe(initBpe(CORPORA[idx].text));
+    setLastMerge(null);
+    setBpeLog(null);
+    narration.cancel();
+  };
+
+  const bpeStep = () => {
+    setBpe((prev) => {
+      if (prev.merges.length >= maxMerges) { bpeSim.stop(); narration.narrate('Merge budget reached. Vocabulary built.', { interrupt: true }); return prev; }
+      const res = applyMerge(prev);
+      if (!res) { bpeSim.stop(); narration.narrate('No pairs left to merge. Done.', { interrupt: true }); return prev; }
+      const { state, step } = res;
+      setLastMerge(step);
+      const n = state.merges.length;
+      const done = n >= maxMerges;
+      narration.narrate(
+        done
+          ? `Final merge: "${step.pair[0]}" plus "${step.pair[1]}" makes "${step.joined}". ${n} merges, vocab ${state.vocab.length}.`
+          : `Merge "${step.pair[0]}" and "${step.pair[1]}" into "${step.joined}", seen ${step.count} times.`,
+        done ? { interrupt: true } : undefined,
+      );
+      setBpeLog({
+        algorithm: `BPE · learn merges · ${n}/${maxMerges}`,
+        stepDescription: `Merge the most frequent adjacent pair into a new symbol`,
+        formula: 'argmaxₚ count(p) → merge p → new token',
+        variables: { 'merge#': n, 'pair': `${step.pair[0]}+${step.pair[1]}`, 'count': step.count, 'vocab': state.vocab.length },
+        result: `"${step.pair[0]}" + "${step.pair[1]}" → "${step.joined}"`,
+        mathDetails: {
+          params: [
+            { label: 'pair count', info: `"${step.pair[0]}${step.pair[1]}" occurred ${step.count} time(s) across the corpus — the most frequent adjacent pair, so it merges first.` },
+            { label: 'greedy frequency', info: 'BPE is greedy: at each step it merges whichever pair is most common right now, building common fragments and whole words bottom-up.' },
+            { label: 'vocab growth', info: `Vocabulary is now ${state.vocab.length} symbols. Each merge adds exactly one new token; stop at the target vocab size.` },
+            { label: 'determinism', info: 'Given the corpus and the merge order, BPE is fully deterministic — the learned table then tokenizes any text the same way every time.' },
+          ],
+          implication: state.vocab.some((s) => s.length > 3 && s !== '</w>')
+            ? 'Multi-character fragments are forming — these become the reusable subword tokens.'
+            : 'Still merging short pairs; common fragments will emerge as frequencies build.',
+        },
+      });
+      return state;
+    });
+  };
+
+  const bpeSim = useSimLoop(bpeStep, { initialSpeed: 650 });
 
   const { toks, vocab, ids } = useMemo(() => {
     const toks = tokenize(text);
@@ -102,7 +171,7 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
     },
   };
 
-  const grid = (
+  const greedyGrid = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: 'min(560px, 92%)' }}>
       <input
         value={text}
@@ -138,19 +207,58 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
     </div>
   );
 
-  return (
-    <LabStage
-      descriptor={descriptor}
-      running={false}
-      stats={[
-        { label: 'TOKENS', value: nTok, color: ACCENT },
-        { label: 'CHARS', value: chars },
-        { label: 'CHARS/TOK', value: cpt.toFixed(2) },
-        { label: 'VOCAB', value: vocab.size },
-      ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, tokenizerPython())}
-      grid={grid}
-      algoDock={(
+  // ---- BPE viz: each word shown as its current symbol pieces, the just-merged
+  // pair highlighted; plus a running list of learned merges. ----
+  const bpeGrid = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: 'min(580px, 94%)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>
+        <span>corpus: <b style={{ color: 'var(--t1)' }}>{CORPORA[corpusIdx].name}</b></span>
+        <span style={{ color: ACCENT }}>{bpe.merges.length}/{maxMerges} merges</span>
+        <span>vocab {bpe.vocab.length}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, minHeight: 140 }}>
+        {[...bpe.words.entries()].map(([w, { syms, freq }]) => (
+          <div key={w} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ width: 64, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', textAlign: 'right' }}>×{freq}</span>
+            {syms.map((s, i) => {
+              const isNew = lastMerge != null && s === lastMerge.joined;
+              return (
+                <span key={i} style={{
+                  fontFamily: 'var(--mono)', fontSize: 12.5,
+                  color: isNew ? '#fff' : 'var(--t1)',
+                  background: isNew ? `color-mix(in srgb, ${ACCENT} 38%, transparent)` : 'var(--bg2)',
+                  border: `1px solid ${isNew ? ACCENT : 'var(--border)'}`,
+                  boxShadow: isNew ? `0 0 12px -2px ${ACCENT}` : 'none',
+                  borderRadius: 6, padding: '3px 7px', whiteSpace: 'pre',
+                }}>{s === '</w>' ? '∎' : s}</span>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+      <div style={{ padding: '10px 14px', background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12 }}>
+        <MonoLabel style={{ marginBottom: 6 }}>Learned merge rules</MonoLabel>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 24 }}>
+          {bpe.merges.length === 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>Press Run to learn merges from the corpus…</span>}
+          {bpe.merges.map((m, i) => (
+            <span key={i} style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: i === bpe.merges.length - 1 ? ACCENT : 'var(--t2)', border: '1px solid var(--border)', borderRadius: 5, padding: '2px 6px' }}>
+              {m.pair[0]}+{m.pair[1]}→{m.joined}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', textAlign: 'center' }}>∎ = end-of-word marker · merges pick the most frequent adjacent pair each step</div>
+    </div>
+  );
+
+  const modeChips = (
+    <>
+      <MonoLabel style={{ marginBottom: 11 }}>Mode</MonoLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
+        <AlgoPill active={mode === 'greedy'} accent={ACCENT} onClick={() => { setMode('greedy'); narration.cancel(); }}>Apply (greedy)</AlgoPill>
+        <AlgoPill active={mode === 'bpe'} accent={ACCENT} onClick={() => { setMode('bpe'); narration.cancel(); }}>BPE (learn merges)</AlgoPill>
+      </div>
+      {mode === 'greedy' ? (
         <>
           <MonoLabel style={{ marginBottom: 11 }}>Examples</MonoLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
@@ -161,31 +269,90 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
             ))}
           </div>
         </>
+      ) : (
+        <>
+          <MonoLabel style={{ marginBottom: 11 }}>Corpus</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {CORPORA.map((c, i) => (
+              <AlgoPill key={c.name} active={corpusIdx === i} accent={ACCENT} onClick={() => { setCorpusIdx(i); resetBpe(i); }}>{c.name}</AlgoPill>
+            ))}
+          </div>
+        </>
       )}
-      controls={(
+    </>
+  );
+
+  const isBpe = mode === 'bpe';
+
+  return (
+    <LabStage
+      descriptor={descriptor}
+      running={isBpe && bpeSim.isPlaying}
+      stats={isBpe
+        ? [
+          { label: 'MERGES', value: `${bpe.merges.length}/${maxMerges}`, color: ACCENT },
+          { label: 'VOCAB', value: bpe.vocab.length },
+          { label: 'WORDS', value: bpe.words.size },
+          { label: 'CORPUS', value: CORPORA[corpusIdx].name },
+        ]
+        : [
+          { label: 'TOKENS', value: nTok, color: ACCENT },
+          { label: 'CHARS', value: chars },
+          { label: 'CHARS/TOK', value: cpt.toFixed(2) },
+          { label: 'VOCAB', value: vocab.size },
+        ]}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, tokenizerPython(mode, maxMerges))}
+      grid={isBpe ? bpeGrid : greedyGrid}
+      narration={narration}
+      algoDock={modeChips}
+      controls={isBpe ? (
+        <RunControls isPlaying={bpeSim.isPlaying} onPlay={bpeSim.toggle} onReset={() => resetBpe()} speed={bpeSim.speed} onSpeed={bpeSim.setSpeed} />
+      ) : (
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', background: 'rgba(8,11,20,.8)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 16px' }}>
           Static — edit the text above to retokenize
         </div>
       )}
-      lastLog={lastLog}
-      contextInsight={`"${text.slice(0, 40)}${text.length > 40 ? '…' : ''}" → ${nTok} tokens (${cpt.toFixed(2)} chars/token). Subword tokens let a fixed ~30k–100k vocabulary spell out any word: rare words fragment into known pieces (## = continuation), so nothing is out-of-vocabulary while sequences stay short.`}
+      lastLog={isBpe ? bpeLog : lastLog}
+      contextInsight={isBpe
+        ? `Training BPE on "${CORPORA[corpusIdx].name}": starting from characters + the ∎ end-marker, each step merges the most frequent adjacent pair into a new symbol. After ${bpe.merges.length} merge(s) the vocabulary holds ${bpe.vocab.length} symbols. This is exactly how GPT/Llama tokenizers are built — frequent fragments and whole words emerge bottom-up from data, then the learned merge list tokenizes any future text deterministically.`
+        : `"${text.slice(0, 40)}${text.length > 40 ? '…' : ''}" → ${nTok} tokens (${cpt.toFixed(2)} chars/token). Subword tokens let a fixed ~30k–100k vocabulary spell out any word: rare words fragment into known pieces (## = continuation), so nothing is out-of-vocabulary while sequences stay short.`}
       params={(
         <ParamsWrap>
-          <ParamsHead title="Tokenization" hint="Greedy subword splitting on a fixed merge list." />
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t2)', lineHeight: 1.7 }}>
-            <div style={{ color: 'var(--t1)', marginBottom: 4 }}>How it works</div>
-            <div>1. Split on whitespace + punctuation.</div>
-            <div>2. Words &gt; 6 chars peel known prefixes/suffixes.</div>
-            <div>3. Each piece gets a vocabulary id.</div>
-            <div style={{ marginTop: 8 }}><b style={{ color: ACCENT }}>##</b> marks a continuation piece (BPE convention).</div>
-          </div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>
-            Try "tokenization", "preprocessing", "unbelievable" to see words fragment.
-          </div>
+          {isBpe ? (
+            <>
+              <ParamsHead title="BPE: learn the merges" hint="Watch a tokenizer build itself from a corpus." />
+              <ParamSlider name="merge budget" value={String(maxMerges)} min={3} max={30} step={1} current={maxMerges} onChange={setMaxMerges} hint="how many merges to learn" accent={ACCENT} />
+              <ParamSlider name="Speed" value={`${bpeSim.speed}ms`} min={150} max={1400} step={50} current={bpeSim.speed} onChange={bpeSim.setSpeed} hint="one merge per tick" accent={ACCENT} />
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t2)', lineHeight: 1.7 }}>
+                <div style={{ color: 'var(--t1)', marginBottom: 4 }}>The training loop</div>
+                <div>1. Split every word into characters + ∎.</div>
+                <div>2. Count every adjacent symbol pair.</div>
+                <div>3. Merge the most frequent pair into a new token.</div>
+                <div>4. Repeat until the vocab target is reached.</div>
+                <div style={{ marginTop: 8 }}>Try the <b style={{ color: ACCENT }}>low/lower/newest</b> corpus — the textbook BPE example.</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <ParamsHead title="Tokenization" hint="Greedy subword splitting on a fixed merge list." />
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t2)', lineHeight: 1.7 }}>
+                <div style={{ color: 'var(--t1)', marginBottom: 4 }}>How it works</div>
+                <div>1. Split on whitespace + punctuation.</div>
+                <div>2. Words &gt; 6 chars peel known prefixes/suffixes.</div>
+                <div>3. Each piece gets a vocabulary id.</div>
+                <div style={{ marginTop: 8 }}><b style={{ color: ACCENT }}>##</b> marks a continuation piece (BPE convention).</div>
+              </div>
+              <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>
+                Try "tokenization", "preprocessing", "unbelievable" to see words fragment. Switch to <b style={{ color: ACCENT }}>BPE</b> mode to watch the merge table being learned.
+              </div>
+            </>
+          )}
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ topic: 'Subword tokenization', text, tokens: toks.map((t) => t.text), tokenCount: nTok, vocab: vocab.size, charsPerToken: cpt }}
+      currentParams={isBpe
+        ? { topic: 'BPE merge learning', mode, corpus: CORPORA[corpusIdx].name, mergesLearned: bpe.merges.length, mergeRules: bpe.merges.map((m) => `${m.pair[0]}+${m.pair[1]}`), vocab: bpe.vocab.length }
+        : { topic: 'Subword tokenization', mode, text, tokens: toks.map((t) => t.text), tokenCount: nTok, vocab: vocab.size, charsPerToken: cpt }}
       apiPanel={apiPanel}
     />
   );

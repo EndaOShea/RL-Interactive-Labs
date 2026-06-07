@@ -13,11 +13,21 @@ export const MUTEX_CONTENT: LabContent = {
     },
     {
       heading: 'Counterexamples',
-      body: 'If a state violating the invariant is reachable, the path from the initial state to it is a counterexample — a concrete, replayable trace of the bug. The naive protocol produces one; adding a lock makes the bad state unreachable, so the property holds.',
+      body: 'If a state violating the invariant is reachable, the path from the initial state to it is a counterexample — a concrete, replayable trace of the bug. The naive protocol produces one; a lock — or Peterson\'s algorithm — makes the bad state unreachable, so the property holds.',
       details: [
         { label: 'Naive', text: 'No coordination — an interleaving reaches C·C (a data race).' },
         { label: 'Lock', text: 'A thread can only enter Critical when the lock is free, pruning the bad state.' },
+        { label: 'Peterson', text: 'A per-process flag plus a shared turn variable gives mutual exclusion with no OS lock — yet the C·C state is still unreachable.' },
         { label: 'Exhaustive', text: 'Unlike testing, model checking covers every interleaving — no race slips through.' },
+      ],
+    },
+    {
+      heading: 'Search order: BFS vs DFS',
+      body: 'The same reachable set can be explored breadth-first (FIFO queue) or depth-first (LIFO stack). Both prove or refute the invariant, but they differ in the trace they return and their memory profile.',
+      details: [
+        { label: 'BFS', text: 'Expands by distance, so the first counterexample found is the shortest — the easiest bug to read.' },
+        { label: 'DFS', text: 'Dives deep before backtracking; cheaper on memory, but the counterexample may be a long, winding trace.' },
+        { label: 'Same verdict', text: 'Safety (a reachable bad state) is order-independent: if a violation exists, both find one.' },
       ],
     },
   ],
@@ -42,8 +52,18 @@ export const RIVER_CONTENT: LabContent = {
       heading: 'Witnesses & solutions',
       body: 'A reachability property "EF goal" is witnessed by an actual path. Here that witness is the puzzle\'s solution — found automatically by exploring the safe reachable region, no cleverness required.',
       details: [
-        { label: 'BFS', text: 'Guarantees the shortest solution (fewest crossings).' },
+        { label: 'BFS', text: 'Guarantees the shortest solution (fewest crossings) — the classic 7-move Wolf-Goat-Cabbage answer.' },
+        { label: 'DFS', text: 'Returns the first path it dives into: still valid, but not necessarily minimal.' },
         { label: 'Dead ends', text: 'Unsafe states (red) are reachable in one move but lead nowhere safe.' },
+      ],
+    },
+    {
+      heading: 'Scaling the puzzle',
+      body: 'Adding entities is just adding conflict pairs. The Snake variant adds 🐍 (which also eats the goat), tightening the constraints — yet the same generic engine still finds a safe schedule, illustrating how reachability scales with the model rather than the code.',
+      details: [
+        { label: 'Conflicts', text: 'Each "predator + prey left without the farmer" pair is an unsafe predicate.' },
+        { label: 'State growth', text: 'Each item doubles the raw state space (2ⁿ), but safety pruning keeps the explored region small.' },
+        { label: 'Generic', text: 'One transition relation, parameterised by the conflict list, covers every variant.' },
       ],
     },
   ],

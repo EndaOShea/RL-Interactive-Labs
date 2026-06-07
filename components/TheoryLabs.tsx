@@ -5,6 +5,29 @@ import { MODULE_CONTENT } from '../constants';
 import StageLayout from './stage/StageLayout';
 import StageGrid, { CellSpec } from './stage/StageGrid';
 import { AlgoPill, ParamSlider, RunControls, Legend, MonoLabel, ACC, GOOD, BAD } from './stage/primitives';
+import { useNarration } from '../hooks/useNarration';
+
+// --- SHARED: curated preset / guided-challenge chip row ---------------------
+// Small clickable chips that live in the Parameters panel. They reuse AlgoPill
+// for the on-brand look but never act as the "active algorithm" — they just
+// apply a parameter bundle. `note` (optional) is a one-line "try this" hint.
+interface PresetChip { label: string; note?: string; apply: () => void }
+const PresetRow: React.FC<{ title: string; hint?: string; chips: PresetChip[] }> = ({ title, hint, chips }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+    <MonoLabel>{title}</MonoLabel>
+    {hint && <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)', letterSpacing: '.03em', lineHeight: 1.5, marginTop: -4 }}>{hint}</span>}
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+      {chips.map((c, i) => (
+        <span key={i} title={c.note} style={{ display: 'inline-flex' }}>
+          <AlgoPill onClick={c.apply}>{c.label}</AlgoPill>
+        </span>
+      ))}
+    </div>
+  </div>
+);
+
+// Direction word from an action index, used across the narration of grid labs.
+const DIR_WORDS = ['up', 'right', 'down', 'left'];
 
 const subtitleFor = (m: ModuleId) => ((MODULE_CONTENT as any)[m]?.title as string) || '';
 const lastReward = (metrics?: TrainingMetrics[]) =>
@@ -95,6 +118,7 @@ interface LabProps {
 
 // --- 1. Model-Free vs Model-Based (Universal RL Lab) ---
 export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+  const narration = useNarration();
   // --- Environment State ---
   const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
   const [startPos] = useState(START_DEFAULT);
@@ -111,17 +135,20 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
   // Algorithms
   const [algoMode, setAlgoMode] = useState<'free' | 'based'>('free');
-  const [subAlgo, setSubAlgo] = useState<'q' | 'sarsa' | 'reinforce' | 'ac'>('q');
+  // Added: 'doubleq' (Double Q-Learning) and 'esarsa' (Expected SARSA).
+  const [subAlgo, setSubAlgo] = useState<'q' | 'sarsa' | 'esarsa' | 'doubleq' | 'reinforce' | 'ac'>('q');
 
   // --- Data Structures ---
-  const [qTable, setQTable] = useState<Record<number, number[]>>({}); 
-  const [sarsaNextAction, setSarsaNextAction] = useState<number | null>(null); 
+  const [qTable, setQTable] = useState<Record<number, number[]>>({});
+  // Second table for Double Q-Learning (decorrelates the max-bias).
+  const [qTableB, setQTableB] = useState<Record<number, number[]>>({});
+  const [sarsaNextAction, setSarsaNextAction] = useState<number | null>(null);
   const [model, setModel] = useState<Record<number, Record<number, { next: number, reward: number }>>>({});
   const [visitedStates, setVisitedStates] = useState<number[]>([]);
   const [plannedCells, setPlannedCells] = useState<number[]>([]);
-  const [policyPrefs, setPolicyPrefs] = useState<Record<number, number[]>>({}); 
-  const [vTable, setVTable] = useState<Record<number, number>>({}); 
-  const [history, setHistory] = useState<{s:number, a:number, r:number}[]>([]); 
+  const [policyPrefs, setPolicyPrefs] = useState<Record<number, number[]>>({});
+  const [vTable, setVTable] = useState<Record<number, number>>({});
+  const [history, setHistory] = useState<{s:number, a:number, r:number}[]>([]);
 
   // --- Parameters ---
   const [speed, setSpeed] = useState(50);
@@ -136,10 +163,27 @@ export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
   // --- Helpers ---
   const getQ = (s: number) => qTable[s] || [0, 0, 0, 0];
-  const getMaxQ = (s: number) => Math.max(...getQ(s));
+  const getQB = (s: number) => qTableB[s] || [0, 0, 0, 0];
+  // For Double-Q the displayed/greedy value is the average of the two tables.
+  const getQEff = (s: number) => subAlgo === 'doubleq'
+    ? getQ(s).map((v, i) => (v + getQB(s)[i]) / 2)
+    : getQ(s);
+  const getMaxQ = (s: number) => Math.max(...getQEff(s));
   const getV = (s: number) => vTable[s] || 0;
   const getPrefs = (s: number) => policyPrefs[s] || [0,0,0,0];
   const toCoord = (idx: number) => ({ x: idx % GRID_W, y: Math.floor(idx / GRID_W) });
+
+  // Expected-SARSA target backup: Σ_a π(a|s') Q(s',a) under ε-greedy π.
+  const expectedQ = (s: number, eps: number) => {
+    const q = getQ(s);
+    const mx = Math.max(...q);
+    const greedy = q.map((v, i) => v === mx ? i : -1).filter(i => i >= 0);
+    return q.reduce((acc, v, i) => {
+      let p = eps / 4;                                  // uniform exploration mass
+      if (greedy.includes(i)) p += (1 - eps) / greedy.length; // greedy mass split over ties
+      return acc + p * v;
+    }, 0);
+  };
 
   // Numerically-stable softmax (subtract the max before exp) so large policy
   // preferences can't overflow to Infinity/NaN — matches the Python export's
@@ -294,16 +338,85 @@ for episode in range(100):
     state = env.reset()
     action = choose_action(state)
     done = False
-    
+
     while not done:
         next_state, reward, done = env.step(action)
         next_action = choose_action(next_state)
-        
+
         target = reward + GAMMA * q_table[next_state][next_action]
         q_table[state][action] += ALPHA * (target - q_table[state][action])
-        
+
         state = next_state
         action = next_action
+        if done: print(f"Episode {episode} finished.")`;
+        } else if (subAlgo === 'esarsa') {
+             pythonCode = `${commonEnv}
+
+# --- Expected SARSA (On-Policy, lower variance) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+
+q_table = np.zeros((env.width * env.height, 4))
+
+def choose_action(s):
+    if random.random() < EPSILON:
+        return random.randint(0, 3)
+    return np.argmax(q_table[s])
+
+def expected_q(s):
+    # E_a~pi[ Q(s,a) ] under the epsilon-greedy policy
+    q = q_table[s]
+    best = np.flatnonzero(q == q.max())
+    probs = np.full(4, EPSILON / 4)
+    probs[best] += (1 - EPSILON) / len(best)
+    return float(np.dot(probs, q))
+
+for episode in range(100):
+    state = env.reset()
+    done = False
+    while not done:
+        action = choose_action(state)
+        next_state, reward, done = env.step(action)
+        # Back up the EXPECTED next value, not a single sampled action.
+        target = reward + GAMMA * (0 if done else expected_q(next_state))
+        q_table[state][action] += ALPHA * (target - q_table[state][action])
+        state = next_state
+        if done: print(f"Episode {episode} finished.")`;
+        } else if (subAlgo === 'doubleq') {
+             pythonCode = `${commonEnv}
+
+# --- Double Q-Learning (removes maximization bias) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+
+q_a = np.zeros((env.width * env.height, 4))
+q_b = np.zeros((env.width * env.height, 4))
+
+def choose_action(s):
+    if random.random() < EPSILON:
+        return random.randint(0, 3)
+    return np.argmax(q_a[s] + q_b[s])  # act on the SUM (average) of both tables
+
+for episode in range(100):
+    state = env.reset()
+    done = False
+    while not done:
+        action = choose_action(state)
+        next_state, reward, done = env.step(action)
+
+        if random.random() < 0.5:
+            # Update A: A picks the argmax, B evaluates it (decorrelated).
+            a_star = np.argmax(q_a[next_state])
+            target = reward + GAMMA * (0 if done else q_b[next_state][a_star])
+            q_a[state][action] += ALPHA * (target - q_a[state][action])
+        else:
+            b_star = np.argmax(q_b[next_state])
+            target = reward + GAMMA * (0 if done else q_a[next_state][b_star])
+            q_b[state][action] += ALPHA * (target - q_b[state][action])
+
+        state = next_state
         if done: print(f"Episode {episode} finished.")`;
         } else if (subAlgo === 'reinforce') {
              pythonCode = `${commonEnv}
@@ -417,6 +530,7 @@ for episode in range(200):
 
   const resetSim = (clearMemory = true) => {
     setIsPlaying(false);
+    narration.cancel();
     setAgentPos(startPos);
     setSarsaNextAction(null);
     setEpisode(0);
@@ -424,15 +538,17 @@ for episode in range(200):
     setHistory([]);
     episodeRewardRef.current = 0;
     setLastLog(null);
-    
+
     if (clearMemory) {
         setQTable({});
+        setQTableB({});
         setModel({});
         setVisitedStates([]);
         setPlannedCells([]);
         setPolicyPrefs({});
         setVTable({});
-        setEpsilon(algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa' ? 0.5 : 0);
+        const isValueBased = algoMode === 'based' || ['q', 'sarsa', 'esarsa', 'doubleq'].includes(subAlgo);
+        setEpsilon(isValueBased ? 0.5 : 0);
         if (onClearMetrics) onClearMetrics();
     }
   };
@@ -441,13 +557,15 @@ for episode in range(200):
     let currPos = agentPos;
     let action = 0;
     let isExploration = false;
-    let currentQVals = getQ(currPos);
+    // Greedy is taken w.r.t. the EFFECTIVE values (avg of A/B for Double-Q).
+    let currentQVals = getQEff(currPos);
+    const valueBasedStep = algoMode === 'based' || ['q', 'sarsa', 'esarsa', 'doubleq'].includes(subAlgo);
 
     // 1. SELECT ACTION
     if (algoMode === 'free' && subAlgo === 'sarsa' && sarsaNextAction !== null) {
         action = sarsaNextAction;
-    } 
-    else if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
+    }
+    else if (valueBasedStep) {
         if (Math.random() < epsilon) {
             action = Math.floor(Math.random() * 4);
             isExploration = true;
@@ -498,14 +616,98 @@ for episode in range(200):
 
     // 3. LEARNING UPDATES
     let newQTable = { ...qTable };
+    let newQTableB = { ...qTableB };
     let newModel = { ...model };
     let newVisited = [...visitedStates];
     let newPolicyPrefs = { ...policyPrefs };
     let newVTable = { ...vTable };
     let flashCells: number[] = [];
 
+    // A0) Expected SARSA — back up the expected next value under ε-greedy π.
+    if (algoMode === 'free' && subAlgo === 'esarsa') {
+        const currentQ = currentQVals[action];
+        const expNext = done ? 0 : expectedQ(nextPos, epsilon);
+        const target = reward + gamma * expNext;
+        const newQ = currentQ + alpha * (target - currentQ);
+        if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
+        newQTable[currPos][action] = newQ;
+
+        if (onLogUpdate && Math.random() < 0.4) {
+            const tdError = target - currentQ;
+            const log = {
+                algorithm: 'Expected SARSA',
+                stepDescription: isExploration ? 'Exploration Step (Random)' : 'Greedy Step (Policy)',
+                formula: "Q(s,a) += α[R + γ Σ π(a'|s')Q(s',a') − Q]",
+                variables: {
+                    'Q(s,a)': currentQ.toFixed(2),
+                    'E[Q(s\')]': expNext.toFixed(2),
+                    'Target': target.toFixed(2),
+                    'R': reward
+                },
+                result: `New Q: ${newQ.toFixed(2)}`,
+                mathDetails: {
+                    params: [
+                        { label: 'Expected backup', info: 'Averages Q over the whole ε-greedy action distribution instead of one sampled action.' },
+                        { label: 'Variance', info: 'Lower than SARSA: the random next-action no longer injects noise into the target.' },
+                        { label: 'Gamma (γ)', info: `${gamma}. Future rewards valued at ${(gamma*100).toFixed(0)}%.` },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate.` }
+                    ],
+                    implication: tdError > 0
+                        ? `Pleasant surprise (+${tdError.toFixed(2)}). The expected next value beat the prediction, so "${actionStr}" rises.`
+                        : `Disappointment (${tdError.toFixed(2)}). The expected next value fell short, so "${actionStr}" drops.`
+                }
+            };
+            onLogUpdate(log); setLastLog(log);
+        }
+    }
+    // A1) Double Q-Learning — split tables to kill maximization bias.
+    else if (algoMode === 'free' && subAlgo === 'doubleq') {
+        const updateA = Math.random() < 0.5;
+        if (updateA) {
+            const qa = getQ(nextPos);
+            const aStar = qa.indexOf(Math.max(...qa));
+            const evalVal = done ? 0 : getQB(nextPos)[aStar];
+            const currentQ = getQ(currPos)[action];
+            const target = reward + gamma * evalVal;
+            const newQ = currentQ + alpha * (target - currentQ);
+            if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
+            newQTable[currPos][action] = newQ;
+        } else {
+            const qb = getQB(nextPos);
+            const bStar = qb.indexOf(Math.max(...qb));
+            const evalVal = done ? 0 : getQ(nextPos)[bStar];
+            const currentQ = getQB(currPos)[action];
+            const target = reward + gamma * evalVal;
+            const newQ = currentQ + alpha * (target - currentQ);
+            if (!newQTableB[currPos]) newQTableB[currPos] = [0,0,0,0];
+            newQTableB[currPos][action] = newQ;
+        }
+        if (onLogUpdate && Math.random() < 0.35) {
+            const log = {
+                algorithm: 'Double Q-Learning',
+                stepDescription: updateA ? 'Updating table A (B evaluates)' : 'Updating table B (A evaluates)',
+                formula: "Q_A(s,a) += α[R + γ Q_B(s', argmax Q_A) − Q_A]",
+                variables: {
+                    'Updated': updateA ? 'A' : 'B',
+                    'Action': actionStr,
+                    'R': reward
+                },
+                result: 'Decorrelated update',
+                mathDetails: {
+                    params: [
+                        { label: 'Two tables', info: 'One table picks the best next action, the OTHER scores it — so noise no longer self-confirms.' },
+                        { label: 'Max-bias', info: 'Single-table Q-Learning over-estimates values by always trusting its own noisy max. This cures it.' },
+                        { label: 'Greedy', info: 'Behaviour uses the average (Q_A + Q_B)/2.' },
+                        { label: 'Alpha (α)', info: `${alpha}. Learning Rate.` }
+                    ],
+                    implication: 'A coin flip decides which table learns this step; the untouched table provides an unbiased value estimate.'
+                }
+            };
+            onLogUpdate(log); setLastLog(log);
+        }
+    }
     // A) SARSA
-    if (algoMode === 'free' && subAlgo === 'sarsa') {
+    else if (algoMode === 'free' && subAlgo === 'sarsa') {
         let nextAction = 0;
         let nextQVal = 0;
         if (!done) {
@@ -711,8 +913,24 @@ for episode in range(200):
         }
     }
 
+    // --- NARRATION: describe the live event on the grid ---------------------
+    if (narration.enabled) {
+        if (done) {
+            narration.narrate(`Goal reached in ${steps + 1} steps, episode ${episode + 1} complete.`, { interrupt: true });
+        } else if (reward === -1) {
+            narration.narrate(`Blocked moving ${DIR_WORDS[action]}, penalty taken.`);
+        } else if (algoMode === 'based' && flashCells.length > 0) {
+            narration.narrate(`Planning: replaying ${flashCells.length} remembered transitions.`);
+        } else if (isExploration) {
+            narration.narrate(`Exploring ${DIR_WORDS[action]} at random.`);
+        } else {
+            narration.narrate(`Moving ${DIR_WORDS[action]}, greedy choice.`);
+        }
+    }
+
     setAgentPos(done ? startPos : nextPos);
     setQTable(newQTable);
+    setQTableB(newQTableB);
     setModel(newModel);
     setVisitedStates(newVisited);
     setPlannedCells(flashCells);
@@ -781,16 +999,22 @@ for episode in range(200):
              }
         }
 
-        if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
-            setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
+        if (valueBasedStep) {
+            setEpsilon(prev => {
+                const next = Math.max(0.01, prev * epsilonDecay);
+                if (narration.enabled && prev > 0.05 && next <= 0.05) {
+                    narration.narrate('Exploration nearly exhausted, policy is locking in.', { interrupt: true });
+                }
+                return next;
+            });
         }
     } else {
         setSteps(s => s + 1);
     }
 
   }, [
-    agentPos, qTable, sarsaNextAction, model, vTable, policyPrefs, history, visitedStates, obstacles, startPos, goalPos,
-    algoMode, subAlgo, epsilon, alpha, gamma, planningSteps, epsilonDecay, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics
+    agentPos, qTable, qTableB, sarsaNextAction, model, vTable, policyPrefs, history, visitedStates, obstacles, startPos, goalPos,
+    algoMode, subAlgo, epsilon, alpha, gamma, planningSteps, epsilonDecay, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics, narration
   ]);
 
   useEffect(() => {
@@ -810,6 +1034,8 @@ for episode in range(200):
     } else {
         if (subAlgo === 'q') text += "System: Q-Learning. Off-Policy value updates. Learning from the optimal future path. ";
         if (subAlgo === 'sarsa') text += "System: SARSA. On-Policy value updates. Learning from the path actually taken (including exploration). ";
+        if (subAlgo === 'esarsa') text += "System: Expected SARSA. On-Policy, but backs up the EXPECTED next value over the whole ε-greedy distribution — same bias as SARSA, far lower variance. ";
+        if (subAlgo === 'doubleq') text += "System: Double Q-Learning. Two value tables; one selects the next action, the other scores it. This removes the optimistic 'maximization bias' of plain Q-Learning. ";
         if (subAlgo === 'reinforce') text += "System: REINFORCE. Monte-Carlo policy gradient. Updates happen only at the end of the episode. ";
         if (subAlgo === 'ac') text += "System: Actor-Critic. Combined Value + Policy updates. Uses TD-Error to critique the policy live. ";
     }
@@ -826,7 +1052,7 @@ for episode in range(200):
 
     let heat = 0;
     let label: string | undefined;
-    if (algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa') {
+    if (algoMode === 'based' || ['q', 'sarsa', 'esarsa', 'doubleq'].includes(subAlgo)) {
       const mq = getMaxQ(idx);
       heat = mq > 0 ? Math.min(mq / 20, 1) : mq < 0 ? -Math.min(Math.abs(mq) / 20, 1) : 0;
       if (Math.abs(mq) > 0.05) label = mq.toFixed(1);
@@ -846,12 +1072,26 @@ for episode in range(200):
     return { heat, label, arrows, planned: plannedCells.includes(idx), agent: isAgent, agentColor };
   };
 
-  const valueBased = algoMode === 'based' || subAlgo === 'q' || subAlgo === 'sarsa';
+  const valueBased = algoMode === 'based' || ['q', 'sarsa', 'esarsa', 'doubleq'].includes(subAlgo);
+
+  // Curated presets + guided challenges (clickable chips in the Parameters tab).
+  const presets: PresetChip[] = [
+    { label: 'Fast & Greedy', note: 'High α, low ε — converges fast but brittle.', apply: () => { setAlgoMode('free'); setSubAlgo('q'); setAlpha(0.5); setGamma(0.95); setEpsilon(0.1); setEpsilonDecay(0.99); } },
+    { label: 'Patient Explorer', note: 'Low α, slow ε decay — stable, thorough.', apply: () => { setAlgoMode('free'); setSubAlgo('q'); setAlpha(0.1); setGamma(0.9); setEpsilon(0.8); setEpsilonDecay(0.998); } },
+    { label: 'Dyna Dreamer', note: 'Model-Based with heavy planning.', apply: () => { setAlgoMode('based'); setAlpha(0.2); setGamma(0.95); setEpsilon(0.4); setPlanningSteps(40); } },
+    { label: 'Low-Variance', note: 'Expected SARSA — smooth backups.', apply: () => { setAlgoMode('free'); setSubAlgo('esarsa'); setAlpha(0.2); setGamma(0.95); setEpsilon(0.3); } },
+  ];
+  const challenges: PresetChip[] = [
+    { label: 'Beat the Bias', note: 'Run Q then Double-Q with α=0.6 — watch Double-Q stay calmer.', apply: () => { setAlgoMode('free'); setSubAlgo('doubleq'); setAlpha(0.6); setGamma(0.95); setEpsilon(0.3); setEpsilonDecay(0.99); } },
+    { label: 'Pure Policy', note: 'REINFORCE with γ=0.99 — arrows emerge before heat does.', apply: () => { setAlgoMode('free'); setSubAlgo('reinforce'); setAlpha(0.1); setGamma(0.99); } },
+    { label: 'Plan vs Act', note: 'Set planning to 0 then 50 in Dyna — see how fast value spreads.', apply: () => { setAlgoMode('based'); setPlanningSteps(0); setAlpha(0.2); setGamma(0.95); setEpsilon(0.5); } },
+  ];
 
   return (
     <StageLayout
       activeModule={activeModule}
       onSelectModule={onSelectModule}
+      narration={narration}
       labNumber={1}
       moduleSubtitle={subtitleFor(activeModule)}
       telemetry={{ episode, reward: lastReward(metrics), epsilon: valueBased ? epsilon.toFixed(3) : undefined, steps, running: isPlaying }}
@@ -868,7 +1108,9 @@ for episode in range(200):
           <MonoLabel style={{ marginBottom: 11 }}>Algorithm</MonoLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
             <AlgoPill active={algoMode === 'free' && subAlgo === 'q'} onClick={() => { setAlgoMode('free'); setSubAlgo('q'); resetSim(true); }}>Q-Learning</AlgoPill>
+            <AlgoPill active={algoMode === 'free' && subAlgo === 'doubleq'} onClick={() => { setAlgoMode('free'); setSubAlgo('doubleq'); resetSim(true); }}>Double-Q</AlgoPill>
             <AlgoPill active={algoMode === 'free' && subAlgo === 'sarsa'} onClick={() => { setAlgoMode('free'); setSubAlgo('sarsa'); resetSim(true); }}>SARSA</AlgoPill>
+            <AlgoPill active={algoMode === 'free' && subAlgo === 'esarsa'} onClick={() => { setAlgoMode('free'); setSubAlgo('esarsa'); resetSim(true); }}>Expected SARSA</AlgoPill>
             <AlgoPill active={algoMode === 'free' && subAlgo === 'reinforce'} onClick={() => { setAlgoMode('free'); setSubAlgo('reinforce'); resetSim(true); }}>REINFORCE</AlgoPill>
             <AlgoPill active={algoMode === 'free' && subAlgo === 'ac'} onClick={() => { setAlgoMode('free'); setSubAlgo('ac'); resetSim(true); }}>Actor-Critic</AlgoPill>
           </div>
@@ -891,6 +1133,8 @@ for episode in range(200):
       params={(
         <ParamsWrap>
           <ParamsHead title="Training Parameters" hint="Tune the agent, watch the heatmap respond." />
+          <PresetRow title="Presets" hint="One-click parameter bundles." chips={presets} />
+          <PresetRow title="Guided Challenges" hint="Try this, then watch what changes." chips={challenges} />
           <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
           <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — how fast Q updates" />
           <ParamSlider name="Gamma · discount" value={gamma.toFixed(2)} min={0.1} max={0.99} step={0.01} current={gamma} onChange={setGamma} hint="γ — weight on future reward" />
@@ -899,7 +1143,7 @@ for episode in range(200):
           {algoMode === 'based' && <ParamSlider name="Planning Steps" value={String(planningSteps)} min={0} max={50} step={5} current={planningSteps} onChange={setPlanningSteps} hint="Dyna mental-replay updates / step" />}
         </ParamsWrap>
       )}
-      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, decay: epsilonDecay, algorithm: algoMode === 'based' ? 'Dyna-Q' : subAlgo.toUpperCase() } }}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, decay: epsilonDecay, algorithm: algoMode === 'based' ? 'Dyna-Q' : ({ q: 'Q-Learning', doubleq: 'Double-Q', sarsa: 'SARSA', esarsa: 'Expected SARSA', reinforce: 'REINFORCE', ac: 'Actor-Critic' } as Record<string, string>)[subAlgo] } }}
       apiPanel={apiPanel}
     />
   );
@@ -907,6 +1151,7 @@ for episode in range(200):
 
 // --- 2. Deterministic vs Stochastic Lab ---
 export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+    const narration = useNarration();
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
@@ -915,12 +1160,16 @@ export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, 
     const [isPlaying, setIsPlaying] = useState(false);
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
-    const [qTable, setQTable] = useState<Record<number, number[]>>({}); 
+    const [qTable, setQTable] = useState<Record<number, number[]>>({});
     const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
-    
+
     const [policyType, setPolicyType] = useState<'deterministic' | 'stochastic'>('deterministic');
     const [slipChance, setSlipChance] = useState(0.0);
     const [temperature, setTemperature] = useState(1.0);
+    // Boltzmann τ schedule: when on, τ cools toward τ_min each episode so the
+    // softmax policy anneals from exploratory (hot) to greedy (cold).
+    const [tempDecay, setTempDecay] = useState(1.0); // 1.0 = no annealing
+    const TEMP_MIN = 0.15;
 
     const [speed, setSpeed] = useState(50);
     const [alpha, setAlpha] = useState(0.1);
@@ -942,6 +1191,8 @@ GAMMA = ${gamma}
 POLICY_TYPE = "${policyType}"
 SLIP_CHANCE = ${slipChance}
 TEMPERATURE = ${temperature}
+TEMP_DECAY = ${tempDecay}   # Boltzmann annealing: tau *= TEMP_DECAY each episode
+TEMP_MIN = ${TEMP_MIN}
 GRID_W, GRID_H = ${GRID_W}, ${GRID_H}
 GOAL = ${goalPos}
 START = ${startPos}
@@ -983,34 +1234,37 @@ class StochasticGridWorld:
         self.pos = new_pos
         return new_pos, reward, done
 
-q_table = np.zeros((GRID_W * GRID_H, 4)) 
+q_table = np.zeros((GRID_W * GRID_H, 4))
 
-def choose_action(state):
+def choose_action(state, tau):
     if POLICY_TYPE == "deterministic":
         # Argmax (Greedy)
         return np.argmax(q_table[state])
     else:
-        # Softmax (Stochastic)
+        # Boltzmann / softmax (Stochastic), at the current temperature tau
         q = q_table[state]
-        exps = np.exp(q / TEMPERATURE)
+        exps = np.exp((q - q.max()) / tau)  # subtract max for numerical stability
         probs = exps / np.sum(exps)
         return np.random.choice(4, p=probs)
 
 env = StochasticGridWorld()
+tau = TEMPERATURE
 
 for episode in range(100):
     state = env.reset()
     done = False
     while not done:
-        action = choose_action(state)
+        action = choose_action(state, tau)
         next_state, reward, done = env.step(action)
-        
+
         # Q-Learning Update
         best_next = np.max(q_table[next_state])
         q_table[state][action] += ALPHA * (reward + GAMMA * best_next - q_table[state][action])
-        
+
         state = next_state
-        if done: print(f"Episode {episode} finished.")`;
+        if done: print(f"Episode {episode} finished.")
+    # Anneal the Boltzmann temperature toward TEMP_MIN.
+    tau = max(TEMP_MIN, tau * TEMP_DECAY)`;
         downloadPython(`experiment_det_vs_stoch.py`, code.trim());
     };
 
@@ -1039,6 +1293,7 @@ for episode in range(100):
 
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
+        narration.cancel();
         setAgentPos(startPos);
         setEpisode(0);
         setSteps(0);
@@ -1063,7 +1318,7 @@ for episode in range(100):
             action = maxIndices[Math.floor(Math.random() * maxIndices.length)];
             logDescription = "Deterministic: Selecting Max Q action";
         } else {
-            const exps = currentQVals.map(q => Math.exp(q / temperature));
+            const exps = currentQVals.map(q => Math.exp((q - Math.max(...currentQVals)) / temperature));
             const sumExps = exps.reduce((a, b) => a + b, 0);
             const probs = exps.map(e => e / sumExps);
             
@@ -1160,6 +1415,21 @@ for episode in range(100):
             setLastLog(log);
         }
 
+        // --- NARRATION ---
+        if (narration.enabled) {
+            if (done) {
+                narration.narrate(`Reached the goal in ${steps + 1} steps despite ${(slipChance * 100).toFixed(0)} percent slip.`, { interrupt: true });
+            } else if (slipped) {
+                narration.narrate(`Slipped! Tried ${DIR_WORDS[action]} but went ${DIR_WORDS[actualAction]}.`);
+            } else if (reward === -1) {
+                narration.narrate(`Bumped a wall heading ${DIR_WORDS[action]}.`);
+            } else if (policyType === 'stochastic') {
+                narration.narrate(`Sampled ${DIR_WORDS[action]} at temperature ${temperature.toFixed(1)}.`);
+            } else {
+                narration.narrate(`Greedy move ${DIR_WORDS[action]}.`);
+            }
+        }
+
         setAgentPos(done ? startPos : nextPos);
 
         if (done) {
@@ -1174,11 +1444,21 @@ for episode in range(100):
                 });
             }
             episodeRewardRef.current = 0;
+            // Anneal the Boltzmann temperature once per episode.
+            if (policyType === 'stochastic' && tempDecay < 1) {
+                setTemperature(prev => {
+                    const next = Math.max(TEMP_MIN, prev * tempDecay);
+                    if (narration.enabled && prev > 0.4 && next <= 0.4) {
+                        narration.narrate('Temperature cooled, policy is sharpening toward greedy.', { interrupt: true });
+                    }
+                    return next;
+                });
+            }
         } else {
             setSteps(s => s + 1);
         }
 
-    }, [agentPos, qTable, obstacles, startPos, goalPos, policyType, slipChance, temperature, alpha, gamma, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics]);
+    }, [agentPos, qTable, obstacles, startPos, goalPos, policyType, slipChance, temperature, tempDecay, alpha, gamma, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics, narration]);
 
     useEffect(() => {
         if (isPlaying) {
@@ -1206,7 +1486,8 @@ for episode in range(100):
                 arrows.push({ rot: rots[bestIdx], op: 1.0 });
             }
         } else {
-            const exps = qs.map(q => Math.exp(q / temperature));
+            const mxq = Math.max(...qs);
+            const exps = qs.map(q => Math.exp((q - mxq) / temperature));
             const sum = exps.reduce((a,b) => a+b, 0);
             const probs = exps.map(e => e/sum);
             const rots = [0, 90, 180, 270];
@@ -1225,9 +1506,10 @@ for episode in range(100):
                 text += "WARNING: High slip chance detected. A rigid deterministic policy may fail if the 'optimal' path is narrow or near obstacles. ";
             }
         } else {
-            text += `Stochastic: Agent samples actions (Temp=${temperature}). `;
+            text += `Stochastic: Agent samples actions (Temp=${temperature.toFixed(2)}). `;
             if (temperature > 2.0) text += "High temperature causes frequent random actions (Exploration). ";
             else if (temperature < 0.5) text += "Low temperature behaves almost deterministically (Exploitation). ";
+            if (tempDecay < 1) text += `A Boltzmann schedule is cooling τ by ×${tempDecay.toFixed(3)} per episode — the policy anneals from hot/exploratory to cold/greedy, the principled cousin of ε-decay. `;
         }
         
         if (alpha > 0.5) text += "\n\nAlpha High (>0.5): Agent learns very fast but is unstable in noisy environments. It might 'forget' a safe path after one unlucky slip.";
@@ -1248,10 +1530,22 @@ for episode in range(100):
     return { heat, label: Math.abs(mq) > 0.05 ? mq.toFixed(1) : undefined, arrows, agent: isAgent, agentColor: '#fff' };
   };
 
+  const presets: PresetChip[] = [
+    { label: 'Icy Floor', note: 'Heavy slip + low α to average out bad luck.', apply: () => { setSlipChance(0.3); setAlpha(0.08); setGamma(0.95); } },
+    { label: 'Rigid & Risky', note: 'Deterministic on an icy floor — watch it fail near walls.', apply: () => { setPolicyType('deterministic'); setSlipChance(0.25); setAlpha(0.3); } },
+    { label: 'Hot Softmax', note: 'τ=3 — very exploratory sampling.', apply: () => { setPolicyType('stochastic'); setTemperature(3); setTempDecay(1); setSlipChance(0.1); } },
+    { label: 'Annealed', note: 'τ cools each episode toward greedy.', apply: () => { setPolicyType('stochastic'); setTemperature(3); setTempDecay(0.97); setSlipChance(0.1); setAlpha(0.15); } },
+  ];
+  const challenges: PresetChip[] = [
+    { label: 'Slip Stress Test', note: 'Crank slip to 50% — can any policy still reach the goal?', apply: () => { setSlipChance(0.5); setAlpha(0.1); setGamma(0.95); } },
+    { label: 'Hot→Cold Race', note: 'Annealing vs fixed τ=1: which converges first?', apply: () => { setPolicyType('stochastic'); setTemperature(4); setTempDecay(0.95); setSlipChance(0.05); } },
+  ];
+
   return (
     <StageLayout
       activeModule={activeModule}
       onSelectModule={onSelectModule}
+      narration={narration}
       labNumber={2}
       moduleSubtitle={subtitleFor(activeModule)}
       telemetry={{ episode, reward: lastReward(metrics), steps, running: isPlaying }}
@@ -1283,14 +1577,17 @@ for episode in range(100):
       params={(
         <ParamsWrap>
           <ParamsHead title="Environment & Policy" hint="Add noise, see how a rigid policy copes." />
+          <PresetRow title="Presets" hint="One-click parameter bundles." chips={presets} />
+          <PresetRow title="Guided Challenges" hint="Try this, then watch what changes." chips={challenges} />
           <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
           <ParamSlider name="Env Slip Chance" value={`${(slipChance * 100).toFixed(0)}%`} min={0} max={0.5} step={0.05} current={slipChance} onChange={setSlipChance} hint="prob. the world ignores your action" accent="#60a5fa" />
-          {policyType === 'stochastic' && <ParamSlider name="Policy Temp · τ" value={temperature.toFixed(1)} min={0.1} max={5} step={0.1} current={temperature} onChange={setTemperature} hint="higher = more random (softmax)" />}
+          {policyType === 'stochastic' && <ParamSlider name="Policy Temp · τ" value={temperature.toFixed(2)} min={0.1} max={5} step={0.1} current={temperature} onChange={setTemperature} hint="higher = more random (softmax)" />}
+          {policyType === 'stochastic' && <ParamSlider name="τ Anneal · decay" value={tempDecay.toFixed(3)} min={0.9} max={1} step={0.005} current={tempDecay} onChange={setTempDecay} hint="τ ← τ · decay each episode (1 = off)" accent="#fbbf24" />}
           <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — low alpha averages out slips" />
           <ParamSlider name="Gamma · discount" value={gamma.toFixed(2)} min={0.1} max={0.99} step={0.01} current={gamma} onChange={setGamma} hint="γ — future reward weight" />
         </ParamsWrap>
       )}
-      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, policyType, slipChance, temperature } }}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, policyType, slipChance, temperature, tempDecay } }}
       apiPanel={apiPanel}
     />
   );
@@ -1298,6 +1595,7 @@ for episode in range(100):
 
 // --- 3. Tabular vs Deep RL Lab ---
 export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+    const narration = useNarration();
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
     const [goalPos] = useState(GOAL_DEFAULT);
@@ -1305,6 +1603,9 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [mode, setMode] = useState<'tabular' | 'deep'>('tabular');
+    // Deep generalization can use a smooth RBF kernel OR discrete tile-coding.
+    const [featureType, setFeatureType] = useState<'rbf' | 'tile'>('rbf');
+    const [tileSize, setTileSize] = useState(2); // tile = tileSize × tileSize block
     const [episode, setEpisode] = useState(0);
     const [steps, setSteps] = useState(0);
     const [qTable, setQTable] = useState<Record<number, number[]>>({});
@@ -1313,9 +1614,15 @@ export const TabularDeepLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetric
     const [speed, setSpeed] = useState(50);
     const [alpha, setAlpha] = useState(0.1);
     const [gamma, setGamma] = useState(0.9);
-    const [epsilon, setEpsilon] = useState(1.0); 
+    const [epsilon, setEpsilon] = useState(1.0);
     const [epsilonDecay, setEpsilonDecay] = useState(0.995);
-    const [genRadius, setGenRadius] = useState(1.5); 
+    const [genRadius, setGenRadius] = useState(1.5);
+
+    // Which coarse tile a cell belongs to (for tile-coding generalization).
+    const tileOf = (idx: number) => {
+        const x = idx % GRID_W, y = Math.floor(idx / GRID_W);
+        return `${Math.floor(x / tileSize)},${Math.floor(y / tileSize)}`;
+    };
 
     const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
     const episodeRewardRef = useRef(0);
@@ -1397,6 +1704,49 @@ for episode in range(100):
         
         state = next_state
     
+    EPSILON *= ${epsilonDecay}
+    if episode % 10 == 0: print(f"Episode {episode} done.")`;
+        } else if (featureType === 'tile') {
+            pythonCode = `${commonEnv}
+
+# --- Tile-Coding Q-Learning (linear approx over coarse tiles) ---
+ALPHA = ${alpha}
+GAMMA = ${gamma}
+EPSILON = ${epsilon}
+TILE = ${tileSize}   # tile = TILE x TILE block of cells
+
+GRID_W, GRID_H = ${GRID_W}, ${GRID_H}
+N_TILES_X = (GRID_W + TILE - 1) // TILE
+
+# One weight row per (coarse) tile, shared by every cell inside it.
+n_tiles = N_TILES_X * ((GRID_H + TILE - 1) // TILE)
+weights = np.zeros((n_tiles, 4))
+
+def tile_of(idx):
+    x, y = idx % GRID_W, idx // GRID_W
+    return (y // TILE) * N_TILES_X + (x // TILE)
+
+def q(idx):
+    return weights[tile_of(idx)]
+
+for episode in range(150):
+    state = env.reset()
+    done = False
+    while not done:
+        if random.random() < EPSILON:
+            action = random.randint(0, 3)
+        else:
+            action = int(np.argmax(q(state)))
+
+        next_state, reward, done = env.step(action)
+
+        best_next = 0 if done else np.max(q(next_state))
+        td = reward + GAMMA * best_next - q(state)[action]
+        # Updating the tile updates EVERY cell that maps to it.
+        weights[tile_of(state)][action] += ALPHA * td
+
+        state = next_state
+
     EPSILON *= ${epsilonDecay}
     if episode % 10 == 0: print(f"Episode {episode} done.")`;
         } else {
@@ -1496,6 +1846,7 @@ for episode in range(200):
 
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
+        narration.cancel();
         setAgentPos(startPos);
         setEpisode(0);
         setSteps(0);
@@ -1503,7 +1854,7 @@ for episode in range(200):
         setLastLog(null);
         if (clearMemory) {
             setQTable({});
-            setEpsilon(1.0); 
+            setEpsilon(1.0);
             if (onClearMetrics) onClearMetrics();
         }
     };
@@ -1511,7 +1862,7 @@ for episode in range(200):
     const step = useCallback(() => {
         const currPos = agentPos;
         const currentQVals = getQ(currPos);
-        
+
         let action = 0;
         let isExploration = false;
         if (Math.random() < epsilon) {
@@ -1557,13 +1908,24 @@ for episode in range(200):
         if (mode === 'tabular') {
             if (!newQTable[currPos]) newQTable[currPos] = [0,0,0,0];
             newQTable[currPos][action] += alpha * tdError;
-        } else {
+        } else if (featureType === 'tile') {
+            // Tile-coding: every cell sharing the current coarse tile gets the
+            // SAME update (a discrete, piecewise-constant approximator).
+            const myTile = tileOf(currPos);
             for (let s = 0; s < N_STATES; s++) {
                 if (obstacles.includes(s) || s === goalPos) continue;
-                
+                if (tileOf(s) !== myTile) continue;
+                if (!newQTable[s]) newQTable[s] = [0,0,0,0];
+                newQTable[s][action] += alpha * tdError;
+            }
+        } else {
+            // RBF: smooth Gaussian spread to neighbours by distance.
+            for (let s = 0; s < N_STATES; s++) {
+                if (obstacles.includes(s) || s === goalPos) continue;
+
                 const d = dist(currPos, s);
                 const similarity = Math.exp(-Math.pow(d, 2) / (2 * Math.pow(genRadius, 2)));
-                
+
                 if (similarity > 0.01) {
                     if (!newQTable[s]) newQTable[s] = [0,0,0,0];
                     newQTable[s][action] += alpha * tdError * similarity;
@@ -1573,13 +1935,19 @@ for episode in range(200):
         setQTable(newQTable);
 
         if (onLogUpdate && Math.random() < 0.2) {
+            const deepName = featureType === 'tile' ? 'Deep RL (Tile-Coding)' : 'Deep RL (RBF)';
+            const deepDesc = featureType === 'tile'
+                ? `Sharing update across the ${tileSize}×${tileSize} tile.`
+                : `Generalizing update to neighbours (Radius=${genRadius}).`;
             const log = {
-                algorithm: mode === 'tabular' ? 'Tabular Q-Learning' : 'Deep RL (Approx)',
-                stepDescription: mode === 'tabular' ? 'Updating single state exactly.' : `Generalizing update to neighbors (Radius=${genRadius})`,
-                formula: mode === 'tabular' ? 'Q(s,a) += α * δ' : 'Q(s\',a) += α * δ * Similarity',
+                algorithm: mode === 'tabular' ? 'Tabular Q-Learning' : deepName,
+                stepDescription: mode === 'tabular' ? 'Updating single state exactly.' : deepDesc,
+                formula: mode === 'tabular'
+                    ? 'Q(s,a) += α * δ'
+                    : featureType === 'tile' ? 'Q(s\',a) += α * δ   ∀ s\' ∈ tile(s)' : 'Q(s\',a) += α * δ * Similarity',
                 variables: {
                     'TD Error (δ)': tdError.toFixed(2),
-                    'Similarity': mode === 'tabular' ? '1.0 (Self)' : 'e^(-d²/2σ²)',
+                    'Spread': mode === 'tabular' ? '1.0 (Self)' : featureType === 'tile' ? `tile ${tileSize}×${tileSize}` : 'e^(-d²/2σ²)',
                     'R': reward
                 },
                 result: 'Weights Updated',
@@ -1589,7 +1957,11 @@ for episode in range(200):
                         { label: 'Epsilon (ε)', info: isExploration ? `Active (${epsilon.toFixed(2)}). Random action taken.` : `Inactive (${epsilon.toFixed(2)}). Greedy action taken.` },
                         { label: 'TD Error (δ)', info: `${tdError.toFixed(2)}. Surprise factor (Difference between Reality and Prediction).` },
                         { label: 'Alpha (α)', info: `${alpha}. Learning Rate. Scale of update.` },
-                        { label: 'Generalization', info: mode === 'tabular' ? 'None (Lookup Table)' : 'Radial Basis Function (Approximates Neural Net)' }
+                        { label: 'Generalization', info: mode === 'tabular'
+                            ? 'None (Lookup Table)'
+                            : featureType === 'tile'
+                                ? 'Tile-coding: piecewise-constant features. Sharp tile edges, no blur within a tile.'
+                                : 'Radial Basis Function: smooth Gaussian features (approximates a neural net).' }
                     ],
                     implication: `The value of going this way changed by ${tdError.toFixed(2)}. ${tdError < 0 ? 'Since it dropped, this action is now LESS attractive compared to other options.' : 'Since it rose, this action is now MORE attractive.'}`
                 }
@@ -1598,11 +1970,26 @@ for episode in range(200):
             setLastLog(log);
         }
 
+        // --- NARRATION ---
+        if (narration.enabled) {
+            if (done) {
+                narration.narrate(`Goal reached, episode ${episode + 1} done.`, { interrupt: true });
+            } else if (mode === 'deep' && Math.abs(tdError) > 0.5) {
+                narration.narrate(featureType === 'tile'
+                    ? `Update spread across the whole ${tileSize} by ${tileSize} tile.`
+                    : `Lesson bled to neighbours, radius ${genRadius.toFixed(1)}.`);
+            } else if (isExploration) {
+                narration.narrate(`Exploring ${DIR_WORDS[action]}.`);
+            } else {
+                narration.narrate(`Moving ${DIR_WORDS[action]}.`);
+            }
+        }
+
         setAgentPos(done ? startPos : nextPos);
         if (done) {
             setEpisode(e => e + 1);
             setSteps(0);
-            
+
             setEpsilon(prev => Math.max(0.01, prev * epsilonDecay));
 
             if (onUpdateMetrics) {
@@ -1618,7 +2005,7 @@ for episode in range(200):
             setSteps(s => s + 1);
         }
 
-    }, [agentPos, qTable, obstacles, startPos, goalPos, mode, alpha, gamma, epsilon, epsilonDecay, genRadius, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics]);
+    }, [agentPos, qTable, obstacles, startPos, goalPos, mode, featureType, tileSize, alpha, gamma, epsilon, epsilonDecay, genRadius, onLogUpdate, onUpdateMetrics, episode, steps, onClearMetrics, narration]);
 
     useEffect(() => {
         if (isPlaying) {
@@ -1653,12 +2040,26 @@ for episode in range(200):
 
   const conceptText = mode === 'tabular'
     ? 'Tabular RL keeps an exact value per state. Learning about one square tells it nothing about its neighbours — it must visit every cell. Slow, but precise.'
-    : 'Deep RL approximates with a function. Learning about one square bleeds into similar squares, so the map fills in fast — but fine detail can blur (catastrophic forgetting).';
+    : featureType === 'tile'
+      ? `Tile-coding splits the world into coarse ${tileSize}×${tileSize} tiles; every cell in a tile shares one weight. Learning is fast and blocky — you can see the sharp tile boundaries fill in. Bigger tiles generalize more but lose detail.`
+      : 'Deep RL with RBF features approximates smoothly. Learning about one square bleeds into similar squares by distance, so the map fills in fast — but fine detail can blur (catastrophic forgetting).';
+
+  const presets: PresetChip[] = [
+    { label: 'Exact & Slow', note: 'Tabular: precise but must visit every cell.', apply: () => { setMode('tabular'); setAlpha(0.2); setEpsilon(1); setEpsilonDecay(0.99); } },
+    { label: 'Wide RBF', note: 'Deep RBF, large radius — fills fast, blurry.', apply: () => { setMode('deep'); setFeatureType('rbf'); setGenRadius(2.5); setAlpha(0.1); } },
+    { label: 'Coarse Tiles', note: '3×3 tile-coding — blocky, fast.', apply: () => { setMode('deep'); setFeatureType('tile'); setTileSize(3); setAlpha(0.15); } },
+    { label: 'Fine Tiles', note: '2×2 tile-coding — sharper detail.', apply: () => { setMode('deep'); setFeatureType('tile'); setTileSize(2); setAlpha(0.2); } },
+  ];
+  const challenges: PresetChip[] = [
+    { label: 'Tile vs RBF', note: 'Same map: tile-coding shows hard edges, RBF a soft gradient.', apply: () => { setMode('deep'); setFeatureType('tile'); setTileSize(2); setGenRadius(1.5); setAlpha(0.2); } },
+    { label: 'Forgetting Test', note: 'High α + wide RBF — watch a new lesson overwrite old ones.', apply: () => { setMode('deep'); setFeatureType('rbf'); setGenRadius(2.8); setAlpha(0.6); } },
+  ];
 
   return (
     <StageLayout
       activeModule={activeModule}
       onSelectModule={onSelectModule}
+      narration={narration}
       labNumber={3}
       moduleSubtitle={subtitleFor(activeModule)}
       telemetry={{ episode, reward: lastReward(metrics), epsilon: epsilon.toFixed(3), steps, running: isPlaying }}
@@ -1672,6 +2073,15 @@ for episode in range(200):
             <AlgoPill active={mode === 'tabular'} onClick={() => { setMode('tabular'); resetSim(true); }}>Tabular · Exact</AlgoPill>
             <AlgoPill active={mode === 'deep'} accent="#818cf8" onClick={() => { setMode('deep'); resetSim(true); }}>Deep RL · Approx</AlgoPill>
           </div>
+          {mode === 'deep' && (
+            <>
+              <MonoLabel style={{ margin: '16px 0 11px' }}>Features</MonoLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <AlgoPill active={featureType === 'rbf'} accent="#818cf8" onClick={() => { setFeatureType('rbf'); resetSim(true); }}>RBF · Smooth</AlgoPill>
+                <AlgoPill active={featureType === 'tile'} accent="#22d3ee" onClick={() => { setFeatureType('tile'); resetSim(true); }}>Tile-Coding</AlgoPill>
+              </div>
+            </>
+          )}
         </>
       )}
       controls={<RunControls isPlaying={isPlaying} onPlay={() => setIsPlaying(!isPlaying)} onReset={() => resetSim(true)} onNewMap={randomizeEnvironment} />}
@@ -1679,7 +2089,7 @@ for episode in range(200):
         <Legend title="LEARNING SPREAD" items={[
           { color: GOOD, label: 'High Q' },
           { color: BAD, label: 'Low Q' },
-          ...(mode === 'deep' ? [{ color: '#818cf8', label: 'Generalizes' }] : []),
+          ...(mode === 'deep' ? [{ color: featureType === 'tile' ? '#22d3ee' : '#818cf8', label: featureType === 'tile' ? `Tile ${tileSize}×${tileSize}` : 'RBF spread' }] : []),
         ]} />
       )}
       rewardLabel="AVG REWARD"
@@ -1689,15 +2099,18 @@ for episode in range(200):
       contextInsight={conceptText}
       params={(
         <ParamsWrap>
-          <ParamsHead title={mode === 'deep' ? 'Neural Network Config' : 'Tabular Config'} hint="Watch how a single lesson spreads across states." />
+          <ParamsHead title={mode === 'deep' ? 'Function Approx Config' : 'Tabular Config'} hint="Watch how a single lesson spreads across states." />
+          <PresetRow title="Presets" hint="One-click parameter bundles." chips={presets} />
+          <PresetRow title="Guided Challenges" hint="Try this, then watch what changes." chips={challenges} />
           <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
-          {mode === 'deep' && <ParamSlider name="Generalization Radius" value={genRadius.toFixed(1)} min={0.5} max={3} step={0.1} current={genRadius} onChange={setGenRadius} hint="how far a lesson bleeds to neighbours" accent="#818cf8" />}
+          {mode === 'deep' && featureType === 'rbf' && <ParamSlider name="RBF Radius · σ" value={genRadius.toFixed(1)} min={0.5} max={3} step={0.1} current={genRadius} onChange={setGenRadius} hint="how far a lesson bleeds (Gaussian)" accent="#818cf8" />}
+          {mode === 'deep' && featureType === 'tile' && <ParamSlider name="Tile Size" value={`${tileSize}×${tileSize}`} min={1} max={4} step={1} current={tileSize} onChange={(v) => { setTileSize(v); resetSim(true); }} hint="cells per coarse tile" accent="#22d3ee" />}
           <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — how fast Q updates" />
           <ParamSlider name="Epsilon · explore" value={epsilon.toFixed(3)} min={0} max={1} step={0.05} current={epsilon} onChange={setEpsilon} hint="ε — random action prob." />
           <ParamSlider name="Decay" value={epsilonDecay.toFixed(3)} min={0.9} max={1} step={0.001} current={epsilonDecay} onChange={setEpsilonDecay} hint="ε ← ε · decay each episode" />
         </ParamsWrap>
       )}
-      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, decay: epsilonDecay, mode } }}
+      tutor={{ ...aiTutor!, currentParams: { alpha, gamma, epsilon, decay: epsilonDecay, mode, features: mode === 'deep' ? featureType : 'tabular', tileSize } }}
       apiPanel={apiPanel}
     />
   );
@@ -1705,19 +2118,52 @@ for episode in range(200):
 
 // --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
 export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+    const narration = useNarration();
     const N_ARMS = 5;
     const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
-    
-    const [strategy, setStrategy] = useState<'greedy' | 'epsilon' | 'optimistic' | 'ucb'>('epsilon');
-    
+
+    // Added strategies: 'thompson' (Bayesian Beta sampling) and 'boltzmann' (softmax over Q).
+    const [strategy, setStrategy] = useState<'greedy' | 'epsilon' | 'optimistic' | 'ucb' | 'thompson' | 'boltzmann'>('epsilon');
+
     const [arms, setArms] = useState<{ count: number; sum: number; q: number }[]>(
         Array(N_ARMS).fill({ count: 0, sum: 0, q: 0 })
     );
-    
+    // Last Thompson samples per arm (for the visual; the bar shows the sampled θ).
+    const [tsSamples, setTsSamples] = useState<number[]>(Array(N_ARMS).fill(0));
+
     const [ucbC, setUcbC] = useState(2.0);
     const [epsilon, setEpsilon] = useState(0.1);
     const [initQ, setInitQ] = useState(0.0);
+    const [tau, setTau] = useState(0.2); // Boltzmann temperature for the bandit
     const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+
+    // Sample from a Beta(a,b) via two Gamma draws (Marsaglia-Tsang). Pure JS,
+    // no deps — used by Thompson sampling.
+    const sampleGamma = (k: number) => {
+        if (k < 1) {
+            const u = Math.random();
+            return sampleGamma(1 + k) * Math.pow(u, 1 / k);
+        }
+        const d = k - 1 / 3;
+        const c = 1 / Math.sqrt(9 * d);
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            let x = 0, v = 0;
+            do {
+                const u1 = Math.random(), u2 = Math.random();
+                x = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2); // standard normal
+                v = Math.pow(1 + c * x, 3);
+            } while (v <= 0);
+            const u = Math.random();
+            if (u < 1 - 0.0331 * x * x * x * x) return d * v;
+            if (Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+        }
+    };
+    const sampleBeta = (a: number, b: number) => {
+        const x = sampleGamma(a);
+        const y = sampleGamma(b);
+        return x / (x + y);
+    };
     
     const [isPlaying, setIsPlaying] = useState(false);
     const [totalSteps, setTotalSteps] = useState(0);
@@ -1737,6 +2183,7 @@ STRATEGY = "${strategy}"
 EPSILON = ${epsilon}
 UCB_C = ${ucbC}
 INIT_Q = ${initQ}
+TAU = ${tau}   # Boltzmann temperature
 N_ARMS = ${N_ARMS}
 TRUE_MEANS = ${JSON.stringify(TRUE_MEANS)}
 
@@ -1745,39 +2192,54 @@ class MultiArmedBandit:
         self.n_arms = n_arms
         self.counts = np.zeros(n_arms)
         self.q_values = np.full(n_arms, initial_q)
+        self.wins = np.zeros(n_arms)    # successes, for Thompson Beta posterior
         self.total_steps = 0
 
     def select_action(self):
         self.total_steps += 1
-        
+
         if STRATEGY == 'greedy':
             # Pure Exploitation
             return np.argmax(self.q_values)
-            
+
         elif STRATEGY == 'epsilon':
             # Epsilon-Greedy
             if random.random() < EPSILON:
                 return random.randint(0, self.n_arms - 1)
             return np.argmax(self.q_values)
-            
+
         elif STRATEGY == 'optimistic':
             # Greedy with High Init Q
             return np.argmax(self.q_values)
-            
+
         elif STRATEGY == 'ucb':
             # Upper Confidence Bound
             scores = []
             for i in range(self.n_arms):
                 if self.counts[i] == 0:
                     return i # Try unseen arms first
-                
+
                 # UCB Formula
                 uncertainty = UCB_C * math.sqrt(math.log(self.total_steps) / self.counts[i])
                 scores.append(self.q_values[i] + uncertainty)
             return np.argmax(scores)
 
+        elif STRATEGY == 'thompson':
+            # Bayesian: sample a plausible win-rate per arm, play the best draw.
+            samples = [np.random.beta(1 + self.wins[i], 1 + (self.counts[i] - self.wins[i]))
+                       for i in range(self.n_arms)]
+            return int(np.argmax(samples))
+
+        elif STRATEGY == 'boltzmann':
+            # Softmax over Q at temperature TAU.
+            q = self.q_values
+            exps = np.exp((q - q.max()) / TAU)
+            probs = exps / exps.sum()
+            return int(np.random.choice(self.n_arms, p=probs))
+
     def update(self, action, reward):
         self.counts[action] += 1
+        self.wins[action] += reward
         n = self.counts[action]
         q = self.q_values[action]
         # Incremental Mean Update
@@ -1803,10 +2265,12 @@ for t in range(1, 501):
 
     const resetSim = (newInitQ = initQ) => {
         setIsPlaying(false);
+        narration.cancel();
         setTotalSteps(0);
         setTotalReward(0);
         batchRewardRef.current = 0;
         setArms(Array(N_ARMS).fill({ count: 0, sum: 0, q: newInitQ }));
+        setTsSamples(Array(N_ARMS).fill(0));
         setLastLog(null);
         if (onClearMetrics) onClearMetrics();
     };
@@ -1902,6 +2366,42 @@ for t in range(1, 501):
                 implication: 'We pick the arm that maximizes the sum of known value (Q) and potential upside (Uncertainty).'
             };
         }
+        else if (strategy === 'thompson') {
+            // Sample θ_i ~ Beta(1 + successes, 1 + failures); play the argmax.
+            const samples = arms.map(a => sampleBeta(1 + a.sum, 1 + (a.count - a.sum)));
+            setTsSamples(samples);
+            let best = -Infinity;
+            samples.forEach((s, i) => { if (s > best) { best = s; action = i; } });
+            logDesc = "Thompson: Sampling from Beta posteriors";
+            logFormula = "θ_a ~ Beta(1+wins, 1+losses);  a = argmax θ_a";
+            mathDetails = {
+                params: [
+                    { label: 'Beta posterior', info: `Arm ${action + 1}: Beta(${1 + arms[action].sum}, ${1 + (arms[action].count - arms[action].sum)}). Belief over its win-rate.` },
+                    { label: 'Sampling', info: 'Each step we draw one plausible win-rate per arm and play the best draw.' },
+                    { label: 'Self-tuning', info: 'Wide posteriors (few plays) sample boldly; tight ones (many plays) sample near their mean — exploration shrinks automatically.' }
+                ],
+                implication: 'Probability matching: an arm is played in proportion to the probability it is actually the best. Optimal regret with no tuning knob.'
+            };
+        }
+        else if (strategy === 'boltzmann') {
+            // Softmax over Q at temperature tau.
+            const mx = Math.max(...arms.map(a => a.q));
+            const exps = arms.map(a => Math.exp((a.q - mx) / tau));
+            const sum = exps.reduce((x, y) => x + y, 0) || 1;
+            const probs = exps.map(e => e / sum);
+            const r = Math.random();
+            let cum = 0;
+            for (let i = 0; i < N_ARMS; i++) { cum += probs[i]; if (r < cum) { action = i; break; } }
+            logDesc = `Boltzmann: Softmax sampling (τ=${tau.toFixed(2)})`;
+            logFormula = "P(a) = exp(Q(a)/τ) / Σ exp(Q/τ)";
+            mathDetails = {
+                params: [
+                    { label: 'Temperature τ', info: `${tau.toFixed(2)}. High τ → near-uniform (explore); low τ → near-greedy (exploit).` },
+                    { label: 'P(a)', info: `Chosen arm ${action + 1} had probability ${(probs[action] * 100).toFixed(0)}% this step.` }
+                ],
+                implication: 'Unlike ε-greedy, exploration is graded by value — clearly bad arms are tried far less than near-tied ones.'
+            };
+        }
 
         // 2. GET REWARD
         const reward = Math.random() < TRUE_MEANS[action] ? 1 : 0;
@@ -1915,10 +2415,24 @@ for t in range(1, 501):
         
         newArms[action] = { count: newCount, sum: newSum, q: newQ };
         setArms(newArms);
-        
+
         setTotalSteps(s => s + 1);
         setTotalReward(r => r + reward);
         batchRewardRef.current += reward;
+
+        // --- NARRATION: describe the pull on the bars ---
+        if (narration.enabled) {
+            const best = arms.indexOf(arms.reduce((m, a) => a.q > m.q ? a : m, arms[0]));
+            if (reward === 1) {
+                narration.narrate(`Arm ${action + 1} paid out. Estimate now ${newQ.toFixed(2)}.`);
+            } else {
+                narration.narrate(`Arm ${action + 1} missed. ${newCount} plays so far.`);
+            }
+            // Milestone: a fresh arm just became the leader.
+            if ((totalSteps + 1) % 25 === 0 && best === 3) {
+                narration.narrate('Best arm is now leading, exploitation taking over.', { interrupt: true });
+            }
+        }
 
         if (onLogUpdate) {
             const log = {
@@ -1954,7 +2468,7 @@ for t in range(1, 501):
             batchRewardRef.current = 0;
         }
 
-    }, [arms, strategy, epsilon, ucbC, totalSteps, onLogUpdate, onUpdateMetrics]);
+    }, [arms, strategy, epsilon, ucbC, tau, totalSteps, onLogUpdate, onUpdateMetrics, narration]);
 
     useEffect(() => {
         if (isPlaying) {
@@ -1969,23 +2483,41 @@ for t in range(1, 501):
         if (strategy === 'greedy') return "Greedy: Quickly locks onto one arm. If it picks a sub-optimal arm early and gets lucky (or the best arm gets unlucky), it gets stuck there forever.";
         if (strategy === 'epsilon') return "Epsilon-Greedy: Continues to explore randomly (ε). This guarantees finding the best arm eventually, but wastes pulls on bad arms forever.";
         if (strategy === 'optimistic') return "Optimistic: By starting with Q=5.0, the agent is 'disappointed' by every arm initially. It is forced to try every arm multiple times until their values drop to realistic levels. It naturally explores early and exploits late.";
-        if (strategy === 'ucb') return "UCB: It calculates a 'Confidence Interval'. Arms played less have high uncertainty (wide interval), boosting their score. As an arm is played, uncertainty shrinks. It mathematically balances exploration and exploitation efficiently.";
+        if (strategy === 'ucb') return "UCB: It calculates a 'Confidence Interval' (the gold band above each bar). Arms played less have high uncertainty (wide band), boosting their score. As an arm is played, uncertainty shrinks. It mathematically balances exploration and exploitation efficiently.";
+        if (strategy === 'thompson') return "Thompson Sampling: Bayesian. Each arm keeps a Beta posterior over its win-rate. Every step it draws one sample per arm (cyan dotted line) and plays the highest draw. Uncertain arms sample wildly and get tried; confident arms sample near their mean. It matches the probability each arm is best — optimal regret, zero tuning.";
+        if (strategy === 'boltzmann') return "Boltzmann (Softmax): Picks arms with probability proportional to exp(Q/τ). Unlike ε-greedy's uniform random exploration, it explores in proportion to value — near-tied arms get tried often, clearly-bad arms rarely. Low τ → greedy, high τ → uniform.";
         return "";
     };
 
   const avgReward = totalSteps > 0 ? (totalReward / totalSteps).toFixed(2) : '—';
 
+  // The current leading arm by estimated Q (drives the highlight + glow).
+  const leadArm = arms.reduce((best, a, i) => a.q > arms[best].q ? i : best, 0);
+  const tNow = totalSteps + 1;
   const bars = (
     <div style={{ display: 'flex', alignItems: 'flex-end', gap: 18, height: 320, width: 540 }}>
       {arms.map((arm, i) => {
         const h = Math.min(arm.q, 1) * 100;
         const tru = TRUE_MEANS[i] * 100;
-        const best = i === 3 && arm.q > 0.7;
+        const best = i === leadArm && arm.count > 0;
+        // UCB uncertainty half-width (clamped) → whisker above the bar.
+        const ucbU = strategy === 'ucb' && arm.count > 0 ? Math.min(ucbC * Math.sqrt(Math.log(tNow) / arm.count), 1) : 0;
+        // Thompson: where the latest sampled θ landed for this arm.
+        const tsY = strategy === 'thompson' ? Math.min(tsSamples[i], 1) * 100 : -1;
         return (
           <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, height: '100%', justifyContent: 'flex-end' }}>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)' }}>{arm.count} plays</div>
             <div style={{ position: 'relative', width: '100%', flex: 1, background: 'var(--bg0)', border: '1px solid var(--border)', borderRadius: '8px 8px 0 0', overflow: 'hidden' }}>
+              {/* true mean (dashed green) */}
               <div style={{ position: 'absolute', bottom: `${tru}%`, left: 0, right: 0, borderTop: '2px dashed color-mix(in srgb, var(--good) 55%, transparent)' }} />
+              {/* UCB confidence band above the estimate */}
+              {ucbU > 0 && (
+                <div style={{ position: 'absolute', bottom: `${h}%`, left: '28%', right: '28%', height: `${Math.min(ucbU * 100, 100 - h)}%`, background: 'color-mix(in srgb, #fbbf24 30%, transparent)', borderTop: '2px solid #fbbf24' }} />
+              )}
+              {/* Thompson sampled draw marker */}
+              {tsY >= 0 && (
+                <div style={{ position: 'absolute', bottom: `${tsY}%`, left: '15%', right: '15%', borderTop: '2px dotted #22d3ee' }} />
+              )}
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${h}%`, background: best ? 'var(--acc)' : 'color-mix(in srgb, var(--acc) 55%, transparent)', transition: 'height .3s ease', boxShadow: best ? '0 0 18px -4px var(--acc)' : 'none' }} />
               <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: '#fff' }}>{arm.q.toFixed(2)}</div>
             </div>
@@ -1996,10 +2528,22 @@ for t in range(1, 501):
     </div>
   );
 
+  const presets: PresetChip[] = [
+    { label: 'Lazy ε', note: 'Tiny ε — barely explores, often stuck.', apply: () => { setStrategy('epsilon'); setEpsilon(0.02); setInitQ(0); resetSim(0); } },
+    { label: 'Curious ε', note: 'Big ε — explores a lot, wastes pulls.', apply: () => { setStrategy('epsilon'); setEpsilon(0.3); setInitQ(0); resetSim(0); } },
+    { label: 'Bayesian', note: 'Thompson sampling — self-tuning.', apply: () => { setStrategy('thompson'); resetSim(0); } },
+    { label: 'Hot Softmax', note: 'Boltzmann at high τ.', apply: () => { setStrategy('boltzmann'); setTau(0.5); resetSim(0); } },
+  ];
+  const challenges: PresetChip[] = [
+    { label: 'Regret Race', note: 'Run UCB vs Thompson 500 pulls — compare avg reward.', apply: () => { setStrategy('thompson'); resetSim(0); } },
+    { label: 'Greedy Trap', note: 'Pure greedy from Q=0 — watch it lock onto a weak arm.', apply: () => { setStrategy('greedy'); setInitQ(0); resetSim(0); } },
+  ];
+
   return (
     <StageLayout
       activeModule={activeModule}
       onSelectModule={onSelectModule}
+      narration={narration}
       labNumber={4}
       moduleSubtitle={subtitleFor(activeModule)}
       telemetry={{ reward: avgReward, epsilon: strategy === 'epsilon' ? epsilon.toFixed(2) : undefined, steps: totalSteps, running: isPlaying }}
@@ -2013,7 +2557,9 @@ for t in range(1, 501):
             <AlgoPill active={strategy === 'greedy'} onClick={() => { setStrategy('greedy'); resetSim(); }}>Greedy</AlgoPill>
             <AlgoPill active={strategy === 'epsilon'} onClick={() => { setStrategy('epsilon'); resetSim(); }}>ε-Greedy</AlgoPill>
             <AlgoPill active={strategy === 'optimistic'} onClick={() => { setStrategy('optimistic'); setInitQ(5.0); resetSim(5.0); }}>Optimistic Init</AlgoPill>
-            <AlgoPill active={strategy === 'ucb'} onClick={() => { setStrategy('ucb'); resetSim(); }}>UCB</AlgoPill>
+            <AlgoPill active={strategy === 'ucb'} accent="#fbbf24" onClick={() => { setStrategy('ucb'); resetSim(); }}>UCB</AlgoPill>
+            <AlgoPill active={strategy === 'thompson'} accent="#22d3ee" onClick={() => { setStrategy('thompson'); resetSim(); }}>Thompson</AlgoPill>
+            <AlgoPill active={strategy === 'boltzmann'} accent="#fb923c" onClick={() => { setStrategy('boltzmann'); resetSim(); }}>Boltzmann</AlgoPill>
           </div>
         </>
       )}
@@ -2022,6 +2568,8 @@ for t in range(1, 501):
         <Legend title="ARMS" items={[
           { color: ACC, label: 'Estimated Q' },
           { node: <span style={{ width: 12, borderTop: `2px dashed ${GOOD}`, display: 'inline-block' }} />, label: 'True mean' },
+          ...(strategy === 'ucb' ? [{ color: '#fbbf24', label: 'UCB band' }] : []),
+          ...(strategy === 'thompson' ? [{ node: <span style={{ width: 12, borderTop: '2px dotted #22d3ee', display: 'inline-block' }} />, label: 'θ sample' }] : []),
         ]} />
       )}
       rewardLabel="AVG REWARD"
@@ -2032,9 +2580,17 @@ for t in range(1, 501):
       params={(
         <ParamsWrap>
           <ParamsHead title="Bandit Controls" hint="Balance trying new arms vs milking the best." />
+          <PresetRow title="Presets" hint="One-click strategy bundles." chips={presets} />
+          <PresetRow title="Guided Challenges" hint="Try this, then watch what changes." chips={challenges} />
           <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={1000} step={10} current={speed} onChange={setSpeed} hint="pull interval" />
           {strategy === 'epsilon' && <ParamSlider name="Epsilon · explore" value={epsilon.toFixed(2)} min={0} max={0.5} step={0.05} current={epsilon} onChange={setEpsilon} hint="ε — chance to pull a random arm" />}
           {strategy === 'ucb' && <ParamSlider name="Confidence · c" value={ucbC.toFixed(1)} min={0.5} max={5} step={0.5} current={ucbC} onChange={setUcbC} hint="higher = more exploration" />}
+          {strategy === 'boltzmann' && <ParamSlider name="Temperature · τ" value={tau.toFixed(2)} min={0.05} max={1} step={0.05} current={tau} onChange={setTau} hint="low = greedy, high = uniform" accent="#fb923c" />}
+          {strategy === 'thompson' && (
+            <div style={{ background: 'color-mix(in srgb, #22d3ee 10%, var(--bg2))', border: '1px solid var(--border)', borderRadius: 9, padding: 12, fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.55 }}>
+              No knob to tune — Thompson sampling self-calibrates exploration from its <b style={{ color: '#22d3ee' }}>Beta posteriors</b>. The cyan dotted lines are the latest sampled win-rates.
+            </div>
+          )}
           {strategy === 'optimistic' && (
             <div style={{ background: 'color-mix(in srgb, var(--good) 10%, var(--bg2))', border: '1px solid var(--border)', borderRadius: 9, padding: 12, fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.55 }}>
               Initial Q seeded to <b style={{ color: GOOD }}>{initQ.toFixed(1)}</b> — every arm disappoints until proven, forcing early exploration.
@@ -2046,7 +2602,7 @@ for t in range(1, 501):
           </div>
         </ParamsWrap>
       )}
-      tutor={{ ...aiTutor!, currentParams: { strategy, epsilon, ucbC, initQ } }}
+      tutor={{ ...aiTutor!, currentParams: { strategy, epsilon, ucbC, initQ, tau } }}
       apiPanel={apiPanel}
     />
   );
@@ -2054,11 +2610,15 @@ for t in range(1, 501):
 
 // --- 5. Single vs Multi-Agent Lab ---
 export const MultiAgentLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+    const narration = useNarration();
     const MA_W = 6;
     const MA_H = 6;
     const MA_STATES = MA_W * MA_H;
-    
-    const [mode, setMode] = useState<'single' | 'coop' | 'comp'>('single');
+
+    // Added 'congestion': both agents race to the SAME goal but collide if they
+    // ever occupy the same cell — a social-dilemma / tragedy-of-the-commons.
+    const [mode, setMode] = useState<'single' | 'coop' | 'comp' | 'congestion'>('single');
+    const [collisionCell, setCollisionCell] = useState<number | null>(null);
     const [agentAPos, setAgentAPos] = useState(0);
     const [agentBPos, setAgentBPos] = useState(MA_STATES - 1); 
     const [goalA, setGoalA] = useState(MA_STATES - 1);
@@ -2142,7 +2702,15 @@ class JointStateGridWorld:
                 done = True
             else:
                 r_a = -0.1; r_b = 0.1 # Evade reward
-                
+        elif MODE == 'congestion':
+            # Shared goal, collision penalty (tragedy of the commons).
+            if new_a == new_b:
+                r_a = -5; r_b = -5      # Collision
+            elif new_a == GOAL_A or new_b == GOAL_A:
+                if new_a == GOAL_A: r_a = 10
+                if new_b == GOAL_A: r_b = 10
+                done = True
+
         self.pos_a = new_a
         self.pos_b = new_b
         return (new_a, new_b), (r_a, r_b), done
@@ -2184,8 +2752,10 @@ for episode in range(100):
 
     const resetSim = (clearMemory = true) => {
         setIsPlaying(false);
+        narration.cancel();
         setAgentAPos(0);
         setAgentBPos(MA_STATES - 1);
+        setCollisionCell(null);
         setEpisode(0);
         setSteps(0);
         episodeRewardRef.current = 0;
@@ -2242,10 +2812,11 @@ for episode in range(100):
         let rB = -0.1;
         let done = false;
         let logDesc = "";
+        let collided = false;
 
         if (mode === 'single') {
             if (nextA === goalA) { rA = 10; done = true; logDesc = "Goal Reached"; }
-        } 
+        }
         else if (mode === 'coop') {
             if (nextA === goalA && nextB === goalB) {
                 rA = 10; rB = 10; done = true; logDesc = "Coop Success!";
@@ -2257,10 +2828,25 @@ for episode in range(100):
             if (nextA === nextB) {
                 rA = 10; rB = -10; done = true; logDesc = "Captured!";
             } else {
-                rA = -0.1; rB = 0.1; 
+                rA = -0.1; rB = 0.1;
+            }
+        }
+        else if (mode === 'congestion') {
+            // Shared goal (goalA). Collision = both occupy the same cell → penalty.
+            if (nextA === nextB) {
+                rA = -5; rB = -5; collided = true; logDesc = "Collision!";
+            } else if (nextA === goalA && nextB === goalA) {
+                // both want the goal but can't both be there (handled above)
+            } else {
+                let reachedA = nextA === goalA;
+                let reachedB = nextB === goalA;
+                if (reachedA) { rA = 10; }
+                if (reachedB) { rB = 10; }
+                if (reachedA || reachedB) { done = true; logDesc = reachedA && reachedB ? "Tie at goal" : "Goal Reached"; }
             }
         }
 
+        setCollisionCell(collided ? nextA : null);
         episodeRewardRef.current += rA;
 
         const nextQA = getQA(nextA, nextB); 
@@ -2314,6 +2900,25 @@ for episode in range(100):
             setLastLog(log);
         }
 
+        // --- NARRATION: describe the joint event on the grid ---
+        if (narration.enabled) {
+            if (mode === 'comp' && done) {
+                narration.narrate('Predator captured the prey!', { interrupt: true });
+            } else if (mode === 'coop' && done) {
+                narration.narrate('Both agents reached their goals together.', { interrupt: true });
+            } else if (mode === 'congestion' && collided) {
+                narration.narrate('Collision — both agents hit the same cell.', { interrupt: true });
+            } else if (mode === 'congestion' && done) {
+                narration.narrate('An agent reached the shared goal cleanly.', { interrupt: true });
+            } else if (mode === 'single' && done) {
+                narration.narrate(`Agent A reached the goal in ${steps + 1} steps.`, { interrupt: true });
+            } else if (mode !== 'single') {
+                narration.narrate(`Agent A goes ${DIR_WORDS[actionA]}, agent B goes ${DIR_WORDS[actionB]}.`);
+            } else {
+                narration.narrate(`Agent A moves ${DIR_WORDS[actionA]}.`);
+            }
+        }
+
         setAgentAPos(nextA);
         setAgentBPos(nextB);
 
@@ -2348,7 +2953,7 @@ for episode in range(100):
             }
         }
 
-    }, [agentAPos, agentBPos, qTableA, qTableB, mode, goalA, goalB, alpha, gamma, epsilon, onLogUpdate, onUpdateMetrics, steps, episode]);
+    }, [agentAPos, agentBPos, qTableA, qTableB, mode, goalA, goalB, alpha, gamma, epsilon, onLogUpdate, onUpdateMetrics, steps, episode, narration]);
 
     useEffect(() => {
         if (isPlaying) {
@@ -2363,6 +2968,7 @@ for episode in range(100):
         if (mode === 'single') return "Single Agent: Standard RL. The environment is stationary (the goal doesn't move). Convergence is guaranteed.";
         if (mode === 'coop') return "Cooperative (Rendezvous): Both agents must learn to coordinate. Agent A learns 'I should go to Goal A, BUT ONLY IF Agent B goes to Goal B'. If they learn independently without seeing each other, they might never synchronize.";
         if (mode === 'comp') return "Competitive (Tag): Zero-Sum Game. The Predator (Blue) learns to chase. The Prey (Red) learns to run away. The environment is 'Non-Stationary' because the opponent keeps changing its strategy to beat you. This often leads to cycling behavior rather than convergence.";
+        if (mode === 'congestion') return "Congestion (Tragedy of the Commons): Both agents want the SAME goal, but colliding on a cell costs both −5. Selfishly rushing causes pile-ups. To do well the pair must implicitly learn to take turns or route around each other — a social dilemma that independent learners struggle to solve without coordination.";
         return "";
     };
 
@@ -2370,19 +2976,33 @@ for episode in range(100):
     const isA = agentAPos === idx;
     const isB = agentBPos === idx && mode !== 'single';
     const isGA = idx === goalA;
-    const isGB = idx === goalB && mode !== 'single';
+    // Congestion shares a single goal; the others keep goal B.
+    const isGB = idx === goalB && (mode === 'coop' || mode === 'comp');
     return {
-      goal: isGA, goalColor: '#60a5fa',
+      goal: isGA, goalColor: mode === 'congestion' ? '#a855f7' : '#60a5fa',
       goalB: isGB, goalBColor: BAD,
       agent: isA, agentColor: '#60a5fa',
       agentB: isB, agentBColor: BAD,
+      planned: collisionCell === idx,   // reuse the flash for a collision burst
     };
   };
+
+  const presets: PresetChip[] = [
+    { label: 'Solo Baseline', note: 'Single agent — stationary, converges.', apply: () => { setMode('single'); setAlpha(0.1); setGamma(0.9); setEpsilon(0.1); resetSim(true); } },
+    { label: 'Tight Coop', note: 'Low ε so the pair can synchronize.', apply: () => { setMode('coop'); setAlpha(0.15); setGamma(0.95); setEpsilon(0.05); resetSim(true); } },
+    { label: 'Predator Hunt', note: 'Competitive tag with fast learning.', apply: () => { setMode('comp'); setAlpha(0.2); setGamma(0.9); setEpsilon(0.2); resetSim(true); } },
+    { label: 'Gridlock', note: 'Congestion — watch the pile-ups.', apply: () => { setMode('congestion'); setAlpha(0.2); setGamma(0.95); setEpsilon(0.15); resetSim(true); } },
+  ];
+  const challenges: PresetChip[] = [
+    { label: 'Sync or Fail', note: 'Coop with ε=0.3 — too much noise to coordinate?', apply: () => { setMode('coop'); setEpsilon(0.3); setAlpha(0.1); resetSim(true); } },
+    { label: 'Take Turns', note: 'Congestion with low ε — can they learn to avoid each other?', apply: () => { setMode('congestion'); setEpsilon(0.05); setAlpha(0.25); setGamma(0.95); resetSim(true); } },
+  ];
 
   return (
     <StageLayout
       activeModule={activeModule}
       onSelectModule={onSelectModule}
+      narration={narration}
       labNumber={5}
       moduleSubtitle={subtitleFor(activeModule)}
       telemetry={{ episode, reward: lastReward(metrics), epsilon: epsilon.toFixed(2), steps, running: isPlaying }}
@@ -2396,6 +3016,7 @@ for episode in range(100):
             <AlgoPill active={mode === 'single'} onClick={() => { setMode('single'); resetSim(true); }}>Single Agent</AlgoPill>
             <AlgoPill active={mode === 'coop'} onClick={() => { setMode('coop'); resetSim(true); }}>Cooperative</AlgoPill>
             <AlgoPill active={mode === 'comp'} accent="#f87171" onClick={() => { setMode('comp'); resetSim(true); }}>Competitive</AlgoPill>
+            <AlgoPill active={mode === 'congestion'} accent="#a855f7" onClick={() => { setMode('congestion'); resetSim(true); }}>Congestion</AlgoPill>
           </div>
         </>
       )}
@@ -2404,6 +3025,7 @@ for episode in range(100):
         <Legend title="AGENTS" items={[
           { color: '#60a5fa', label: 'Agent A' },
           ...(mode !== 'single' ? [{ color: BAD, label: 'Agent B' }] : []),
+          ...(mode === 'congestion' ? [{ color: '#a855f7', label: 'Shared goal' }] : []),
         ]} />
       )}
       rewardLabel="AVG REWARD"
@@ -2414,6 +3036,8 @@ for episode in range(100):
       params={(
         <ParamsWrap>
           <ParamsHead title="MARL Settings" hint="A second learner makes the world non-stationary." />
+          <PresetRow title="Presets" hint="One-click scenario bundles." chips={presets} />
+          <PresetRow title="Guided Challenges" hint="Try this, then watch what changes." chips={challenges} />
           <ParamSlider name="Speed" value={`${speed}ms`} min={10} max={500} step={10} current={speed} onChange={setSpeed} hint="step interval" />
           <ParamSlider name="Alpha · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={setAlpha} hint="α — how fast Q updates" />
           <ParamSlider name="Gamma · discount" value={gamma.toFixed(2)} min={0.1} max={0.99} step={0.01} current={gamma} onChange={setGamma} hint="γ — future reward weight" />

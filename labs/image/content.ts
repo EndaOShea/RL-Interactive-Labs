@@ -18,15 +18,26 @@ export const CONV_CONTENT: LabContent = {
       heading: 'Padding, Stride & Output Size',
       body: 'Without padding, a kernel cannot be centred on the border, so the output shrinks. Zero-padding (used here) keeps the output the same size by surrounding the image with zeros. Stride is how far the window jumps each step; stride > 1 downsamples. The output side length is ⌊(W − F + 2P)/S⌋ + 1 for input W, kernel F, padding P, stride S.',
       details: [
-        { label: 'Padding P', text: 'P = (F−1)/2 with stride 1 keeps the output the same size ("same" padding). This lab uses zero-pad with P = 1.' },
-        { label: 'Stride S', text: 'S = 1 visits every position; S = 2 halves the output and is a cheap downsampler.' },
+        { label: 'Padding P', text: 'P = (F−1)/2 with stride 1 keeps the output the same size ("same" padding). This lab uses P = 1 with a choice of border mode.' },
+        { label: 'Border mode', text: 'Zero treats off-image pixels as 0 (can darken/halo borders); replicate repeats the nearest edge pixel; reflect mirrors the image across its edge for the smoothest border.' },
+        { label: 'Stride S', text: 'S = 1 visits every position; S = 2 halves the output (14×14 → 7×7) and is a cheap downsampler that replaces a separate pooling layer in many modern nets.' },
         { label: 'Translation equivariance', text: 'The same kernel runs everywhere, so a shifted feature produces a shifted response — the network does not relearn it per location.' },
+      ],
+    },
+    {
+      heading: 'A Zoo of Kernels',
+      body: 'The kernel weights alone decide the feature. First-derivative kernels (Sobel-X/Y) respond to directional edges; the second-derivative Laplacian responds to curvature and fires on both sides of an edge. Smoothing kernels (box blur, Gaussian) average a neighbourhood — the Gaussian weights the centre more, giving a softer, artefact-free blur. Emboss combines a gradient with a bias for a 3-D relief look; sharpen is the identity plus a Laplacian to boost local contrast.',
+      details: [
+        { label: 'Sobel vs Laplacian', text: 'Sobel = first derivative (one signed lobe → edge direction); Laplacian = sum of second derivatives (isotropic, sign flips across an edge).' },
+        { label: 'Box vs Gaussian blur', text: 'Box blur weights all 9 pixels equally; Gaussian uses 1-2-1 weights so the centre dominates — less ringing, the standard low-pass pre-filter.' },
+        { label: 'Sharpen = I + Laplacian', text: 'Adding a scaled Laplacian back to the original amplifies exactly the high-frequency detail the Laplacian isolates.' },
       ],
     },
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'Weight sharing', description: 'A convolution reuses one tiny kernel across the whole image instead of a separate weight per pixel-pair, drastically cutting parameters versus a dense layer.', recommendation: 'Think of each kernel as a single reusable pattern matcher; depth (many kernels) gives breadth of features.' },
-    { category: 'METHODOLOGY', title: 'Border handling matters', description: 'Different padding choices (zero, reflect, replicate) create different artefacts at the image edge.', recommendation: 'Pick padding deliberately; zero-pad is simplest but can darken borders for blur-like kernels.' },
+    { category: 'METHODOLOGY', title: 'Border handling matters', description: 'Different padding choices (zero, reflect, replicate) create different artefacts at the image edge.', recommendation: 'Pick padding deliberately; zero-pad is simplest but can darken borders for blur-like kernels — reflect/replicate avoid the dark halo.' },
+    { category: 'METHODOLOGY', title: 'Strided convolution', description: 'A stride-2 convolution both filters and downsamples in one op, shrinking the feature map and growing the effective receptive field of later layers.', recommendation: 'Use strided convs (or pooling) to build a coarse-to-fine pyramid; check the output-size formula so dimensions stay integral.' },
   ],
 };
 
@@ -38,7 +49,8 @@ export const FEATUREMAPS_CONTENT: LabContent = {
       details: [
         { label: 'Fixed filters', text: 'The conv filters here are hand-picked (vertical edge, horizontal edge, blob) — NOT trained. A real CNN learns these by backprop.' },
         { label: 'ReLU', text: 'max(0, x) — discards negative responses, so each map shows only where its feature is positively present.' },
-        { label: 'Max-pool 2×2', text: 'Takes the max in each 2×2 block: smaller maps, more translation tolerance, the strongest activation wins.' },
+        { label: 'Pooling 2×2', text: 'Downsamples each map by halving both dimensions. Max-pool keeps the strongest activation per block (peak-preserving, the classic choice); average-pool blends all four (smoother, used in modern nets and as global-average-pool before the classifier).' },
+        { label: 'Max vs average', text: 'Max is invariant to where in the block the peak sits, so it is robust to small shifts; average retains more of the overall energy and is gentler on noise. Swapping pooling can change which template the feature vector lands closest to.' },
       ],
     },
     {

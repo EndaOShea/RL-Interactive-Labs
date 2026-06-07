@@ -381,6 +381,15 @@ export const MODULE_CONTENT = {
                     { label: "Policy-Based", text: "Learns the 'Behavior' directly (probabilities). Good for robots/continuous movement." },
                     { label: "Actor-Critic", text: "Hybrid. Learns a Value function to critique and improve the Policy." }
                 ]
+            },
+            {
+                heading: "TD Variants: Double-Q & Expected SARSA",
+                body: "Plain Q-Learning has two well-known weaknesses these variants fix.",
+                details: [
+                    { label: "Maximization Bias", text: "Q-Learning backs up max Q(s'), and the max of noisy estimates is biased UPWARD — it over-values states it has been lucky in." },
+                    { label: "Double-Q", text: "Keeps two tables; one picks the best next action, the OTHER scores it. The estimates are decorrelated, so the optimistic bias cancels." },
+                    { label: "Expected SARSA", text: "Backs up the EXPECTED next value Σ π(a'|s')Q(s',a') instead of a single sampled action. Same target as SARSA in expectation, but much lower variance." }
+                ]
             }
         ]
     },
@@ -411,6 +420,15 @@ export const MODULE_CONTENT = {
                     { label: "Transition Function", text: "T(s,a,s') is a probability. You might try to move 'North' but slip and move 'East'." },
                     { label: "Impact on Learning", text: "High noise requires lower learning rates (Alpha) to average out the bad luck from the good luck." }
                 ]
+            },
+            {
+                heading: "Boltzmann (Softmax) Action Selection & Annealing",
+                body: "A principled stochastic policy: P(a|s) = exp(Q(a)/τ) / Σ exp(Q/τ).",
+                details: [
+                    { label: "Temperature τ", text: "High τ flattens the distribution (explore); low τ sharpens it toward greedy (exploit). τ→0 recovers a deterministic policy." },
+                    { label: "Value-aware exploration", text: "Unlike ε-greedy's uniform random pick, softmax tries near-best actions far more than clearly-bad ones." },
+                    { label: "Annealing schedule", text: "Cooling τ over episodes (τ ← τ·decay) is the temperature analogue of ε-decay — start hot/curious, end cold/confident." }
+                ]
             }
         ]
     },
@@ -430,6 +448,15 @@ export const MODULE_CONTENT = {
             {
                 heading: "The Concept of Generalization",
                 body: "In Tabular RL, learning about State A tells you nothing about State B. In Deep RL, if State A and B look similar, the network updates both. This speeds up learning but can cause 'Catastrophic Forgetting' where new lessons overwrite old ones.",
+            },
+            {
+                heading: "Feature Representations: Tile-Coding vs RBF",
+                body: "Before deep nets, linear function approximation over fixed features was the workhorse — and it still teaches the core trade-off cleanly.",
+                details: [
+                    { label: "Tile-Coding (CMAC)", text: "Partition the state into coarse tiles; every cell in a tile shares one weight. Updates are blocky with hard edges — cheap, fast, but no detail within a tile." },
+                    { label: "RBF Features", text: "Place Gaussian bumps over the space; an update bleeds smoothly to neighbours by distance. Soft gradients, but a wide radius blurs fine structure." },
+                    { label: "The trade-off", text: "Coarser features (big tiles / wide RBF) generalize faster but lose resolution. This is the same bias-variance dial a neural net's capacity controls." }
+                ]
             }
         ]
     },
@@ -449,6 +476,15 @@ export const MODULE_CONTENT = {
                     { label: "Optimistic Init", text: "Assume everything is amazing (High Q). You will be disappointed until you find the true best. Naturally explores." },
                     { label: "UCB (Upper Confidence Bound)", text: "Be optimistic in the face of uncertainty. 'This arm has low average, but I haven't tried it much, so maybe it's great!'" }
                 ]
+            },
+            {
+                heading: "Bayesian & Softmax Strategies",
+                body: "Two more strategies trade ε-greedy's blunt randomness for value- and uncertainty-aware exploration.",
+                details: [
+                    { label: "Thompson Sampling", text: "Keep a Beta posterior over each arm's win-rate. Each step, sample one plausible rate per arm and play the best draw. Exploration shrinks automatically as posteriors tighten — probability matching with optimal regret and no tuning knob." },
+                    { label: "Boltzmann / Softmax", text: "Pick arms with probability ∝ exp(Q/τ). Explores in proportion to value, so near-tied arms get tried while clearly-bad arms are mostly skipped." },
+                    { label: "Why it matters", text: "In clinical trials or recommenders, ε-greedy keeps wasting pulls on known-bad options forever; Thompson and softmax taper exploration where it is no longer worth it." }
+                ]
             }
         ]
     },
@@ -464,6 +500,15 @@ export const MODULE_CONTENT = {
                 heading: "Joint State Space",
                 body: "To solve this, Agent A cannot just look at the map. It must look at Agent B. The state space grows exponentially: State = (Pos_A, Pos_B).",
                 details: [{ label: "Complexity", text: "For a 10x10 grid: Single Agent = 100 states. Two Agents = 100x100 = 10,000 states." }]
+            },
+            {
+                heading: "Social Dilemmas & Congestion",
+                body: "Even with a shared goal, selfish maximizers can hurt the collective.",
+                details: [
+                    { label: "Tragedy of the Commons", text: "When both agents rush the same resource (goal cell), they collide and both lose. The locally-greedy move is globally costly." },
+                    { label: "Implicit Coordination", text: "Without communication, the pair must learn to take turns or route around each other purely from the collision penalty — hard for independent Q-learners." },
+                    { label: "Real-world echoes", text: "Traffic merges, network congestion, and shared-compute scheduling are all congestion games where naive self-interest causes pile-ups." }
+                ]
             }
         ]
     }

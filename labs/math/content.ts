@@ -23,6 +23,15 @@ export const GD_CONTENT: LabContent = {
         { label: 'Convex vs non-convex', text: 'Convex → any descent finds the global min. Non-convex → GD only guarantees a local min.' },
       ],
     },
+    {
+      heading: 'Adaptive & second-order optimisers',
+      body: 'Plain GD uses one global step size; modern optimisers adapt it. RMSProp divides the step by √(running mean of g²), so steep directions are damped and flat ones amplified. Adam combines this second moment with a momentum-like first moment (and bias-corrects both), giving the de-facto default for deep learning. Newton’s method goes further and uses curvature: x ← x − f′(x)/f″(x). On an exact quadratic that lands on the minimum in a single step, but it needs the Hessian f″ to be positive-definite — near a maximum (f″<0) Newton steps the wrong way.',
+      details: [
+        { label: 'RMSProp', text: 'Per-coordinate step α·g/√(s+ε) with s an EMA of g² — scale-free, good for ill-conditioned losses.' },
+        { label: 'Adam', text: 'First moment m (momentum) + second moment v (RMSProp) with bias correction; robust default α≈1e-3.' },
+        { label: 'Newton', text: 'Second-order: divides by curvature f″. One-step exact on quadratics; expensive and unsafe where f″≤0.' },
+      ],
+    },
   ],
   lifecycle: [
     { category: 'METHODOLOGY', title: 'Tuning the learning rate', description: 'A single fixed α rarely suits the whole loss surface; the same step that is stable in one region diverges in another.', recommendation: 'Use learning-rate schedules or adaptive optimisers (Adam, RMSProp) and watch the loss curve for smooth decay.' },
@@ -43,11 +52,20 @@ export const TAYLOR_CONTENT: LabContent = {
     },
     {
       heading: 'Why it underlies ML & radius of convergence',
-      body: 'First- and second-order Taylor expansions justify the core of optimisation: gradient descent is the first-order model J(θ+Δ) ≈ J(θ) + ∇J·Δ, and Newton/quasi-Newton methods use the second-order (Hessian) term. Smooth activations like GELU and softplus are effectively polynomial/series approximations of gates. But series only converge within a radius: 1/(1−x) about a=0 converges only for |x|<1 and blows up at the pole x=1; ln(1+x) converges on (−1, 1].',
+      body: 'First- and second-order Taylor expansions justify the core of optimisation: gradient descent is the first-order model J(θ+Δ) ≈ J(θ) + ∇J·Δ, and Newton/quasi-Newton methods use the second-order (Hessian) term. Smooth activations like GELU and softplus are effectively polynomial/series approximations of gates. But series only converge within a radius: 1/(1−x) about a=0 converges only for |x|<1 and blows up at the pole x=1; ln(1+x) converges on (−1, 1]. The radius is the distance to the nearest singularity in the COMPLEX plane — so tanh (poles at ±iπ/2) and Runge’s 1/(1+25x²) (poles at ±i/5) have finite radii even though they are perfectly smooth and bounded on the real line.',
       details: [
         { label: 'Optimisation link', text: 'GD = linear Taylor model of the loss; Newton = quadratic model — faster but needs the Hessian.' },
-        { label: 'Radius of convergence', text: 'Distance from a to the nearest singularity. Outside it, adding terms makes the error worse.' },
+        { label: 'Radius of convergence', text: 'Distance from a to the nearest (complex) singularity. Outside it, adding terms makes the error worse.' },
         { label: 'eˣ, sin, cos', text: 'Entire functions — their series converge on the whole real line.' },
+      ],
+    },
+    {
+      heading: 'Padé: rational approximation past the pole',
+      body: 'A Padé approximant replaces the truncated polynomial with a ratio of polynomials R(x)=P_m(x)/Q_m(x) whose Taylor expansion matches f to order 2m. Because the denominator Q can vanish, Padé can model the function’s poles — so it often converges far past the radius where the raw Taylor series diverges (e.g. usefully approximating 1/(1−x) near x=1, or tanh out on its saturated plateau). For the same total work, Padé[m/m] is frequently orders of magnitude more accurate than the degree-2m polynomial, which is why it shows up in special-function libraries, control theory and model reduction.',
+      details: [
+        { label: 'Rational P/Q', text: 'Numerator and denominator polynomials fit to the Taylor coefficients; the denominator captures poles.' },
+        { label: 'Beats the polynomial', text: 'Same coefficient data, but the rational form extends the accurate range past the Taylor radius.' },
+        { label: 'Used in', text: 'Special-function evaluation, matrix-exponential scaling-and-squaring, and reduced-order modelling.' },
       ],
     },
   ],
@@ -75,6 +93,15 @@ export const LINTRANSFORM_CONTENT: LabContent = {
         { label: 'Mv = λv', text: 'Eigen-directions are stretched, not rotated; λ is the stretch factor.' },
         { label: 'PCA', text: 'Principal components are the eigenvectors of the covariance matrix; explained variance ∝ eigenvalue.' },
         { label: 'Stability', text: '|λ|>1 ⇒ a direction blows up; spectral radius decides growth/decay in dynamics & RNNs.' },
+      ],
+    },
+    {
+      heading: 'SVD, singular values & conditioning',
+      body: 'Every matrix factors as M = U Σ Vᵀ — a rotation (Vᵀ), an axis-aligned stretch by the singular values σ₁≥σ₂≥0 (Σ), then another rotation (U). Geometrically the unit circle maps to an ellipse whose semi-axis lengths are exactly the singular values, oriented along the columns of U. Unlike eigenvalues, singular values are always real and ≥0 and exist for any matrix — even rectangular ones, and even when the eigenvalues are complex (a pure rotation has complex λ but singular values all 1). The ratio κ = σ₁/σ₂ is the condition number: large κ means the map is nearly singular and solving with it amplifies noise. SVD is the engine behind PCA, low-rank/least-squares approximation (keep the top-k σ) and the Moore–Penrose pseudo-inverse.',
+      details: [
+        { label: 'M = U Σ Vᵀ', text: 'Rotate → stretch by σ → rotate. The σ are the ellipse semi-axes the unit circle maps to.' },
+        { label: 'Condition number κ', text: 'κ = σ₁/σ₂. κ≈1 is well-conditioned (rotation/uniform scale); κ≫1 is near-singular and unstable.' },
+        { label: 'Low-rank & pseudo-inverse', text: 'Truncating small σ gives the best low-rank fit (PCA); inverting the non-zero σ gives the pseudo-inverse.' },
       ],
     },
   ],

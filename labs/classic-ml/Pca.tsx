@@ -2,12 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import ScatterPlot, { ScatterLine } from '../../components/labkit/viz/ScatterPlot';
+import ScatterPlot, { ScatterLine, ScatterEllipse } from '../../components/labkit/viz/ScatterPlot';
 import { ParamSlider, AlgoPill, RunControls, Legend, MonoLabel, GOOD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
+import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from './shared';
 import { pcaPython } from './python';
+import { PresetChips, Preset } from './presets';
 
 const ACCENT = '#34d399';
 const makeCloud = (n: number): [number, number][] => Array.from({ length: n }, () => [randn(), randn()]);
@@ -30,57 +32,80 @@ function computePCA(pts: { x: number; y: number }[]) {
   return { mx, my, l1, l2, v1x, v1y, e1: l1 / total, e2: l2 / total };
 }
 
+interface Cfg { threshold: number; whiten: boolean; elongation: number; }
+const PRESETS: Preset<Cfg>[] = [
+  { id: 'thin', label: 'Thin cloud', hint: 'A near-1D cloud — PC1 alone captures ~95%+ of the variance, so 1 component suffices.', values: { threshold: 0.9, whiten: false, elongation: 0.18 } },
+  { id: 'round', label: 'Round cloud', hint: 'Both axes vary similarly — you need both components to hit a high threshold.', values: { threshold: 0.9, whiten: false, elongation: 0.75 } },
+  { id: 'whiten', label: 'Whitened', hint: 'Whitening rescales each PC to unit variance — the projected cloud becomes isotropic.', values: { threshold: 0.95, whiten: true, elongation: 0.34 } },
+  { id: 'strict', label: '99% threshold', hint: 'Demanding 99% variance usually forces keeping every component — little compression.', values: { threshold: 0.99, whiten: false, elongation: 0.34 } },
+];
+
 const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [count, setCount] = useState(180);
   const [angle, setAngle] = useState(0.5);
+  const [elong, setElong] = useState(0.34);
+  const [threshold, setThreshold] = useState(0.9);
+  const [whiten, setWhiten] = useState(false);
   const [project, setProject] = useState(false);
   const [base, setBase] = useState<[number, number][]>(() => makeCloud(180));
   const [e1Series, setE1Series] = useState<number[]>([]);
+  const [presetId, setPresetId] = useState<string | undefined>();
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const narration = useNarration();
 
   const points = useMemo(() => {
     const c = Math.cos(angle), s = Math.sin(angle);
     return base.map(([u, v]) => {
-      const a = u * 0.98, b = v * 0.34;          // elongate
-      const rx = a * c - b * s, ry = a * s + b * c; // rotate
+      const a = u * 0.98, b = v * elong;             // elongate (controllable)
+      const rx = a * c - b * s, ry = a * s + b * c;  // rotate
       return { x: 0.5 + rx * 0.13, y: 0.5 + ry * 0.13 };
     });
-  }, [base, angle]);
+  }, [base, angle, elong]);
 
   const pca = useMemo(() => computePCA(points), [points]);
   const s1 = Math.sqrt(pca.l1), s2 = Math.sqrt(pca.l2);
   const v2x = -pca.v1y, v2y = pca.v1x;
   const thetaDeg = (Math.atan2(pca.v1y, pca.v1x) * 180) / Math.PI;
+  // #components to reach the variance threshold (2-D: 1 if PC1 alone clears it, else 2).
+  const kComp = pca.e1 >= threshold ? 1 : 2;
+  const cumKept = kComp === 1 ? pca.e1 : 1;
 
   const step = () => {
     setAngle((a) => a + 0.05);
     setE1Series((arr) => [...arr, pca.e1].slice(-60));
+    narration.narrate(`Cloud at ${thetaDeg.toFixed(0)} degrees, PC1 captures ${(pca.e1 * 100).toFixed(0)} percent.`);
     setLastLog({
-      algorithm: 'PCA · Principal Components',
+      algorithm: `PCA · Principal Components${whiten ? ' · whitened' : ''}`,
       stepDescription: 'Eigen-decompose the covariance matrix',
-      formula: 'Σ v = λ v   ·   explained = λᵢ / Σλ',
-      variables: { 'λ₁': pca.l1, 'λ₂': pca.l2, 'PC1%': pca.e1, 'θ°': thetaDeg },
-      result: `PC1 explains ${(pca.e1 * 100).toFixed(1)}%`,
+      formula: whiten ? 'z = Λ^{-1/2} Vᵀ(x − μ)   ·   explained = λᵢ/Σλ' : 'Σ v = λ v   ·   explained = λᵢ / Σλ',
+      variables: { 'λ₁': pca.l1, 'λ₂': pca.l2, 'PC1%': pca.e1, 'keep': kComp },
+      result: `keep ${kComp} PC → ${(cumKept * 100).toFixed(1)}%`,
       mathDetails: {
         params: [
           { label: 'PC1', info: `The white axis — direction of maximum variance (λ₁ = ${pca.l1.toFixed(4)}).` },
-          { label: 'PC2', info: 'Orthogonal to PC1, capturing the remaining variance.' },
           { label: 'explained', info: `${(pca.e1 * 100).toFixed(1)}% of the spread lies along PC1; project onto it to compress to 1-D with little loss.` },
+          { label: 'threshold', info: `${(threshold * 100).toFixed(0)}%. Keep the fewest components whose cumulative variance clears this — here ${kComp} of 2.` },
+          { label: 'whiten', info: whiten ? 'On: each component is rescaled to unit variance, so the projected cloud is isotropic.' : 'Off: components keep their natural variances.' },
         ],
-        implication: 'As the cloud rotates, PC1 tracks its long axis — PCA is rotation-following, not axis-aligned.',
+        implication: kComp === 1 ? 'PC1 alone clears the threshold — the data is effectively 1-D.' : 'Both components are needed to reach the variance target.',
       },
     });
   };
 
   const sim = useSimLoop(step, { initialSpeed: 90 });
 
-  const regen = (n = count) => { setBase(makeCloud(n)); setE1Series([]); setLastLog(null); };
-  const reset = () => { sim.stop(); setAngle(0.5); setE1Series([]); setLastLog(null); };
+  const regen = (n = count) => { setBase(makeCloud(n)); setE1Series([]); setLastLog(null); narration.cancel(); };
+  const reset = () => { sim.stop(); setAngle(0.5); setE1Series([]); setLastLog(null); narration.cancel(); };
+  const applyPreset = (p: Preset<Cfg>) => {
+    setThreshold(p.values.threshold); setWhiten(p.values.whiten); setElong(p.values.elongation); setPresetId(p.id);
+    narration.narrate(p.hint, { interrupt: true });
+  };
 
   const projected = points.map((p) => {
     const dx = p.x - pca.mx, dy = p.y - pca.my;
     const t = dx * pca.v1x + dy * pca.v1y;
-    return { x: pca.mx + t * pca.v1x, y: pca.my + t * pca.v1y };
+    const scale = whiten && s1 > 1e-6 ? 0.5 / s1 : 1; // visualise unit-variance rescale
+    return { x: pca.mx + t * scale * pca.v1x, y: pca.my + t * scale * pca.v1y };
   });
   const plotPoints = project
     ? [...points.map((p) => ({ x: p.x, y: p.y, faint: true })), ...projected.map((p) => ({ x: p.x, y: p.y }))]
@@ -90,24 +115,31 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     { x1: pca.mx - pca.v1x * 2 * s1, y1: pca.my - pca.v1y * 2 * s1, x2: pca.mx + pca.v1x * 2 * s1, y2: pca.my + pca.v1y * 2 * s1, color: '#fff', width: 2.8 },
     { x1: pca.mx - v2x * 2 * s2, y1: pca.my - v2y * 2 * s2, x2: pca.mx + v2x * 2 * s2, y2: pca.my + v2y * 2 * s2, color: ACCENT, width: 2, dash: true },
   ];
+  // Richer visuals: a 2σ covariance ellipse showing the cloud's shape and orientation.
+  const ellipses: ScatterEllipse[] = [{ cx: pca.mx, cy: pca.my, rx: 2 * s1, ry: 2 * s2, angle: Math.atan2(pca.v1y, pca.v1x), color: ACCENT }];
 
-  const insight = `PC1 explains ${(pca.e1 * 100).toFixed(0)}% of the variance. ` +
-    'Press Run to rotate the cloud and watch PC1 stay locked to its longest axis. Toggle Project to collapse the data onto PC1.';
+  const insight = `PC1 explains ${(pca.e1 * 100).toFixed(0)}% of the variance; keep ${kComp} component${kComp === 1 ? '' : 's'} for the ${(threshold * 100).toFixed(0)}% target. ` +
+    (whiten ? 'Whitening rescales the projection to unit variance — the collapsed cloud is isotropic. '
+      : 'Press Run to rotate the cloud and watch PC1 stay locked to its longest axis. ') +
+    'The green ellipse is the 2σ covariance shape.';
 
   return (
     <LabStage
       descriptor={descriptor}
       running={sim.isPlaying}
+      narration={narration}
       stats={[
         { label: 'PC1', value: `${(pca.e1 * 100).toFixed(0)}%`, color: GOOD },
         { label: 'PC2', value: `${(pca.e2 * 100).toFixed(0)}%` },
+        { label: 'KEEP', value: `${kComp}/2` },
         { label: 'θ', value: `${thetaDeg.toFixed(0)}°` },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, pcaPython())}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, pcaPython(whiten, threshold))}
       grid={(
         <ScatterPlot
           points={plotPoints}
           lines={lines}
+          ellipses={ellipses}
           centroids={[{ x: pca.mx, y: pca.my, color: '#fff' }]}
           xLabel="x₁"
           yLabel="x₂"
@@ -116,9 +148,14 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       algoDock={(
         <>
           <MonoLabel style={{ marginBottom: 11 }}>Projection</MonoLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
             <AlgoPill active={!project} onClick={() => setProject(false)}>Original 2-D</AlgoPill>
             <AlgoPill active={project} onClick={() => setProject(true)}>Project → PC1</AlgoPill>
+          </div>
+          <MonoLabel style={{ marginBottom: 11 }}>Scaling</MonoLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <AlgoPill active={!whiten} onClick={() => { setWhiten(false); setPresetId(undefined); }}>Raw</AlgoPill>
+            <AlgoPill active={whiten} onClick={() => { setWhiten(true); setPresetId(undefined); }}>Whiten</AlgoPill>
           </div>
         </>
       )}
@@ -127,6 +164,7 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         <Legend title="COMPONENTS" items={[
           { node: <span style={{ width: 12, height: 2, background: '#fff', display: 'inline-block' }} />, label: 'PC1' },
           { node: <span style={{ width: 12, height: 2, background: ACCENT, display: 'inline-block' }} />, label: 'PC2' },
+          { node: <span style={{ width: 11, height: 8, border: `1.5px solid ${ACCENT}`, borderRadius: '50%', display: 'inline-block' }} />, label: '2σ shape' },
           { color: 'var(--t2)', label: 'Data' },
         ]} />
       )}
@@ -138,13 +176,16 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       params={(
         <ParamsWrap>
           <ParamsHead title="PCA Controls" hint="Rotate the cloud; watch the components track the variance." />
+          <PresetChips presets={PRESETS} activeId={presetId} onApply={applyPreset} />
+          <ParamSlider name="Variance threshold" value={`${(threshold * 100).toFixed(0)}%`} min={0.5} max={0.99} step={0.01} current={threshold} onChange={(v) => { setThreshold(v); setPresetId(undefined); }} hint="min cumulative variance to keep" />
+          <ParamSlider name="Elongation" value={elong.toFixed(2)} min={0.1} max={0.95} step={0.05} current={elong} onChange={(v) => { setElong(v); setPresetId(undefined); }} hint="how stretched the cloud is" />
           <ParamSlider name="Orientation" value={`${((angle * 180 / Math.PI) % 360).toFixed(0)}°`} min={0} max={6.28} step={0.02} current={angle} onChange={setAngle} hint="rotate the data manually" />
           <ParamSlider name="Points" value={String(count)} min={60} max={320} step={20} current={count} onChange={(v) => { setCount(v); regen(v); }} hint="cloud size" />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={20} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint="rotation interval" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'PCA', explainedPC1: +pca.e1.toFixed(3), thetaDeg: +thetaDeg.toFixed(1), count }}
+      currentParams={{ algorithm: 'PCA', explainedPC1: +pca.e1.toFixed(3), whiten, threshold, keep: kComp, thetaDeg: +thetaDeg.toFixed(1), count }}
       apiPanel={apiPanel}
     />
   );

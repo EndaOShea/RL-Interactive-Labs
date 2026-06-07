@@ -25,10 +25,20 @@ export const FOURIER_CONTENT: LabContent = {
         { label: 'Sine', text: 'A single harmonic (k=1) — the purest tone, one bar in the spectrum.' },
       ],
     },
+    {
+      heading: 'Timbre, Gibbs & the Mel Axis',
+      body: 'The RELATIVE strengths of the harmonics — not the fundamental — give an instrument its timbre: a clarinet leans on odd harmonics, an organ stacks octaves, a bright pulse keeps every partial strong. Truncating the series to a finite K cannot reach a perfect edge, so the reconstruction OVERSHOOTS near jumps (the Gibbs phenomenon) — a fixed ~9% ripple that never disappears, it just narrows. Plotting the bars on a mel axis (mel(f) = 2595·log₁₀(1+f/700)) re-spaces them the way the ear hears: low harmonics spread out, high ones crowd together, previewing the log-mel pooling used by speech front-ends.',
+      details: [
+        { label: 'Timbre', text: 'The amplitude pattern aₖ defines the "voice": odd-only (clarinet), octave stacks (organ), all-strong (buzzy pulse).' },
+        { label: 'Gibbs ripple', text: 'A truncated series overshoots a discontinuity by a fixed fraction; adding harmonics narrows the ripple but never removes it.' },
+        { label: 'Mel warp', text: 'A perceptual, roughly-log frequency axis — the basis of the log-mel features every ASR system consumes.' },
+      ],
+    },
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'Phase carries information too', description: 'This lab fixes the harmonics to sines so the spectrum is just amplitudes, but real signals also carry per-harmonic phase. Two signals with identical |aₖ| but different phases sound and look different.', recommendation: 'When the relative timing of partials matters (transients, stereo imaging), keep the complex spectrum (magnitude AND phase), not just the magnitude bars.' },
     { category: 'DATA', title: 'Finite harmonics band-limit the signal', description: 'A real recording is sampled, so only frequencies below the Nyquist limit survive; truncating harmonics is the same kind of band-limiting and softens sharp edges.', recommendation: 'Choose a sample rate and harmonic count high enough to capture the bandwidth your task needs — speech needs ~8 kHz, music far more.' },
+    { category: 'METHODOLOGY', title: 'Why a mel-warped spectrum', description: 'Equal steps in Hz are not equal steps in perceived pitch; the cochlea resolves low frequencies finely and high ones coarsely. The mel scale linearises perceived pitch, so a handful of mel bands capture what matters for speech.', recommendation: 'For perceptual or speech features pool the linear spectrum into mel bands and log-compress; for exact analysis (tuning, partials) keep the linear |aₖ|.' },
   ],
 };
 
@@ -50,6 +60,17 @@ export const SPECTROGRAM_CONTENT: LabContent = {
         { label: 'Long window', text: 'Sharp frequency bins, poor time resolution — good for sustained tones, bad for fast transients.' },
         { label: 'Short window', text: 'Sharp timing, coarse frequency bins — good for clicks and onsets.' },
         { label: 'Leakage', text: 'A rectangular window’s abrupt edges spread energy across bins; tapered windows suppress this.' },
+      ],
+    },
+    {
+      heading: 'Window Functions & the Mel Front-End',
+      body: 'The taper you multiply each frame by sets a main-lobe / side-lobe tradeoff. A rectangular (boxcar) window has the narrowest main lobe (best raw frequency resolution) but tall side-lobes, so a strong tone leaks energy into neighbouring bins. Hann and Hamming taper the edges to suppress that leakage at the cost of a slightly wider main lobe; Blackman pushes side-lobes down further still. After the DFT, a real front-end POOLS the linear bins through a triangular mel filterbank — Mₘ = Σ_f Hₘ(f)·|X(f)| — so high frequencies share wide bands and the feature vector shrinks to the ~16–80 perceptual bands that carry speech.',
+      details: [
+        { label: 'Rectangular', text: 'Narrowest main lobe, worst leakage — only use when no strong tone can swamp its neighbours.' },
+        { label: 'Hann / Hamming', text: 'Smooth tapers; the workhorse windows that trade a little frequency width for far less leakage.' },
+        { label: 'Blackman', text: 'Very low side-lobes (least leakage) at the cost of the widest main lobe.' },
+        { label: 'Mel pooling', text: 'Triangular filters pool linear bins into perceptual bands — the M in MFCC and log-mel features.' },
+        { label: 'Formants', text: 'A voiced vowel shows steady resonant bands (formants); their pattern is the cue speech models read to tell vowels apart.' },
       ],
     },
   ],

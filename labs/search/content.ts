@@ -22,10 +22,30 @@ export const PATHFINDING_CONTENT: LabContent = {
         { label: 'A*', text: 'Expands lowest g + h. Optimal with an admissible heuristic, far fewer expansions than Dijkstra.' },
       ],
     },
+    {
+      heading: 'Choosing a heuristic',
+      body: 'h(n) must match the movement model to stay admissible (never overestimate). On a 4-connected grid use Manhattan; with diagonals the exact ground truth is octile (or Euclidean as a looser bound). A tighter — but still admissible — heuristic dominates: it expands no more nodes than a weaker one.',
+      details: [
+        { label: 'Manhattan', text: '|Δr| + |Δc|. Exact for 4-directional movement; over-counts when diagonals are allowed.' },
+        { label: 'Euclidean', text: 'Straight-line √(Δr²+Δc²). Always admissible but loose on a grid, so it under-guides A*.' },
+        { label: 'Chebyshev', text: 'max(|Δr|,|Δc|). The move count when a diagonal costs the same as a straight step.' },
+        { label: 'Octile', text: 'max + (√2−1)·min. Exact 8-directional cost when diagonals cost √2 — the tightest grid heuristic.' },
+      ],
+    },
+    {
+      heading: 'Trading optimality for speed',
+      body: 'Weighted A* expands by f(n) = g(n) + ε·h(n) with ε ≥ 1. Inflating h makes the search commit toward the goal sooner, slashing expansions — and the returned path is provably at most ε× the optimal cost. Bi-directional search instead runs two frontiers, one from the start and one from the goal, and stops when they meet near the middle.',
+      details: [
+        { label: 'Weighted A* (ε)', text: 'ε = 1 is plain A*; larger ε = faster, bounded-suboptimal (cost ≤ ε × optimum). Great when "good enough, now" beats "perfect, later".' },
+        { label: 'Bi-directional', text: 'Two half-searches each reach the midpoint, so ~2·b^(d/2) nodes are touched instead of b^d — a large saving on long paths.' },
+        { label: 'IDA*', text: 'Iterative-deepening A*: repeated depth-bounded DFS by f-cost — A*-optimal at DFS memory, useful when the frontier is too big to store.' },
+      ],
+    },
   ],
   lifecycle: [
-    { category: 'METHODOLOGY', title: 'Admissible heuristics', description: 'A* is only guaranteed optimal if h(n) never overestimates the true remaining cost.', recommendation: 'Use Manhattan distance for 4-connected grids, Euclidean (or octile) when diagonals are allowed.' },
-    { category: 'DEPLOYMENT', title: 'Memory vs optimality', description: 'BFS/Dijkstra/A* store the whole frontier and can blow up on large maps; DFS is cheap but suboptimal.', recommendation: 'For huge maps consider IDA*, bidirectional search, or hierarchical pathfinding.' },
+    { category: 'METHODOLOGY', title: 'Admissible heuristics', description: 'A* is only guaranteed optimal if h(n) never overestimates the true remaining cost.', recommendation: 'Use Manhattan for 4-connected grids; octile (exact) or Euclidean (looser) when diagonals are allowed.' },
+    { category: 'METHODOLOGY', title: 'Bounded-suboptimal search', description: 'Weighted A* (ε > 1) breaks the admissibility bound on purpose to expand far fewer nodes.', recommendation: 'Pick the smallest ε that hits your time budget — the path is still guaranteed within ε× of optimal.' },
+    { category: 'DEPLOYMENT', title: 'Memory vs optimality', description: 'BFS/Dijkstra/A* store the whole frontier and can blow up on large maps; DFS is cheap but suboptimal.', recommendation: 'For huge maps consider IDA*, bidirectional search, jump-point search, or hierarchical pathfinding.' },
   ],
 };
 
@@ -48,9 +68,19 @@ export const GRAPH_SEARCH_CONTENT: LabContent = {
         { label: 'A* vs Dijkstra', text: 'Same optimal cost; A* expands fewer nodes thanks to the heuristic.' },
       ],
     },
+    {
+      heading: 'Faster variants',
+      body: 'Weighted A* multiplies h by ε ≥ 1 to commit toward the goal sooner — fewer node expansions, with the cost guaranteed within ε× of optimal. Bi-directional search grows two Dijkstra frontiers, one from S and one from G, and stops the instant they collide; each only has to reach the midpoint.',
+      details: [
+        { label: 'Weighted A* (ε)', text: 'f = g + ε·h. ε = 1.6 typically expands a fraction of A*’s nodes while staying within 60% of optimal cost.' },
+        { label: 'Bi-directional', text: 'Forward and backward fronts meet in the middle; settling ~2·b^(d/2) nodes instead of b^d.' },
+        { label: 'Meeting cost', text: 'When a node is settled by both sides, the candidate path cost is gF(n) + gB(n); the path stitches the two halves.' },
+      ],
+    },
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'Heuristic quality', description: 'A weak heuristic makes A* behave like Dijkstra; an inadmissible one can break optimality.', recommendation: 'Prefer the tightest admissible heuristic you can compute cheaply.' },
+    { category: 'METHODOLOGY', title: 'Bounded-suboptimal search', description: 'Weighted A* (ε > 1) sacrifices a known factor of optimality to expand far fewer nodes.', recommendation: 'Tune ε to your latency budget; the path stays within ε× of the cheapest.' },
     { category: 'VERIFICATION', title: 'Negative weights', description: 'Dijkstra and A* assume non-negative edge weights; negatives break them.', recommendation: 'Use Bellman–Ford (or Johnson’s) when negative weights are possible.' },
   ],
 };

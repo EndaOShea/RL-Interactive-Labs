@@ -12,10 +12,12 @@ export const DTREE_CONTENT: LabContent = {
       ],
     },
     {
-      heading: 'Depth & overfitting',
-      body: 'Shallow trees underfit; very deep trees memorise the training set (every leaf pure) and generalise poorly. The XOR-like data here needs at least two levels — one split can never separate it.',
+      heading: 'Depth, pruning & overfitting',
+      body: 'Shallow trees underfit; very deep trees memorise the training set (every leaf pure) and generalise poorly. The XOR-like data here needs at least two levels — one split can never separate it. Pre-pruning stops growth early; the min-samples-leaf knob in this lab refuses any split that would leave a child with fewer than the set number of points, killing noisy micro-splits before they form.',
       details: [
-        { label: 'Pruning', text: 'Limit depth / min-samples, or prune back, to control overfitting.' },
+        { label: 'Pre-pruning', text: 'Caps that stop growth: max-depth, min-samples-leaf, min impurity decrease.' },
+        { label: 'Post-pruning', text: 'Grow fully, then collapse weak subtrees (cost-complexity α) measured on validation.' },
+        { label: 'Gini vs gain', text: 'Gini and entropy/information-gain usually choose nearly the same splits; entropy is slightly costlier (logs) but more sensitive to small probabilities.' },
         { label: 'Forests', text: 'Averaging many randomised trees (random forest) fixes most of the variance problem.' },
       ],
     },
@@ -43,7 +45,17 @@ export const SVM_CONTENT: LabContent = {
       details: [
         { label: 'Large C', text: 'Fits training data tightly; narrow margin.' },
         { label: 'Small C', text: 'Wider margin, more tolerant of noise.' },
-        { label: 'Kernels', text: 'The kernel trick (not shown) lets SVMs draw curved boundaries.' },
+        { label: 'Hinge', text: 'The soft-margin objective is ½‖w‖² + C·Σ hinge — a convex problem with a unique optimum.' },
+      ],
+    },
+    {
+      heading: 'The kernel trick (poly & RBF)',
+      body: 'When classes are not linearly separable (interlocking moons, concentric rings), an SVM maps the points into a higher-dimensional feature space where a flat hyperplane *does* separate them — then maps the boundary back, where it appears curved. The trick: you never compute the mapping, only inner products K(xᵢ,xⱼ) = φ(xᵢ)·φ(xⱼ). The decision function becomes f(x)=Σᵢ αᵢ K(xᵢ,x)+b, a weighted sum over the support vectors only.',
+      details: [
+        { label: 'Polynomial', text: 'K=(1+xᵢ·x)ᵈ — degree d controls flexibility; d=1 is linear.' },
+        { label: 'RBF / Gaussian', text: 'K=exp(−γ‖xᵢ−x‖²) — an infinite-dimensional feature space. Large γ → tight, wiggly boundaries (overfit risk); small γ → smooth, nearly linear.' },
+        { label: 'C × γ', text: 'C and γ interact: both large memorises the training set; tune them together (grid search + CV).' },
+        { label: 'Sparsity', text: 'Only αᵢ≠0 (the support vectors) appear in f(x), so prediction stays cheap even in the lifted space.' },
       ],
     },
   ],
@@ -70,6 +82,15 @@ export const NB_CONTENT: LabContent = {
       details: [
         { label: 'Diagonal covariance', text: 'Independence ⇒ axis-aligned ellipses (no tilt).' },
         { label: 'Log-space', text: 'Products underflow, so implementations sum log-probabilities.' },
+      ],
+    },
+    {
+      heading: 'Gaussian vs Multinomial',
+      body: 'The likelihood model depends on the feature type. Gaussian NB fits a continuous normal per feature (used here for the raw x/y coordinates → smooth quadratic borders). Multinomial NB models *counts* — bin each axis into discrete cells and learn per-class cell frequencies, giving blocky decision regions. Multinomial NB is the classic text classifier (word counts per document).',
+      details: [
+        { label: 'Gaussian', text: 'Continuous features; likelihood = 𝒩(x; μ_{c,f}, σ²_{c,f}). Quadratic boundaries.' },
+        { label: 'Multinomial', text: 'Discrete counts; likelihood = (count+α)/(N+αB). Blocky boundaries; ideal for bag-of-words.' },
+        { label: 'Laplace α', text: 'Add-α smoothing fixes the zero-count problem: an unseen cell gets a small pseudo-count instead of crushing the posterior to zero. Large α → smoother but blurrier; α→0 → brittle.' },
       ],
     },
   ],

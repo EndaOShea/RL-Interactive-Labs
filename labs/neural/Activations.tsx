@@ -1,32 +1,38 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import FunctionPlot from '../../components/labkit/viz/FunctionPlot';
 import { AlgoPill, RunControls, Legend, MonoLabel } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
+import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { activationsPython } from './python';
 
 const ACCENT = '#2dd4bf';
 const DERIV = '#fbbf24';
-type Fn = 'sigmoid' | 'tanh' | 'relu' | 'leaky' | 'gelu';
+type Fn = 'sigmoid' | 'tanh' | 'relu' | 'leaky' | 'gelu' | 'silu' | 'elu';
 
+const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 const gelu = (x: number) => 0.5 * x * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (x + 0.044715 * x ** 3)));
 const F: Record<Fn, (x: number) => number> = {
-  sigmoid: (x) => 1 / (1 + Math.exp(-x)),
+  sigmoid,
   tanh: (x) => Math.tanh(x),
   relu: (x) => Math.max(0, x),
   leaky: (x) => (x > 0 ? x : 0.1 * x),
   gelu,
+  silu: (x) => x * sigmoid(x),
+  elu: (x) => (x > 0 ? x : Math.exp(x) - 1),
 };
 const D: Record<Fn, (x: number) => number> = {
-  sigmoid: (x) => { const s = F.sigmoid(x); return s * (1 - s); },
+  sigmoid: (x) => { const s = sigmoid(x); return s * (1 - s); },
   tanh: (x) => 1 - Math.tanh(x) ** 2,
   relu: (x) => (x > 0 ? 1 : 0),
   leaky: (x) => (x > 0 ? 1 : 0.1),
   gelu: (x) => (gelu(x + 1e-3) - gelu(x - 1e-3)) / 2e-3,
+  silu: (x) => { const s = sigmoid(x); return s + x * s * (1 - s); },
+  elu: (x) => (x > 0 ? 1 : Math.exp(x)),
 };
 const NOTE: Record<Fn, string> = {
   sigmoid: 'Squashes to (0,1); saturates at both ends → vanishing gradients in deep nets.',
@@ -34,12 +40,23 @@ const NOTE: Record<Fn, string> = {
   relu: 'max(0,x): cheap, non-saturating for x>0, but "dead" units for x<0 (zero gradient).',
   leaky: 'Leaky ReLU keeps a small slope for x<0, avoiding dead units.',
   gelu: 'Smooth, used in Transformers; gates inputs by their value.',
+  silu: 'SiLU / Swish = x·σ(x): smooth, non-monotonic, self-gated (EfficientNet).',
+  elu: 'ELU: smooth negative tail (eˣ−1) pushes mean activations toward zero.',
 };
+const LABEL: Record<Fn, string> = {
+  sigmoid: 'σ(x)=1/(1+e⁻ˣ)', tanh: 'f(x)=tanh(x)', relu: 'f(x)=max(0,x)', leaky: 'f(x)=x>0?x:0.1x',
+  gelu: 'GELU(x)=x·Φ(x)', silu: 'SiLU(x)=x·σ(x)', elu: 'ELU(x)=x>0?x:eˣ−1',
+};
+const ALL: Fn[] = ['sigmoid', 'tanh', 'relu', 'leaky', 'gelu', 'silu', 'elu'];
+const PALETTE = ['#2dd4bf', '#38bdf8', '#fbbf24', '#f87171', '#a78bfa', '#34d399', '#fb7185'];
 
 const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [fn, setFn] = useState<Fn>('relu');
+  const [overlay, setOverlay] = useState(false);
   const [qx, setQx] = useState(-5);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const narration = useNarration();
+  const prevHealthyRef = useRef<boolean | null>(null);
 
   const data = useMemo(() => {
     const N = 121, lo = -5, hi = 5;
@@ -50,39 +67,72 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     return { fpts, dpts, range: [mn - pad, mx + pad] as [number, number] };
   }, [fn]);
 
+  // overlay: every activation's curve at once, shared range
+  const overlayData = useMemo(() => {
+    if (!overlay) return null;
+    const N = 121, lo = -5, hi = 5;
+    let mn = Infinity, mx = -Infinity;
+    const series = ALL.map((f) => {
+      const pts = [];
+      for (let i = 0; i < N; i++) { const x = lo + (i / (N - 1)) * (hi - lo); const y = F[f](x); pts.push({ x, y }); mn = Math.min(mn, y); mx = Math.max(mx, y); }
+      return pts;
+    });
+    const pad = (mx - mn) * 0.08 || 0.1;
+    return { series, range: [mn - pad, mx + pad] as [number, number] };
+  }, [overlay]);
+
   const step = () => {
     const nx = qx >= 5 ? -5 : Math.min(5, qx + 0.25);
     setQx(nx);
+    const grad = D[fn](nx);
+    const healthy = Math.abs(grad) >= 0.05;
+    // narrate gradient-health transitions and the saturated tails
+    if (prevHealthyRef.current !== null && healthy !== prevHealthyRef.current) {
+      narration.narrate(healthy
+        ? `Gradient wakes up near x ${nx.toFixed(1)}, slope ${grad.toFixed(2)}.`
+        : `Gradient flattens near x ${nx.toFixed(1)} — this neuron would stall here.`);
+    } else if (Math.abs(nx) >= 4.9) {
+      narration.narrate(`At the ${nx > 0 ? 'right' : 'left'} tail, slope ${grad.toFixed(2)}.`);
+    }
+    prevHealthyRef.current = healthy;
     setLastLog({
       algorithm: `Activation · ${fn}`,
       stepDescription: 'Evaluate the activation and its gradient',
-      formula: fn === 'relu' ? 'f(x)=max(0,x)' : fn === 'sigmoid' ? 'σ(x)=1/(1+e⁻ˣ)' : fn === 'tanh' ? 'f(x)=tanh(x)' : fn === 'leaky' ? 'f(x)=x>0?x:0.1x' : 'GELU(x)=x·Φ(x)',
-      variables: { 'x': nx, 'f(x)': F[fn](nx), "f'(x)": D[fn](nx) },
-      result: `f'(${nx.toFixed(1)}) = ${D[fn](nx).toFixed(3)}`,
+      formula: LABEL[fn],
+      variables: { 'x': +nx.toFixed(2), 'f(x)': +F[fn](nx).toFixed(3), "f'(x)": +grad.toFixed(3) },
+      result: `f'(${nx.toFixed(1)}) = ${grad.toFixed(3)}`,
       mathDetails: {
         params: [
           { label: 'gradient', info: "f'(x) (gold) is what backprop multiplies by — near-zero regions stall learning." },
           { label: fn, info: NOTE[fn] },
+          { label: 'self-gated', info: (fn === 'silu' || fn === 'gelu') ? 'SiLU/GELU multiply the input by a soft gate, so the curve dips below 0 then rises — smoother optimisation landscape.' : 'Piecewise/saturating activations have flat regions where the gradient dies.' },
         ],
-        implication: Math.abs(D[fn](nx)) < 0.05 ? 'Gradient ≈ 0 here — a neuron stuck in this region learns very slowly.' : 'Healthy gradient — weights feeding this neuron update well.',
+        implication: !healthy ? 'Gradient ≈ 0 here — a neuron stuck in this region learns very slowly.' : 'Healthy gradient — weights feeding this neuron update well.',
       },
     });
   };
   const sim = useSimLoop(step, { initialSpeed: 60 });
-  const reset = () => { sim.stop(); setQx(-5); setLastLog(null); };
+  const reset = () => { sim.stop(); narration.cancel(); prevHealthyRef.current = null; setQx(-5); setLastLog(null); };
 
   return (
     <LabStage
       descriptor={descriptor}
       running={sim.isPlaying}
+      narration={narration}
       stats={[
-        { label: 'FN', value: fn, color: ACCENT },
+        { label: 'FN', value: overlay ? 'overlay' : fn, color: ACCENT },
         { label: 'x', value: qx.toFixed(2) },
         { label: 'f(x)', value: F[fn](qx).toFixed(3) },
         { label: "f'(x)", value: D[fn](qx).toFixed(3), color: DERIV },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, activationsPython(fn))}
-      grid={(
+      grid={overlay && overlayData ? (
+        <FunctionPlot
+          width={560} height={440} domain={[-5, 5]} range={overlayData.range}
+          series={overlayData.series.map((pts, i) => ({ points: pts, color: PALETTE[i], width: fn === ALL[i] ? 3 : 1.6 }))}
+          xLabel="x" yLabel="f(x)"
+        />
+      ) : (
         <FunctionPlot
           width={560} height={440} domain={[-5, 5]} range={data.range}
           series={[{ points: data.fpts, color: ACCENT, width: 2.6 }, { points: data.dpts, color: DERIV, width: 1.8, dash: true }]}
@@ -91,30 +141,41 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
         />
       )}
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
-      legend={(
+      legend={overlay ? (
+        <Legend title="ACTIVATIONS" items={ALL.map((f, i) => ({ color: PALETTE[i], label: f }))} />
+      ) : (
         <Legend title="CURVES" items={[
           { color: ACCENT, label: 'f(x)' },
           { color: DERIV, label: "f'(x) (gradient)" },
         ]} />
       )}
       lastLog={lastLog}
-      contextInsight={`${fn}: ${NOTE[fn]} The derivative (gold) is the signal backprop propagates — activations that saturate (flat regions) cause vanishing gradients, which is why ReLU-family functions dominate deep nets.`}
+      contextInsight={`${fn}: ${NOTE[fn]} The derivative (gold) is the signal backprop propagates — activations that saturate (flat regions) cause vanishing gradients, which is why ReLU-family functions dominate deep nets. Toggle "overlay all" to compare every curve at once.`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Activation Functions" hint="The non-linearity that makes nets expressive." />
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Function</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {(['sigmoid', 'tanh', 'relu', 'leaky', 'gelu'] as Fn[]).map((f) => (
-                <AlgoPill key={f} active={fn === f} accent={ACCENT} onClick={() => { setFn(f); reset(); }}>{f}</AlgoPill>
+              {ALL.map((f) => (
+                <AlgoPill key={f} active={fn === f && !overlay} accent={ACCENT} onClick={() => { setFn(f); setOverlay(false); reset(); }}>{f}</AlgoPill>
               ))}
+            </div>
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>View · try this</MonoLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <AlgoPill active={overlay} accent={ACCENT} onClick={() => { setOverlay((v) => !v); reset(); }}>overlay all curves</AlgoPill>
+              <AlgoPill accent={ACCENT} onClick={() => { setFn('sigmoid'); setOverlay(false); reset(); }}>see saturation (sigmoid tails)</AlgoPill>
+              <AlgoPill accent={ACCENT} onClick={() => { setFn('relu'); setOverlay(false); reset(); }}>see a dead zone (ReLU x&lt;0)</AlgoPill>
+              <AlgoPill accent={ACCENT} onClick={() => { setFn('silu'); setOverlay(false); reset(); }}>see a self-gated dip (SiLU)</AlgoPill>
             </div>
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>Run sweeps x to trace the gradient.</div>
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ topic: 'Activation functions', activation: fn, x: +qx.toFixed(2), grad: +D[fn](qx).toFixed(3) }}
+      currentParams={{ topic: 'Activation functions', activation: fn, overlay, x: +qx.toFixed(2), grad: +D[fn](qx).toFixed(3) }}
       apiPanel={apiPanel}
     />
   );

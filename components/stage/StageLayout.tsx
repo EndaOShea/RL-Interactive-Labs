@@ -6,8 +6,9 @@ import React, { useState } from 'react';
 import { ModuleId, SimulationUpdate, AITutorProps } from '../../types';
 import { MODULE_CONTENT, LIFECYCLE_CONTEXTS } from '../../constants';
 import {
-  SBGlass, SBTab, LED, Sparkline, MonoLabel, CodeBadge, sbBtn, GOOD, MathTicker,
+  SBGlass, SBTab, LED, Sparkline, MonoLabel, CodeBadge, sbBtn, GOOD, MathTicker, NarrationToggle,
 } from './primitives';
+import type { NarrationControl } from '../../hooks/useNarration';
 
 /* ─────────────────────────── icon-rail nav ─────────────────────────── */
 const NAV: { id: ModuleId; d: string; label: string }[] = [
@@ -251,6 +252,8 @@ export interface StageLayoutProps {
   algoDock?: React.ReactNode;
   controls: React.ReactNode;
   legend?: React.ReactNode;
+  /** Optional spoken-narration control (from useNarration); shows a stage toggle. */
+  narration?: NarrationControl;
 
   rewardLabel?: string;
   rewardValue?: number | string;
@@ -329,6 +332,9 @@ const StageLayout: React.FC<StageLayoutProps> = (p) => {
 
           {/* legend bottom-right */}
           {p.legend && <div style={{ position: 'absolute', bottom: 56, right: 24, zIndex: 6 }}>{p.legend}</div>}
+
+          {/* narration toggle bottom-left */}
+          {p.narration && <div style={{ position: 'absolute', bottom: 56, left: 24, zIndex: 6 }}><NarrationToggle ctrl={p.narration} showRate /></div>}
 
           {/* math ticker bottom */}
           <MathTickerSlot lastLog={p.lastLog} />

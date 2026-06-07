@@ -2,6 +2,7 @@
 // + the glass/tab/button helpers from design/lib/stageB.jsx. Shared by StageLayout
 // and every lab so the whole app speaks one visual language.
 import React, { useMemo } from 'react';
+import type { NarrationControl } from '../../hooks/useNarration';
 
 export const ACC = '#a855f7';
 export const GOOD = '#34d399';
@@ -222,6 +223,44 @@ export const RunControls: React.FC<{
     )}
   </SBGlass>
 );
+
+/* ---------- spoken-narration toggle (stage glass button) ---------- */
+// Flips useNarration on/off. Renders nothing when the browser lacks the Web
+// Speech API, so labs can drop it in unconditionally. An optional rate slider
+// appears in the expanded state for pacing the voice.
+export const NarrationToggle: React.FC<{ ctrl: NarrationControl; showRate?: boolean }> = ({ ctrl, showRate }) => {
+  if (!ctrl.supported) return null;
+  return (
+    <SBGlass style={{ padding: 7, display: 'flex', gap: 8, alignItems: 'center' }}>
+      <button
+        onClick={ctrl.toggle}
+        className="sb-btn"
+        title="Spoken narration of what's happening on the stage"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: 'var(--mono)', fontSize: 11.5,
+          padding: '7px 12px', borderRadius: 9, cursor: 'pointer', letterSpacing: '.02em',
+          border: `1px solid ${ctrl.enabled ? 'var(--acc)' : 'var(--border)'}`,
+          background: ctrl.enabled ? 'color-mix(in srgb, var(--acc) 22%, transparent)' : 'rgba(20,26,44,.6)',
+          color: ctrl.enabled ? 'var(--t0)' : 'var(--t1)',
+          boxShadow: ctrl.enabled ? '0 0 16px -4px var(--acc)' : 'none', whiteSpace: 'nowrap',
+        }}
+      >
+        <span style={{ fontSize: 13 }}>{ctrl.enabled ? '🔊' : '🔇'}</span>
+        {ctrl.enabled ? 'Narrating' : 'Narrate'}
+      </button>
+      {showRate && ctrl.enabled && (
+        <>
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)' }}>{ctrl.rate.toFixed(2)}×</span>
+          <input
+            type="range" className="stage-range" min={0.6} max={1.6} step={0.05} value={ctrl.rate}
+            onChange={(e) => ctrl.setRate(Number(e.target.value))}
+            style={{ width: 66, accentColor: ACC }}
+          />
+        </>
+      )}
+    </SBGlass>
+  );
+};
 
 /* ---------- live-math ticker (one-liner along the stage floor) ---------- */
 export const MathTicker: React.FC<{ formula?: string; result?: string; delta?: string }> = ({ formula, result, delta }) => (

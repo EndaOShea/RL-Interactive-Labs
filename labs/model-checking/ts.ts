@@ -23,7 +23,11 @@ export interface ExploreResult {
   trace: (k: string) => string[];
 }
 
-export function explore<S>(ts: TS<S>, max = 400): ExploreResult {
+/** Search strategy for the reachability walk: breadth-first (shortest traces)
+ * or depth-first (dives deep first — finds longer counterexamples/solutions). */
+export type SearchMode = 'bfs' | 'dfs';
+
+export function explore<S>(ts: TS<S>, max = 400, mode: SearchMode = 'bfs'): ExploreResult {
   const order: string[] = [];
   const nodes = new Map<string, { label: string; bad: boolean; goal: boolean }>();
   const edges: { from: string; to: string }[] = [];
@@ -37,15 +41,18 @@ export function explore<S>(ts: TS<S>, max = 400): ExploreResult {
   seen.add(k0); dist.set(k0, 0); nodes.set(k0, info(ts.init)); order.push(k0);
   if (nodes.get(k0)!.bad) badKey = k0;
   if (nodes.get(k0)!.goal) goalKey = k0;
-  const queue: S[] = [ts.init];
 
-  for (let qi = 0; qi < queue.length && nodes.size < max; qi++) {
-    const s = queue[qi]; const ks = ts.key(s);
+  // BFS uses a FIFO queue (pop front); DFS uses a LIFO stack (pop back). Both
+  // record discovery order, edges, distances and parent pointers identically.
+  const frontier: S[] = [ts.init];
+  while (frontier.length > 0 && nodes.size < max) {
+    const s = mode === 'bfs' ? frontier.shift()! : frontier.pop()!;
+    const ks = ts.key(s);
     if (nodes.get(ks)!.bad) continue; // don't expand unsafe states
     for (const t of ts.next(s)) {
       const kt = ts.key(t);
       if (!seen.has(kt)) {
-        seen.add(kt); dist.set(kt, dist.get(ks)! + 1); parent.set(kt, ks); nodes.set(kt, info(t)); order.push(kt); queue.push(t);
+        seen.add(kt); dist.set(kt, dist.get(ks)! + 1); parent.set(kt, ks); nodes.set(kt, info(t)); order.push(kt); frontier.push(t);
         if (nodes.get(kt)!.bad && !badKey) badKey = kt;
         if (nodes.get(kt)!.goal && !goalKey) goalKey = kt;
       }

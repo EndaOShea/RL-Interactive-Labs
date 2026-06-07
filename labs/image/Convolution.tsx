@@ -7,13 +7,15 @@ import { AlgoPill, ParamSlider, RunControls, MonoLabel } from '../../components/
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { useNarration } from '../../hooks/useNarration';
 import { convPython } from './python';
 
 const ACCENT = '#60a5fa';
 const N = 14; // image side
 
 type ImgPreset = 'cross' | 'diagonal' | 'circle';
-type KernelName = 'identity' | 'edge-detect' | 'sharpen' | 'box-blur' | 'sobel-x' | 'sobel-y' | 'emboss';
+type KernelName = 'identity' | 'edge-detect' | 'sharpen' | 'box-blur' | 'sobel-x' | 'sobel-y' | 'emboss' | 'laplacian' | 'gaussian-blur';
+type PadMode = 'zero' | 'replicate' | 'reflect';
 
 const KERNELS: Record<KernelName, number[][]> = {
   identity: [[0, 0, 0], [0, 1, 0], [0, 0, 0]],
@@ -23,9 +25,34 @@ const KERNELS: Record<KernelName, number[][]> = {
   'sobel-x': [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
   'sobel-y': [[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
   emboss: [[-2, -1, 0], [-1, 1, 1], [0, 1, 2]],
+  laplacian: [[0, 1, 0], [1, -4, 1], [0, 1, 0]],
+  'gaussian-blur': [[1 / 16, 2 / 16, 1 / 16], [2 / 16, 4 / 16, 2 / 16], [1 / 16, 2 / 16, 1 / 16]],
 };
 
-const KERNEL_NAMES: KernelName[] = ['identity', 'edge-detect', 'sharpen', 'box-blur', 'sobel-x', 'sobel-y', 'emboss'];
+const KERNEL_NAMES: KernelName[] = ['identity', 'edge-detect', 'sharpen', 'box-blur', 'sobel-x', 'sobel-y', 'emboss', 'laplacian', 'gaussian-blur'];
+
+// Plain-English blurb per kernel for narration variety.
+const KERNEL_DESC: Record<KernelName, string> = {
+  identity: 'identity filter, image unchanged',
+  'edge-detect': 'Laplacian edge detector lighting up boundaries',
+  sharpen: 'sharpen filter boosting the centre over its neighbours',
+  'box-blur': 'box blur averaging each neighbourhood',
+  'sobel-x': 'Sobel-X picking out vertical edges',
+  'sobel-y': 'Sobel-Y picking out horizontal edges',
+  emboss: 'emboss filter giving a directional relief',
+  laplacian: 'Laplacian second-derivative, fires on curvature',
+  'gaussian-blur': 'Gaussian blur, weighted smoothing',
+};
+
+// Curated presets: image + kernel + padding + stride, surfaced as chips.
+interface Preset { name: string; preset: ImgPreset; kernel: KernelName; pad: PadMode; stride: number; tip: string; }
+const PRESETS: Preset[] = [
+  { name: 'Edge hunt', preset: 'circle', kernel: 'edge-detect', pad: 'zero', stride: 1, tip: 'Watch only the ring boundary survive.' },
+  { name: 'Vertical strokes', preset: 'cross', kernel: 'sobel-x', pad: 'zero', stride: 1, tip: 'Sobel-X fires on the vertical bar, ignores the horizontal.' },
+  { name: 'Soften', preset: 'diagonal', kernel: 'gaussian-blur', pad: 'reflect', stride: 1, tip: 'Reflect padding avoids dark borders while blurring.' },
+  { name: 'Stride-2 downsample', preset: 'cross', kernel: 'edge-detect', pad: 'zero', stride: 2, tip: 'Stride 2 halves the output — a cheap 7×7 feature map.' },
+  { name: 'Curvature', preset: 'circle', kernel: 'laplacian', pad: 'replicate', stride: 1, tip: 'Laplacian peaks where the ring bends most.' },
+];
 
 function makeImage(preset: ImgPreset): number[][] {
   const img = Array.from({ length: N }, () => Array<number>(N).fill(0));
@@ -44,19 +71,37 @@ function makeImage(preset: ImgPreset): number[][] {
   return img;
 }
 
-/** Single output pixel at (i,j) via zero-padded 3×3 cross-correlation. */
-function convAt(img: number[][], k: number[][], i: number, j: number): number {
+/** Read a padded pixel under the chosen border mode (P=1 here). */
+function padRead(img: number[][], r: number, c: number, pad: PadMode): number {
+  if (r >= 0 && r < N && c >= 0 && c < N) return img[r][c];
+  if (pad === 'zero') return 0;
+  if (pad === 'replicate') { // clamp to nearest edge
+    const rr = Math.max(0, Math.min(N - 1, r)), cc = Math.max(0, Math.min(N - 1, c));
+    return img[rr][cc];
+  }
+  // reflect (mirror without repeating the edge): -1 -> 1, N -> N-2
+  const refl = (x: number) => (x < 0 ? -x : x >= N ? 2 * (N - 1) - x : x);
+  return img[refl(r)][refl(c)];
+}
+
+/** Single output pixel: 3×3 cross-correlation centred at input (ci,cj). */
+function convAt(img: number[][], k: number[][], ci: number, cj: number, pad: PadMode): number {
   let s = 0;
   for (let m = -1; m <= 1; m++) for (let n = -1; n <= 1; n++) {
-    const r = i + m, c = j + n;
-    const v = r >= 0 && r < N && c >= 0 && c < N ? img[r][c] : 0;
-    s += v * k[m + 1][n + 1];
+    s += padRead(img, ci + m, cj + n, pad) * k[m + 1][n + 1];
   }
   return s;
 }
 
-function fullConv(img: number[][], k: number[][]): number[][] {
-  return Array.from({ length: N }, (_, i) => Array.from({ length: N }, (_, j) => convAt(img, k, i, j)));
+/** Output side length for "same"-style P=1, kernel F=3, this stride. */
+const outSide = (stride: number) => Math.floor((N - 3 + 2) / stride) + 1;
+
+/** Full feature map at the given stride/padding. Output cell (oi,oj) maps to
+ *  input centre (oi*stride, oj*stride). */
+function fullConv(img: number[][], k: number[][], pad: PadMode, stride: number): number[][] {
+  const O = outSide(stride);
+  return Array.from({ length: O }, (_, oi) =>
+    Array.from({ length: O }, (_, oj) => convAt(img, k, oi * stride, oj * stride, pad)));
 }
 
 /** Normalise a matrix to [0,1] for grayscale display. */
@@ -70,25 +115,31 @@ function normalise(m: number[][]): number[][] {
 const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [preset, setPreset] = useState<ImgPreset>('cross');
   const [kernelName, setKernelName] = useState<KernelName>('edge-detect');
-  const [pos, setPos] = useState(0); // sweep index 0..N*N (N*N = done)
+  const [pad, setPad] = useState<PadMode>('zero');
+  const [stride, setStride] = useState(1);
+  const [pos, setPos] = useState(0); // sweep index 0..OH*OW (OH*OW = done)
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const narration = useNarration();
 
   const image = useMemo(() => makeImage(preset), [preset]);
   const kernel = KERNELS[kernelName];
-  const full = useMemo(() => fullConv(image, kernel), [image, kernel]);
+  const O = outSide(stride);
+  const TOTAL = O * O;
+  const full = useMemo(() => fullConv(image, kernel, pad, stride), [image, kernel, pad, stride]);
   const fullNorm = useMemo(() => normalise(full), [full]);
 
-  // Partial output: only cells already swept are filled; rest shown as 0.5 (mid-gray placeholder via separate matrix).
-  const done = pos >= N * N;
+  // Partial output: only cells already swept are filled.
+  const done = pos >= TOTAL;
   const outDisplay = useMemo(() => {
     if (done) return fullNorm;
-    const m = Array.from({ length: N }, () => Array<number>(N).fill(0));
-    for (let p = 0; p < pos; p++) { const i = Math.floor(p / N), j = p % N; m[i][j] = fullNorm[i][j]; }
+    const m = Array.from({ length: O }, () => Array<number>(O).fill(0));
+    for (let p = 0; p < pos; p++) { const i = Math.floor(p / O), j = p % O; m[i][j] = fullNorm[i][j]; }
     return m;
-  }, [pos, fullNorm, done]);
+  }, [pos, fullNorm, done, O]);
 
-  const curI = done ? N - 1 : Math.floor(pos / N);
-  const curJ = done ? N - 1 : pos % N;
+  const curOI = done ? O - 1 : Math.floor(pos / O);
+  const curOJ = done ? O - 1 : pos % O;
+  const curI = curOI * stride, curJ = curOJ * stride; // input centre of the receptive field
 
   // Input with the current 3×3 receptive field tinted (boost cells in window).
   const inputDisplay = useMemo(() => {
@@ -99,34 +150,57 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     }));
   }, [image, curI, curJ, done]);
 
+  // Peak activation so far (a "hotspot" the narration can call out).
+  const hotspot = useMemo(() => {
+    let best = -Infinity, bi = 0, bj = 0;
+    const lim = done ? TOTAL : pos;
+    for (let p = 0; p < lim; p++) { const i = Math.floor(p / O), j = p % O; if (full[i][j] > best) { best = full[i][j]; bi = i; bj = j; } }
+    return { v: best, i: bi, j: bj };
+  }, [pos, full, done, O, TOTAL]);
+
   const step = () => {
-    if (pos >= N * N) { sim.pause(); return; }
-    const i = Math.floor(pos / N), j = pos % N;
+    if (pos >= TOTAL) { sim.pause(); return; }
+    const i = curOI, j = curOJ;
     const val = full[i][j];
-    setPos((p) => p + 1);
+    const nextPos = pos + 1;
+    setPos(nextPos);
+    if (nextPos >= TOTAL) {
+      narration.narrate(`Sweep complete. ${KERNEL_DESC[kernelName]}. Peak response ${hotspot.v.toFixed(2)} at output ${hotspot.i}, ${hotspot.j}.`, { interrupt: true });
+    } else if (Math.abs(val) > 0.85 * Math.max(0.01, Math.abs(hotspot.v))) {
+      narration.narrate(`Strong activation ${val.toFixed(2)} at pixel ${i}, ${j}.`);
+    } else {
+      narration.narrate(`Filtering pixel ${i}, ${j}, response ${val.toFixed(2)}.`);
+    }
     setLastLog({
       algorithm: `Convolution · ${kernelName}`,
-      stepDescription: `Slide the 3×3 kernel to output pixel (${i},${j}) and sum the weighted receptive field`,
-      formula: '(I∗K)(i,j) = ΣΣ I(i+m,j+n)·K(m,n)',
-      variables: { 'i': i, 'j': j, '(I∗K)': +val.toFixed(3), 'progress': `${pos + 1}/${N * N}` },
+      stepDescription: `Slide the 3×3 kernel to output pixel (${i},${j}) — input centre (${i * stride},${j * stride}) — and sum the weighted receptive field`,
+      formula: '(I∗K)(i,j) = ΣΣ I(s·i+m, s·j+n)·K(m,n)',
+      variables: { 'i': i, 'j': j, '(I∗K)': +val.toFixed(3), 'stride': stride, 'pad': pad, 'progress': `${nextPos}/${TOTAL}` },
       result: `out(${i},${j}) = ${val.toFixed(3)}`,
       mathDetails: {
         params: [
-          { label: 'kernel', info: `${kernelName}. The 3×3 weights decide which feature is detected (edges, blur, sharpen…).` },
-          { label: 'zero-pad', info: 'Off-image pixels are treated as 0, so the output stays the same size as the input (P=1, S=1).' },
-          { label: 'output size', info: '⌊(W−F+2P)/S⌋+1 = ⌊(14−3+2)/1⌋+1 = 14 — "same" convolution.' },
+          { label: 'kernel', info: `${kernelName}. The 3×3 weights decide which feature is detected (edges, blur, sharpen, curvature…).` },
+          { label: 'padding', info: pad === 'zero' ? 'Zero-pad: off-image pixels are 0 (can darken borders for blur kernels).' : pad === 'replicate' ? 'Replicate: the nearest edge pixel is repeated outward — no dark halo.' : 'Reflect: the image is mirrored across its edge — smoothest border, no repeated edge line.' },
+          { label: 'stride', info: stride === 1 ? 'Stride 1 visits every position — "same" size output.' : `Stride ${stride} jumps ${stride} pixels per step, downsampling the map.` },
+          { label: 'output size', info: `⌊(W−F+2P)/S⌋+1 = ⌊(${N}−3+2)/${stride}⌋+1 = ${O} → ${O}×${O} feature map.` },
         ],
-        implication: pos + 1 >= N * N ? 'Sweep complete — the full feature map is shown on the right.' : 'Each output pixel sees only a local 3×3 patch — its receptive field.',
+        implication: nextPos >= TOTAL ? `Sweep complete — peak response ${hotspot.v.toFixed(2)} marks where "${kernelName}" matched best.` : 'Each output pixel sees only a local 3×3 patch — its receptive field.',
       },
     });
   };
 
   const sim = useSimLoop(step, { initialSpeed: 60 });
-  const reset = () => { sim.stop(); setPos(0); setLastLog(null); };
-  const changePreset = (p: ImgPreset) => { sim.stop(); setPreset(p); setPos(0); setLastLog(null); };
-  const changeKernel = (k: KernelName) => { sim.stop(); setKernelName(k); setPos(0); setLastLog(null); };
+  const resetSweep = () => { setPos(0); setLastLog(null); narration.cancel(); };
+  const reset = () => { sim.stop(); resetSweep(); };
+  const changePreset = (p: ImgPreset) => { sim.stop(); setPreset(p); resetSweep(); };
+  const changeKernel = (k: KernelName) => { sim.stop(); setKernelName(k); resetSweep(); };
+  const changePad = (p: PadMode) => { sim.stop(); setPad(p); resetSweep(); };
+  const changeStride = (s: number) => { sim.stop(); setStride(s); resetSweep(); };
+  const applyPreset = (p: Preset) => {
+    sim.stop(); setPreset(p.preset); setKernelName(p.kernel); setPad(p.pad); setStride(p.stride); resetSweep();
+  };
 
-  const progressPct = Math.round((Math.min(pos, N * N) / (N * N)) * 100);
+  const progressPct = Math.round((Math.min(pos, TOTAL) / TOTAL) * 100);
 
   return (
     <LabStage
@@ -134,10 +208,12 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       running={sim.isPlaying}
       stats={[
         { label: 'KERNEL', value: kernelName, color: ACCENT },
-        { label: 'IMAGE', value: preset },
+        { label: 'OUT', value: `${O}×${O}` },
+        { label: 'STRIDE', value: `${stride}` },
         { label: 'PROGRESS', value: `${progressPct}%` },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, convPython(kernelName))}
+      narration={narration}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, convPython(kernelName, pad, stride))}
       grid={(
         <div style={{ display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
           <div style={{ textAlign: 'center' }}>
@@ -150,8 +226,11 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
             <div style={{ fontFamily: 'var(--mono)', fontSize: 18, color: 'var(--t2)', marginTop: 14 }}>∗ →</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <MonoLabel style={{ marginBottom: 8, display: 'block' }}>OUTPUT · I∗K</MonoLabel>
-            <Heatmap matrix={outDisplay} mode="gray" cell={18} gap={1} min={0} max={1} accent={ACCENT} />
+            <MonoLabel style={{ marginBottom: 8, display: 'block' }}>OUTPUT · I∗K {stride > 1 ? `↓${stride}` : ''}</MonoLabel>
+            <Heatmap matrix={outDisplay} mode="gray" cell={Math.round(18 * (14 / O))} gap={1} min={0} max={1} accent={ACCENT} />
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)', marginTop: 8 }}>
+              {pos > 0 ? `peak ${hotspot.v.toFixed(2)} @ (${hotspot.i},${hotspot.j})` : `${O}×${O} feature map`}
+            </div>
           </div>
         </div>
       )}
@@ -168,10 +247,21 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
       legend={undefined}
       lastLog={lastLog}
-      contextInsight={`The ${kernelName} kernel slides over the ${preset}. Edge kernels light up intensity changes; blur averages; sharpen amplifies the centre. Watch the output fill cell-by-cell — each pixel is one weighted sum over a local 3×3 patch (zero-padded, stride 1).`}
+      contextInsight={`The ${kernelName} kernel slides over the ${preset} with ${pad} padding at stride ${stride}, producing a ${O}×${O} map. Edge/Laplacian kernels light up intensity changes; blur averages; sharpen amplifies the centre. Watch the output fill cell-by-cell — each pixel is one weighted sum over a local 3×3 patch.`}
       params={(
         <ParamsWrap>
-          <ParamsHead title="Convolution" hint="Choose an image and a 3×3 kernel; Run sweeps the window." />
+          <ParamsHead title="Convolution" hint="Choose an image, kernel, padding and stride; Run sweeps the window." />
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Presets · try this</MonoLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {PRESETS.map((p) => (
+                <AlgoPill key={p.name} active={preset === p.preset && kernelName === p.kernel && pad === p.pad && stride === p.stride} accent={ACCENT} onClick={() => applyPreset(p)}>{p.name}</AlgoPill>
+              ))}
+            </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '7px 0 0', lineHeight: 1.45 }}>
+              {PRESETS.find((p) => preset === p.preset && kernelName === p.kernel && pad === p.pad && stride === p.stride)?.tip ?? 'Pick a preset or mix your own kernel · padding · stride.'}
+            </p>
+          </div>
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Image preset</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
@@ -180,11 +270,27 @@ const ConvolutionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
               ))}
             </div>
           </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Padding · border</MonoLabel>
+            <div style={{ display: 'flex', gap: 7 }}>
+              {(['zero', 'replicate', 'reflect'] as PadMode[]).map((p) => (
+                <AlgoPill key={p} active={pad === p} accent={ACCENT} onClick={() => changePad(p)}>{p}</AlgoPill>
+              ))}
+            </div>
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Stride · downsample</MonoLabel>
+            <div style={{ display: 'flex', gap: 7 }}>
+              {[1, 2].map((s) => (
+                <AlgoPill key={s} active={stride === s} accent={ACCENT} onClick={() => changeStride(s)}>{`s=${s} → ${outSide(s)}²`}</AlgoPill>
+              ))}
+            </div>
+          </div>
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={10} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint="one output pixel / tick" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'Convolution', kernel: kernelName, image: preset, padding: 'zero (same)', stride: 1, size: `${N}x${N}` }}
+      currentParams={{ algorithm: 'Convolution', kernel: kernelName, image: preset, padding: pad, stride, output: `${O}x${O}` }}
       apiPanel={apiPanel}
     />
   );

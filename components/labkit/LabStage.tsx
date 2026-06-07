@@ -10,8 +10,9 @@ import { SimulationUpdate } from '../../types';
 import { LabDescriptor, StatChip, TutorState } from '../../catalog/types';
 import { APP_NAME, CATEGORIES } from '../../catalog/registry';
 import {
-  SBGlass, SBTab, LED, Sparkline, MonoLabel, CodeBadge, GOOD, MathTicker, ACC,
+  SBGlass, SBTab, LED, Sparkline, MonoLabel, CodeBadge, GOOD, MathTicker, ACC, NarrationToggle,
 } from '../stage/primitives';
+import type { NarrationControl } from '../../hooks/useNarration';
 import { LiveMath } from '../stage/StageLayout';
 import LabNav from './LabNav';
 import LabContext from './LabContext';
@@ -32,6 +33,8 @@ export interface LabStageProps {
   algoDock?: React.ReactNode;
   controls: React.ReactNode;
   legend?: React.ReactNode;
+  /** Optional spoken-narration control (from useNarration); shows a stage toggle. */
+  narration?: NarrationControl;
 
   rewardLabel?: string;
   rewardValue?: number | string;
@@ -110,6 +113,9 @@ const LabStage: React.FC<LabStageProps> = (p) => {
 
           {/* legend bottom-right */}
           {p.legend && <div style={{ position: 'absolute', bottom: 56, right: 24, zIndex: 6 }}>{p.legend}</div>}
+
+          {/* narration toggle bottom-left */}
+          {p.narration && <div style={{ position: 'absolute', bottom: 56, left: 24, zIndex: 6 }}><NarrationToggle ctrl={p.narration} showRate /></div>}
 
           {/* math ticker bottom */}
           {p.lastLog ? <MathTicker formula={p.lastLog.formula} result={p.lastLog.result} /> : <MathTicker />}
