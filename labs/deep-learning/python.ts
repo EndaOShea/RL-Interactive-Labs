@@ -127,7 +127,7 @@ export const architectureBuilderPython = (mode: Mode, input: Shape, layers: Laye
       }
       case 'dropout': return `    layers.Dropout(${l.rate}),`;
       case 'batchnorm': return '    layers.BatchNormalization(),';
-      default: return '';
+      default: { const _exhaustive: never = l.kind; return _exhaustive; }
     }
   }).join('\n');
   const inputShape = mode === 'cnn' ? `(${input.h}, ${input.w}, ${input.c})` : `(${input.c},)`;

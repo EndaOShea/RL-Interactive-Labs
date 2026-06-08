@@ -1,7 +1,8 @@
 // Pure, analytic architecture inspector for the Architecture Builder lab.
 // No React, no side effects: given an architecture, return exact per-layer
 // output shapes, parameter counts, receptive fields, FLOPs, plus risk findings
-// (risks added in archBuilder.ts Task 2). All formulas mirror Keras semantics.
+// (linear collapse, over/underfit, vanishing gradients, kernel/stride). All
+// formulas mirror Keras semantics.
 
 export type LayerKind = 'conv' | 'pool' | 'flatten' | 'dense' | 'dropout' | 'batchnorm';
 export type Activation = 'relu' | 'sigmoid' | 'tanh' | 'leaky' | 'none';
