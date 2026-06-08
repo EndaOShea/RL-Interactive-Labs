@@ -15,9 +15,9 @@ const ACCENT = '#14b8a6';
 
 const TfIdfLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
-  const [docs] = useState<string[]>(TFIDF_DOCS);
+  const docs = TFIDF_DOCS;
   const [selA, setSelA] = useState(0);
-  const [selB, setSelB] = useState(2);
+  const [selB, setSelB] = useState(1);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
   const model = useMemo(() => tfidf(docs), [docs]);
@@ -101,8 +101,9 @@ const TfIdfLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           <MonoLabel>TF-IDF weight · rows = vocabulary, cols = documents</MonoLabel>
           <Heatmap
             matrix={matrixT}
-            mode="heat"
-            rowLabels={model.vocab}
+            mode="diverging"
+            min={0}
+            rowLabels={model.vocab.map((w) => (w.length > 7 ? w.slice(0, 6) + '…' : w))}
             colLabels={docs.map((_, i) => 'd' + i)}
             cell={18}
             accent={ACCENT}
