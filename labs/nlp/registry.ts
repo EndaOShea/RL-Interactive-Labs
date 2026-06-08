@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { EMBEDDINGS_CONTENT } from './content';
+import { EMBEDDINGS_CONTENT, TFIDF_CONTENT } from './content';
 
 export const ACCENT = '#14b8a6';
 
@@ -16,5 +16,17 @@ export const NLP_LABS: LabDescriptor[] = [
     codeFile: 'word_embeddings.py',
     content: EMBEDDINGS_CONTENT,
     component: React.lazy(() => import('./WordEmbeddings')),
+  },
+  {
+    id: 'tfidf',
+    category: 'nlp',
+    title: 'TF-IDF & Document Similarity',
+    subtitle: 'tf·idf,  idf = ln(N/df)  ·  cosine similarity',
+    blurb: 'Turn documents into weighted bag-of-words vectors: TF-IDF boosts the rare informative terms and crushes "the". Compare any two docs by cosine — the classical search baseline.',
+    icon: 'M5 4h14v4H5zM5 11h14M5 15h10M5 19h14',
+    accent: ACCENT,
+    codeFile: 'tfidf.py',
+    content: TFIDF_CONTENT,
+    component: React.lazy(() => import('./TfIdf')),
   },
 ];
