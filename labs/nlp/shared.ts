@@ -61,8 +61,10 @@ export function nearestWords(target: Vec, k: number, exclude: string[] = []): { 
 }
 
 /** Analogy a:b :: c:? -> returns b - a + c and its nearest words. */
-export function analogy(a: string, b: string, c: string, k = 3) {
-  const va = wordVec(a)!, vb = wordVec(b)!, vc = wordVec(c)!;
+export function analogy(a: string, b: string, c: string, k = 3):
+  { target: Vec; neighbours: { word: string; sim: number }[] } | null {
+  const va = wordVec(a), vb = wordVec(b), vc = wordVec(c);
+  if (!va || !vb || !vc) return null; // unknown word — caller shows "not found"
   const target = addV(subV(vb, va), vc);
   return { target, neighbours: nearestWords(target, k, [a, b, c]) };
 }
@@ -140,6 +142,7 @@ export function trainNgram(corpus: string, n: number): NgramModel {
 
 /** P(next | context) with add-k (Laplace) smoothing over vocab ∪ {</s>}. */
 export function ngramProb(model: NgramModel, ctx: string, next: string, k: number): number {
+  if (k <= 0 && !model.counts.has(ctx)) return 0; // MLE: unseen context → 0
   const V = model.vocab.length + 1; // + </s>
   const row = model.counts.get(ctx);
   const c = row?.get(next) ?? 0;
@@ -205,6 +208,7 @@ export interface ViterbiResult { tags: NerTag[]; score: number; trellis: number[
 
 /** Viterbi: argmax over tag sequences of Σ emission + transition. */
 export function viterbi(sentence: string[]): ViterbiResult {
+  if (sentence.length === 0) return { tags: [], score: 0, trellis: [] };
   const T = sentence.length; const S = NER_TAGS.length;
   const dp: number[][] = Array.from({ length: T }, () => new Array(S).fill(-Infinity));
   const bp: number[][] = Array.from({ length: T }, () => new Array(S).fill(0));
@@ -227,7 +231,8 @@ export function viterbi(sentence: string[]): ViterbiResult {
 
 /* ---------- semantic search (baked 2-D topic embeddings) ---------- */
 export interface SearchDoc { id: number; text: string; vec: Vec; }
-// Axes: x = sports(0) -> tech(10); y = casual(0) -> finance(10).
+// Angular clusters: sports = low-x/high-y (NW); tech = high-x/low-y (SE);
+// finance/markets = mid-x/very-high-y (N). x broadly separates sports from tech.
 export const SEARCH_DOCS: SearchDoc[] = [
   { id: 0, text: 'the team won the championship final', vec: [2, 8] },
   { id: 1, text: 'the striker scored a last-minute goal', vec: [1, 8] },
@@ -272,12 +277,13 @@ export interface LogisticModel { w: Vec; b: number; }
 
 /** Fit 2-D logistic regression by gradient descent (deterministic). */
 export function fitLogistic(points: SentimentPoint[], iters = 400, lr = 0.05): LogisticModel {
+  if (points.length === 0) return { w: [0, 0], b: 0 };
   let w = [0, 0]; let b = 0;
   for (let it = 0; it < iters; it++) {
     let gw = [0, 0]; let gb = 0;
     for (const p of points) {
       const z = dot(w, p.vec) + b;
-      const yh = 1 / (1 + Math.exp(-z));
+      const yh = sigmoid(z);
       const e = yh - p.label;
       gw = [gw[0] + e * p.vec[0], gw[1] + e * p.vec[1]];
       gb += e;
