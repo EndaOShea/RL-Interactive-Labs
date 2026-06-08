@@ -84,6 +84,52 @@ export const NGRAM_CONTENT: LabContent = {
   ],
 };
 
+export const NER_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Sequence labeling: a tag per token',
+      body: 'Named Entity Recognition assigns a class label to every token in a sentence: Person (PER), Location (LOC), Organization (ORG), or Outside (O) for tokens that belong to no entity. The key challenge is ambiguity: "Amazon" is an organisation in most business contexts but a location when discussing the river, and "Paris" can be a person\'s name as well as a city. Resolving these cases requires context — the tokens around a word inform its tag. The BIO (Beginning-Inside-Outside) scheme extends these tags to handle multi-token spans ("New / York" as B-LOC / I-LOC), but for single-token entities the four tags used here capture the essential structure.',
+      details: [
+        { label: 'Per-token labels', text: 'Unlike sentence-level classification, NER assigns a tag to every individual token — even punctuation and articles receive the O tag.' },
+        { label: 'Context matters', text: '"Google" in a news article is ORG; in a sentence about verbs it might be O. Neighbouring tokens provide the disambiguating signal.' },
+        { label: 'BIO scheme', text: 'Real taggers use B-PER/I-PER (begin/inside) to mark multi-word entities; this lab uses the simpler 4-tag set to keep the Viterbi trellis readable.' },
+      ],
+    },
+    {
+      heading: 'Features: lexicon + word shape',
+      body: 'This lab scores each (word, tag) pair with an emission function that combines two signals: a hand-crafted gazetteer (a dictionary of known names and their entity types — Alice → PER:3, Berlin → LOC:3, Google → ORG:3) and a word-shape prior based on capitalisation. A capitalised word that is not in the gazetteer still likely names something, so entity tags receive a mild positive score (+0.4) while O receives a mild penalty (−0.5). A lowercase word is almost always O (+2.0) and rarely an entity (−2.0). Real industrial taggers replace the hand-crafted lexicon with features learned by a BiLSTM or Transformer encoder, but the emission-score concept remains the same.',
+      details: [
+        { label: 'Gazetteer', text: 'A lookup table mapping known surface forms to their entity type and a log-probability score. High coverage but misses novel names.' },
+        { label: 'Word shape', text: 'Capitalisation, digits, and punctuation patterns provide soft features for words absent from the gazetteer.' },
+        { label: 'Neural replacement', text: 'In modern taggers the emission score is a softmax over a BiLSTM or Transformer hidden state — learned end-to-end from labelled corpora.' },
+      ],
+    },
+    {
+      heading: 'Viterbi: the best tag SEQUENCE, not the best per-token tag',
+      body: 'A greedy decoder picks the highest-scoring tag for each token independently, ignoring whether neighbouring tag assignments are consistent. Viterbi dynamic programming instead finds the globally optimal tag sequence by considering all O(T·S²) transitions together. At each time step t it tracks, for every possible current tag s, the score of the best path that ends in s, carrying a backpointer to the best previous tag. At the end it traces back to recover the full sequence. Viterbi guarantees the argmax over the entire sequence — something greedy cannot provide. Modern CRF-based taggers keep exactly this Viterbi decode step but replace the hand-crafted scores with parameters learned by conditional maximum-likelihood training.',
+      details: [
+        { label: 'Greedy vs global', text: 'Greedy per-token argmax can pick O, PER, O, PER alternately when the correct sequence is a single PER span — Viterbi respects the transition structure.' },
+        { label: 'O(T·S²) complexity', text: 'For each of the T tokens and S² tag transitions the algorithm does O(1) work: linear in sentence length and quadratic in tag-set size.' },
+        { label: 'CRF extension', text: 'A linear-chain CRF adds the same Viterbi decode on top of learned feature weights, training end-to-end to maximise P(y|x) — the same decode, learned scores.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Entity boundaries and surface ambiguity',
+      description: 'The same surface form can denote entities of different types ("Amazon" the company vs "Amazon" the river) or no entity at all, depending on context. Even with a perfect per-token classifier, incorrect boundary detection (e.g., labelling only the head noun of a multi-word name) counts as a full span error in evaluation.',
+      recommendation: 'Augment the lexicon with contextual signals (surrounding POS tags, sentence-level topic) and always use a structured prediction layer (CRF or Viterbi) to enforce valid tag sequences (e.g. I-LOC cannot follow B-PER).',
+    },
+    {
+      category: 'METHODOLOGY',
+      title: 'Evaluate with span-level F1, not per-token accuracy',
+      description: 'Per-token accuracy is a misleading metric for NER because O tokens dominate most sentences, making a model that predicts O everywhere look 90%+ accurate. The standard evaluation is span-level precision, recall, and F1: a span is correct only if both its boundaries and its entity type exactly match the gold annotation.',
+      recommendation: 'Report entity-level F1 broken down by type (PER/LOC/ORG) to diagnose which entity classes the model struggles with; use the CoNLL-2003 script or seqeval library for reproducible evaluation.',
+    },
+  ],
+};
+
 export const TFIDF_CONTENT: LabContent = {
   sections: [
     {

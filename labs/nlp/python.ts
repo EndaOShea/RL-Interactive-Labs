@@ -105,6 +105,115 @@ for idx in top_idx:
 `;
 };
 
+/* ---------- 4) Named Entity Recognition — Viterbi sequence labeling ---------- */
+export const nerPython = () => `# Named Entity Recognition: Viterbi sequence labeling.
+# Mirrors the on-screen maths exactly: lexicon + word-shape emission scores,
+# transition scores, and Viterbi dynamic programming with backpointers.
+# Tags: O (Outside), PER (Person), LOC (Location), ORG (Organisation).
+
+NER_TAGS = ['O', 'PER', 'LOC', 'ORG']
+
+# Baked lexicon: word -> {tag: log-score}. Higher = more likely.
+NER_LEXICON = {
+    'Alice':   {'PER': 3},
+    'Bob':     {'PER': 3},
+    'Maria':   {'PER': 3},
+    'Paris':   {'LOC': 3},
+    'Berlin':  {'LOC': 3},
+    'Seattle': {'LOC': 3},
+    'Google':  {'ORG': 3},
+    'Amazon':  {'ORG': 2.4, 'LOC': 0.6},
+}
+
+def emission(word, tag):
+    """Emission score for (word, tag) from lexicon + capitalisation shape prior."""
+    lex = NER_LEXICON.get(word)
+    if lex and tag in lex:
+        return lex[tag]
+    capitalised = word[0].isupper() if word else False
+    if tag == 'O':
+        return -0.5 if capitalised else 2.0
+    return 0.4 if capitalised else -2.0  # entity tags only plausible for capitalised words
+
+def transition(prev_tag, cur_tag):
+    """Transition score between consecutive tags."""
+    if prev_tag == 'O' and cur_tag == 'O':
+        return 0.5
+    if prev_tag != 'O' and cur_tag == prev_tag:
+        return 0.3  # continue an entity
+    return 0.0
+
+def viterbi(sentence):
+    """Viterbi decode: argmax over tag sequences of sum(emission + transition).
+    Returns (tags, score, trellis_dp).
+    """
+    T = len(sentence)
+    S = len(NER_TAGS)
+    NEG_INF = float('-inf')
+
+    # dp[t][s] = best score of any path ending in tag s at position t
+    dp = [[NEG_INF] * S for _ in range(T)]
+    bp = [[0] * S for _ in range(T)]          # backpointers
+
+    # Initialise first position
+    for s, tag in enumerate(NER_TAGS):
+        dp[0][s] = emission(sentence[0], tag)
+
+    # Fill
+    for t in range(1, T):
+        for s, cur_tag in enumerate(NER_TAGS):
+            em = emission(sentence[t], cur_tag)
+            for p, prev_tag in enumerate(NER_TAGS):
+                cand = dp[t-1][p] + transition(prev_tag, cur_tag) + em
+                if cand > dp[t][s]:
+                    dp[t][s] = cand
+                    bp[t][s] = p
+
+    # Best final tag
+    best = max(range(S), key=lambda s: dp[T-1][s])
+    score = dp[T-1][best]
+
+    # Backtrack
+    idx = [0] * T
+    idx[T-1] = best
+    for t in range(T-1, 0, -1):
+        idx[t-1] = bp[t][idx[t]]
+
+    tags = [NER_TAGS[i] for i in idx]
+    return tags, score, dp
+
+# ---- Sentences to tag ----
+NER_SENTENCES = [
+    ['Alice', 'visited', 'Paris', 'with', 'Bob'],
+    ['Google', 'opened', 'an', 'office', 'in', 'Berlin'],
+    ['Maria', 'works', 'at', 'Amazon', 'in', 'Seattle'],
+]
+
+if __name__ == "__main__":
+    for sentence in NER_SENTENCES:
+        tags, score, _ = viterbi(sentence)
+        print(f"Sentence : {' '.join(sentence)}")
+        print(f"Tags     : {' '.join(tags)}")
+        print(f"Score    : {score:.4f}")
+        # Extract entity spans (consecutive non-O tokens)
+        spans = []
+        i = 0
+        while i < len(tags):
+            if tags[i] != 'O':
+                j = i
+                while j < len(tags) and tags[j] == tags[i]:
+                    j += 1
+                spans.append((' '.join(sentence[i:j]), tags[i]))
+                i = j
+            else:
+                i += 1
+        if spans:
+            print(f"Entities : {', '.join(f'{text} -> {tag}' for text, tag in spans)}")
+        else:
+            print("Entities : (none)")
+        print()
+`;
+
 /* ---------- 3) N-gram Language Model — add-k smoothing + perplexity + generation ---------- */
 export const ngramPython = (n: number, k: number) => `import re
 import math

@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT } from './content';
+import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT, NER_CONTENT } from './content';
 
 export const ACCENT = '#14b8a6';
 
@@ -40,5 +40,17 @@ export const NLP_LABS: LabDescriptor[] = [
     codeFile: 'ngram_lm.py',
     content: NGRAM_CONTENT,
     component: React.lazy(() => import('./NgramLM')),
+  },
+  {
+    id: 'ner',
+    category: 'nlp',
+    title: 'Named Entity Recognition',
+    subtitle: 'Viterbi: argmax Σ emission + transition  ·  PER / LOC / ORG',
+    blurb: 'Tag every token in a sentence with PER/LOC/ORG/O. Lexicon + word-shape features score each tag; Viterbi finds the best whole-sentence labeling, not just the best per-token guess.',
+    icon: 'M4 7h4v4H4zM10 7h4v4h-4zM16 7h4v4h-4zM4 15h16',
+    accent: ACCENT,
+    codeFile: 'ner_viterbi.py',
+    content: NER_CONTENT,
+    component: React.lazy(() => import('./Ner')),
   },
 ];
