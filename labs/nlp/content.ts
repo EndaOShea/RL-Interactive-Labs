@@ -130,6 +130,52 @@ export const NER_CONTENT: LabContent = {
   ],
 };
 
+export const SEARCH_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'From keyword match to meaning',
+      body: 'TF-IDF retrieval matches on exact words: a query containing "football" can only retrieve documents that also contain the word "football". Embedding-based retrieval matches on meaning instead. Both the query and every document are mapped into the same dense vector space by a sentence-embedding model, so a query about "football" can retrieve "the striker scored a last-minute goal" even though the two share no words — they simply point in the same direction in the embedding space. This lab uses hand-placed 2-D vectors to make the geometry visible, but the cosine comparisons are identical to those used with real high-dimensional transformer embeddings (e.g. sentence-BERT).',
+      details: [
+        { label: 'Shared vector space', text: 'The query and every document are embedded into the same space, so cosine similarity directly measures topical relatedness regardless of surface vocabulary.' },
+        { label: 'No shared words needed', text: 'Synonyms, paraphrases, and topic-related terms naturally cluster together in embedding space — something bag-of-words TF-IDF cannot capture at all.' },
+        { label: 'Keyword baseline', text: 'The TF-IDF lab in this area is the keyword-matching baseline; semantic search improves on it by replacing sparse term counts with dense meaning vectors.' },
+      ],
+    },
+    {
+      heading: 'Cosine ranking & top-k',
+      body: 'Retrieval is a three-step process: (1) embed the query into the same vector space as the pre-indexed documents; (2) compute the cosine similarity between the query vector and every document vector; (3) return the k documents with the highest scores. Cosine measures the angle between vectors, comparing their direction (topic) while ignoring their magnitude (document length), so a short document and a long document on the same topic score equally. The result is an ordered list of the most semantically relevant documents — the "top-k retrieved set".',
+      details: [
+        { label: 'cos(q, d) = q·d / (|q||d|)', text: 'Dot product divided by the product of norms. Ranges from -1 (opposite) to +1 (identical direction). Values near 1 mean same topic.' },
+        { label: 'Magnitude invariance', text: 'Cosine ignores vector length, so a 500-word article and a 50-word summary on the same topic receive similar scores.' },
+        { label: 'argsort descending', text: 'Sort all documents by descending cosine score and take the first k. No model inference at query time — just dot products against a pre-built index.' },
+      ],
+    },
+    {
+      heading: 'Retrieval-Augmented Generation (RAG)',
+      body: 'Large language models are powerful but their knowledge is frozen at training time and they can hallucinate facts. RAG patches both problems by splitting the workflow in two: first, a retrieval step fetches the most semantically relevant documents from a live corpus using exactly the cosine-retrieval mechanism in this lab; second, those documents are injected into the LLM\'s prompt as context, grounding the generated answer in real sources. The LLM then reads, synthesises, and cites the retrieved passages rather than relying on parametric memory alone. This lab demonstrates the retrieval half of that pipeline — the step that determines what the LLM gets to see.',
+      details: [
+        { label: 'Retrieval → prompt injection', text: 'Top-k documents are concatenated into the prompt as "context:" blocks before the user\'s question, giving the LLM up-to-date, source-specific information.' },
+        { label: 'Reduces hallucination', text: 'When the LLM is told to answer from the provided context, it is far less likely to fabricate details — it can quote or paraphrase real retrieved text.' },
+        { label: 'Bridge to the LLM area', text: 'The LLM Sampling and Attention labs in this platform show what happens inside the generator; this lab is the retrieval step that feeds it.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Retrieval quality is bounded by embedding quality',
+      description: 'If the embedding model clusters unrelated topics together or separates synonyms, the retrieval step will return irrelevant documents no matter how good the downstream LLM is. The embedding model is the weakest link: domain mismatch (a general-purpose model on medical text), poor training data, or low-dimensional compression can all cause systematic retrieval failures.',
+      recommendation: 'Evaluate retrieval quality independently with recall@k and mean reciprocal rank (MRR) on labelled query-document pairs before wiring retrieval into a RAG pipeline. Fine-tune or swap the embedding model if domain recall is poor.',
+    },
+    {
+      category: 'DEPLOYMENT',
+      title: 'Exact cosine over millions of docs is too slow — use ANN indexes',
+      description: 'Computing exact cosine similarity against 10 million documents at query time is impractical even with vectorised hardware. Approximate nearest-neighbour (ANN) indexes — FAISS (flat or HNSW graphs), ScaNN, or Pinecone/Weaviate/Qdrant in the cloud — trade a small amount of recall for orders-of-magnitude speed improvements, reducing retrieval latency from seconds to milliseconds.',
+      recommendation: 'For production RAG, pre-embed all documents offline and build an HNSW or IVF-Flat index with FAISS. Use exact search only for small corpora (< ~50 k documents) or offline evaluation.',
+    },
+  ],
+};
+
 export const TFIDF_CONTENT: LabContent = {
   sections: [
     {

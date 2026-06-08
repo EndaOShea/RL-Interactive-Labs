@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT, NER_CONTENT } from './content';
+import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT, NER_CONTENT, SEARCH_CONTENT } from './content';
 
 export const ACCENT = '#14b8a6';
 
@@ -52,5 +52,17 @@ export const NLP_LABS: LabDescriptor[] = [
     codeFile: 'ner_viterbi.py',
     content: NER_CONTENT,
     component: React.lazy(() => import('./Ner')),
+  },
+  {
+    id: 'semantic-search',
+    category: 'nlp',
+    title: 'Semantic Search & RAG',
+    subtitle: 'score(d) = cos(q, d)  ·  top-k retrieval',
+    blurb: 'Embed a query and a document set in one space, rank by cosine, and retrieve the top-k by meaning rather than keywords — the retrieval half of RAG.',
+    icon: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
+    accent: ACCENT,
+    codeFile: 'semantic_search.py',
+    content: SEARCH_CONTENT,
+    component: React.lazy(() => import('./SemanticSearch')),
   },
 ];

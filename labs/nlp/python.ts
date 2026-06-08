@@ -304,3 +304,54 @@ for _ in range(20):
 
 print(f"\\nGenerated sentence (N={N}, k={K}): {' '.join(generated)}")
 `;
+
+/* ---------- 5) Semantic Search / RAG retrieval — cosine top-k ---------- */
+export const searchPython = (queryLabel: string, queryVec: number[], k: number) => `import numpy as np
+
+# Semantic search: embed a query + document set in one 2-D space, rank by cosine,
+# retrieve the top-k.  In practice, query and document vectors come from a
+# sentence-embedding model (e.g. sentence-BERT, text-embedding-3-small); here they
+# are hand-placed 2-D coordinates so the geometry is visible.
+
+# ---- Document corpus (id, text, 2-D topic embedding) ----
+DOCS = [
+    {"id": 0, "text": "the team won the championship final",   "vec": [2, 8]},
+    {"id": 1, "text": "the striker scored a last-minute goal", "vec": [1, 8]},
+    {"id": 2, "text": "new smartphone ships with a faster chip","vec": [9, 2]},
+    {"id": 3, "text": "the laptop GPU doubles training speed",  "vec": [9, 3]},
+    {"id": 4, "text": "central bank raises interest rates",     "vec": [4, 9]},
+    {"id": 5, "text": "the stock surged after strong earnings", "vec": [6, 9]},
+    {"id": 6, "text": "a startup raised funding for its AI chip","vec": [8, 6]},
+    {"id": 7, "text": "the coach praised the defense",          "vec": [2, 7]},
+]
+
+# ---- Query (in practice, produced by the same embedding model as the docs) ----
+QUERY_LABEL = "${queryLabel}"
+QUERY_VEC   = ${JSON.stringify(queryVec)}   # 2-D embedding of the query
+K           = ${k}
+
+def cosine(u, v):
+    u, v = np.array(u, float), np.array(v, float)
+    d = np.linalg.norm(u) * np.linalg.norm(v)
+    return 0.0 if d < 1e-9 else float(u @ v / d)
+
+# Score every document by cosine similarity to the query
+scored = [(doc, cosine(QUERY_VEC, doc["vec"])) for doc in DOCS]
+ranked = sorted(scored, key=lambda t: -t[1])
+
+print(f"Query : {QUERY_LABEL}")
+print(f"Vec   : {QUERY_VEC}")
+print(f"top-{K} retrieved:")
+for rank, (doc, sim) in enumerate(ranked[:K], 1):
+    print(f"  #{rank}  cos={sim:.4f}  d{doc['id']}: {doc['text']}")
+
+print(f"\\nFull ranking:")
+for rank, (doc, sim) in enumerate(ranked, 1):
+    flag = " <-- retrieved" if rank <= K else ""
+    print(f"  #{rank}  cos={sim:.4f}  d{doc['id']}: {doc['text']}{flag}")
+
+# In a RAG pipeline the top-${k} docs above would be injected into an LLM prompt:
+#   prompt = "Context:\\n" + "\\n".join(f"- {d['text']}" for d,_ in ranked[:${k}])
+#           + f"\\n\\nQuestion: {QUERY_LABEL}"
+# The LLM then answers grounded in the retrieved context instead of parametric memory.
+`;
