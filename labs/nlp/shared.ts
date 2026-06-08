@@ -10,8 +10,6 @@ export const addV = (a: Vec, b: Vec): Vec => a.map((x, i) => x + b[i]);
 export const subV = (a: Vec, b: Vec): Vec => a.map((x, i) => x - b[i]);
 export const dot = (a: Vec, b: Vec): number => a.reduce((s, x, i) => s + x * b[i], 0);
 export const norm = (a: Vec): number => Math.sqrt(dot(a, a));
-export const meanV = (vs: Vec[]): Vec =>
-  vs.length === 0 ? [] : vs[0].map((_, j) => vs.reduce((s, v) => s + v[j], 0) / vs.length);
 
 /** Cosine similarity in [-1, 1]; 0 for a zero vector. */
 export const cosine = (a: Vec, b: Vec): number => {

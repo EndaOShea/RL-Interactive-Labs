@@ -105,7 +105,7 @@ for idx in top_idx:
 `;
 };
 
-/* ---------- 4) Named Entity Recognition — Viterbi sequence labeling ---------- */
+/* ---------- 3) Named Entity Recognition — Viterbi sequence labeling ---------- */
 export const nerPython = () => `# Named Entity Recognition: Viterbi sequence labeling.
 # Mirrors the on-screen maths exactly: lexicon + word-shape emission scores,
 # transition scores, and Viterbi dynamic programming with backpointers.
@@ -214,7 +214,7 @@ if __name__ == "__main__":
         print()
 `;
 
-/* ---------- 3) N-gram Language Model — add-k smoothing + perplexity + generation ---------- */
+/* ---------- 4) N-gram Language Model — add-k smoothing + perplexity + generation ---------- */
 export const ngramPython = (n: number, k: number) => `import re
 import math
 import random
