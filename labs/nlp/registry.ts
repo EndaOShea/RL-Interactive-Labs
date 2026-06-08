@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { EMBEDDINGS_CONTENT, TFIDF_CONTENT } from './content';
+import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT } from './content';
 
 export const ACCENT = '#14b8a6';
 
@@ -28,5 +28,17 @@ export const NLP_LABS: LabDescriptor[] = [
     codeFile: 'tfidf.py',
     content: TFIDF_CONTENT,
     component: React.lazy(() => import('./TfIdf')),
+  },
+  {
+    id: 'ngram-lm',
+    category: 'nlp',
+    title: 'N-gram Language Model',
+    subtitle: 'P(wₜ | context) = (count+k)/(total+k·V)  ·  perplexity',
+    blurb: 'Build a bigram/trigram model from counts, smooth away the zero-probability trap with add-k, watch perplexity, and sample new sentences token by token.',
+    icon: 'M4 17l5-10 4 7 3-4 4 7M4 20h16',
+    accent: ACCENT,
+    codeFile: 'ngram_lm.py',
+    content: NGRAM_CONTENT,
+    component: React.lazy(() => import('./NgramLM')),
   },
 ];

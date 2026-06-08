@@ -38,6 +38,52 @@ export const EMBEDDINGS_CONTENT: LabContent = {
   ],
 };
 
+export const NGRAM_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Predicting the next word from counts',
+      body: 'An n-gram language model assigns probability to a word by conditioning only on the previous n−1 words — the Markov assumption. A bigram (n=2) conditions on one word; a trigram (n=3) on two. To handle sentence boundaries each sentence is padded with n−1 <s> start tokens and a single </s> end token. Probability is then just a normalised count: P(wₜ | wₜ₋ₙ₊₁ … wₜ₋₁) = count(context, wₜ) / count(context). Despite its simplicity, the model can already produce fluent-sounding fragments on a small corpus because it captures common local collocations.',
+      details: [
+        { label: 'Markov assumption', text: 'The model ignores everything more than n−1 steps back. A bigram sees only the immediately preceding word; a trigram sees two. Longer histories need exponentially more data.' },
+        { label: 'Sentence padding', text: '<s> tokens fill the left context at the start of each sentence, and </s> marks the end — letting the model also learn where sentences typically stop.' },
+        { label: 'Probability from counts', text: 'Count how many times the context appeared, then how often each word followed it, and divide. The distribution is just a normalised frequency table.' },
+      ],
+    },
+    {
+      heading: 'Smoothing: the zero-probability problem',
+      body: 'A corpus covers only a tiny fraction of all possible n-grams. Any n-gram not seen in training has a count of 0, so its raw probability is 0. A single unseen word in a sentence drives the whole sentence probability to 0, making perplexity infinite. Add-k (Laplace) smoothing fixes this by pretending every possible n-gram was seen k extra times: P(wₜ | ctx) = (count + k) / (total + k·V), where V is the vocabulary size (including </s>). This reserves a small probability mass for unseen events. Setting k = 1 is classic Laplace smoothing; smaller k values stay closer to the raw counts. As k grows the distribution flattens toward uniform — a bias/variance trade-off between over-fitting the training counts and over-smoothing to ignorance.',
+      details: [
+        { label: 'Zero probability trap', text: 'Without smoothing, a single unseen n-gram in a test sentence gives P = 0 and log P = −∞, making perplexity undefined. This happens frequently even on small test sets.' },
+        { label: 'Add-k formula', text: '(count + k) / (total + k·V) where V = |vocab| + 1 for </s>. The extra +1 ensures </s> is always reachable even from contexts that never ended a sentence.' },
+        { label: 'k as a hyperparameter', text: 'k→0 recovers the raw MLE counts (risky); k=1 is Laplace (often over-smoothes); k≈0.1 is a common compromise. Interpolation and back-off are stronger alternatives.' },
+      ],
+    },
+    {
+      heading: 'Perplexity & generation',
+      body: 'Perplexity = exp(−(1/N) Σ log P(wₜ | ctx)) is the geometric mean inverse probability: roughly the model\'s average branching factor — how many equally likely next words it expects. A perplexity of 5 means the model is on average as uncertain as if it had to pick uniformly among 5 options. Lower is better. Smoothing raises perplexity because it spreads mass to unseen events; a trigram usually has lower perplexity than a bigram on the training distribution because it conditions on more context and can be more precise. To generate text, sample from the smoothed next-token distribution, append the drawn token, shift the context window, and repeat until </s>. This count-based sampling is the direct ancestor of neural language models and connects to the LLM Sampling lab, where a Transformer\'s learned distribution replaces the count table and temperature/top-k control the sharpness of sampling.',
+      details: [
+        { label: 'Perplexity interpretation', text: 'exp(cross-entropy) is the branching factor: a perplexity of 10 means the model is, on average, as confused as if choosing uniformly among 10 tokens. Lower = less surprised = better model.' },
+        { label: 'Smoothing vs perplexity', text: 'Every bit of probability mass moved from observed to unseen events raises perplexity. Optimal k minimises perplexity on held-out data, not on training data.' },
+        { label: 'Bridge to neural LMs', text: 'Neural language models (RNNs, Transformers) replace the count table with a learned distribution but keep the same predict-the-next-token objective and evaluate by the same perplexity metric.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Data sparsity explodes with n',
+      description: 'The number of possible n-grams is |V|ⁿ. Even for a modest 10 000-word vocabulary, trigrams number 10¹², of which a typical corpus covers a minuscule fraction. Most n-grams are never seen — the zero-probability problem grows rapidly with n, making smoothing and back-off essential rather than optional.',
+      recommendation: 'In practice, n > 5 is rarely useful without massive data. For small corpora use n = 2 or 3 with interpolation (mix unigram + bigram + trigram probabilities) rather than relying on pure high-order counts.',
+    },
+    {
+      category: 'METHODOLOGY',
+      title: 'Held-out perplexity and interpolation',
+      description: 'Always evaluate perplexity on held-out data, never on the training corpus — training perplexity decreases monotonically with n and tells you nothing about generalisation. Back-off (use a lower-order model when the high-order count is zero) and linear interpolation (λ₁P₁ + λ₂P₂ + λ₃P₃, with λ weights tuned on held-out data) outperform fixed add-k smoothing for any non-trivial application.',
+      recommendation: 'Use Kneser-Ney smoothing (a principled back-off that conditions on the number of distinct contexts a word appears in) as the practical baseline before reaching for a neural LM.',
+    },
+  ],
+};
+
 export const TFIDF_CONTENT: LabContent = {
   sections: [
     {
