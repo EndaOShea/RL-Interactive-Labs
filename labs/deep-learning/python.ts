@@ -1,4 +1,5 @@
 // Runnable Python exports for the Deep Learning labs (PyTorch).
+import type { Layer, Shape, Mode } from './archBuilder';
 
 export const resnetPython = (depth = 20, residual = true, gain = 0.9) => `import torch, torch.nn as nn
 
@@ -107,3 +108,30 @@ for step in range(200):
     if sched: sched.step()
 print("final point:", p.detach().tolist(), " loss:", float(rosenbrock(p)))
 `;
+
+export const architectureBuilderPython = (mode: Mode, input: Shape, layers: Layer[]) => {
+  const lines = layers.map((l) => {
+    switch (l.kind) {
+      case 'conv': return `    layers.Conv2D(${l.filters}, ${l.kernel}, strides=${l.stride}, padding="${l.padding}", activation=${l.activation === 'none' ? 'None' : `"${l.activation}"`}),`;
+      case 'pool': return `    layers.MaxPooling2D(${l.pool}),`;
+      case 'flatten': return '    layers.Flatten(),';
+      case 'dense': return `    layers.Dense(${l.units}, activation=${l.activation === 'none' ? 'None' : `"${l.activation}"`}),`;
+      case 'dropout': return `    layers.Dropout(${l.rate}),`;
+      case 'batchnorm': return '    layers.BatchNormalization(),';
+      default: return '';
+    }
+  }).join('\n');
+  const inputShape = mode === 'cnn' ? `(${input.h}, ${input.w}, ${input.c})` : `(${input.c},)`;
+  return `import tensorflow as tf
+from tensorflow.keras import layers, models
+
+# Architecture composed in the Architecture Builder lab (${mode.toUpperCase()} mode).
+# model.summary() prints the exact per-layer output shapes and parameter counts
+# you saw in the lab — run it to confirm the numbers match.
+model = models.Sequential([
+    layers.Input(shape=${inputShape}),
+${lines}
+])
+model.summary()
+`;
+};
