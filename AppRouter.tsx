@@ -26,6 +26,10 @@ const AppRouter: React.FC = () => (
       <Route path="/llm/:labId?" element={<AreaHost category="llm" />} />
       <Route path="/diffusion/:labId?" element={<AreaHost category="diffusion" />} />
       <Route path="/math/:labId?" element={<AreaHost category="math" />} />
+      <Route path="/probability/:labId?" element={<AreaHost category="probability" />} />
+      <Route path="/information/:labId?" element={<AreaHost category="information" />} />
+      <Route path="/sequence/:labId?" element={<AreaHost category="sequence" />} />
+      <Route path="/stochastic/:labId?" element={<AreaHost category="stochastic" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   </BrowserRouter>

@@ -19,6 +19,10 @@ import { AUDIO_LABS } from '../labs/audio/registry';
 import { LLM_LABS } from '../labs/llm/registry';
 import { DIFFUSION_LABS } from '../labs/diffusion/registry';
 import { MATH_LABS } from '../labs/math/registry';
+import { PROBABILITY_LABS } from '../labs/probability/registry';
+import { INFORMATION_LABS } from '../labs/information/registry';
+import { SEQUENCE_LABS } from '../labs/sequence/registry';
+import { STOCHASTIC_LABS } from '../labs/stochastic/registry';
 
 export const APP_NAME = 'ML Interactive Labs';
 
@@ -136,6 +140,38 @@ export const CATEGORIES: CategoryMeta[] = [
     order: 1,
     accent: '#22d3ee',
   },
+  {
+    id: 'probability',
+    label: 'Probability & Bayesian',
+    blurb: 'Reason under uncertainty — Bayes’ rule and base rates, the distribution zoo, and MCMC sampling of intractable posteriors.',
+    icon: 'M3 19c4 0 4-12 9-12s5 12 9 12M3 19h18',
+    order: 1.3,
+    accent: '#c084fc',
+  },
+  {
+    id: 'information',
+    label: 'Information Theory',
+    blurb: 'The currency of learning is bits — entropy and surprise, KL / cross-entropy (the classification loss), and the Huffman compression limit.',
+    icon: 'M4 18h4l2-12 4 16 2-8h4M4 21h16',
+    order: 1.6,
+    accent: '#fcd34d',
+  },
+  {
+    id: 'sequence',
+    label: 'Sequence Models',
+    blurb: 'Networks with memory — RNN backprop-through-time, LSTM gating, and the fixed-context bottleneck that attention was built to remove.',
+    icon: 'M4 8h11l-3-3M4 8l3 3M20 16H9l3 3M20 16l-3-3',
+    order: 9.5,
+    accent: '#a3e635',
+  },
+  {
+    id: 'stochastic',
+    label: 'Stochastic & Bayesian Models',
+    blurb: 'Models that know what they don’t know — Bayesian neural nets, Gaussian processes, and hidden Markov models for uncertainty over weights, functions and state.',
+    icon: 'M4 18c3 0 4-10 8-10s4 8 8 8M4 21h16M4 13a2 2 0 1 0 0-.01M20 16a2 2 0 1 0 0-.01',
+    order: 9.7,
+    accent: '#e879f9',
+  },
 ];
 
 /* ─────────────────── link-only catalog items (RL) ─────────────────── */
@@ -168,6 +204,10 @@ export const LABS: LabDescriptor[] = [
   ...LLM_LABS,
   ...DIFFUSION_LABS,
   ...MATH_LABS,
+  ...PROBABILITY_LABS,
+  ...INFORMATION_LABS,
+  ...SEQUENCE_LABS,
+  ...STOCHASTIC_LABS,
 ];
 
 export const LAB_BY_ID = new Map(LABS.map((l) => [l.id, l]));

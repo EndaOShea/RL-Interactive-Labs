@@ -7,7 +7,7 @@
 An interactive platform for learning machine learning **by doing** — live, client-side
 simulations with real-time math and multi-provider AI tutoring, wrapped in a full-screen
 "Cinematic Stage" UI. It began as **Policy Playground** (Reinforcement Learning) and now spans
-fourteen subject areas, each added without touching the original RL app.
+eighteen subject areas, each added without touching the original RL app.
 
 View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
 
@@ -49,6 +49,17 @@ client-side** — no TF.js/ONNX and no servers.
 - **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention.
 - **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
 - **Math Foundations** — gradient descent, Taylor series, linear transformations.
+- **Probability & Bayesian** — Bayes' theorem & base rates (with sequential Beta–Bernoulli
+  updating), the distribution zoo (PMF/PDF + sampling and the Law of Large Numbers), and MCMC
+  (Metropolis–Hastings) sampling of a multimodal target.
+- **Information Theory** — entropy & surprise, KL divergence & cross-entropy (the classification
+  loss = irreducible H(p) + avoidable KL), and Huffman source coding against the entropy bound.
+- **Sequence Models** — RNN backprop-through-time (vanishing/exploding gradients), LSTM gated
+  memory (the constant error carousel), and the seq2seq fixed-context bottleneck that motivated
+  attention.
+- **Stochastic & Bayesian Models** — Bayesian neural networks (point vs MC-Dropout vs deep
+  ensemble vs variational, with predictive-uncertainty bands), Gaussian processes (closed-form
+  kernel regression), and hidden Markov models (forward filtering, smoothing, Viterbi).
 
 ## What a lab looks like
 
