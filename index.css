@@ -43,6 +43,12 @@ body {
   height: 100%;
 }
 
+/* Full-viewport lab shell. Use the DYNAMIC viewport height so the bottom-pinned
+   "live math" ticker is never clipped below the fold — `100vh` can resolve taller
+   than the visible area (browser UI / zoom / rounding), which pushed the ticker
+   off-screen. `100vh` first as a fallback for browsers without `dvh`. */
+.lab-shell { height: 100vh; height: 100dvh; }
+
 .scope sub { font-size: .7em; }
 
 /* status LED pulse */

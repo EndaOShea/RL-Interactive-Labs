@@ -56,7 +56,7 @@ const LabStage: React.FC<LabStageProps> = (p) => {
   const categoryLabel = CATEGORIES.find((c) => c.id === d.category)?.label || d.category;
 
   return (
-    <div className="scope" style={{ width: '100vw', height: '100vh', background: 'var(--bg1)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div className="scope lab-shell" style={{ width: '100vw', background: 'var(--bg1)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* telemetry header */}
       <header style={{ height: 48, borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 20px', gap: 16, background: 'var(--bg0)', flexShrink: 0 }}>
         <span style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14, color: 'var(--t0)' }}>{APP_NAME}</span>
