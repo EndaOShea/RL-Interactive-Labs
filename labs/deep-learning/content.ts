@@ -127,3 +127,32 @@ export const OPTIM_CONTENT: LabContent = {
     { category: 'METHODOLOGY', title: 'Tune the learning rate first', description: 'Most training failures are a mis-set learning rate, not the optimizer choice.', recommendation: 'Sweep the LR (log scale) before fiddling with anything else; consider an LR-range test.' },
   ],
 };
+
+export const ARCH_BUILDER_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Reading an architecture',
+      body: 'Every layer transforms a tensor. A Conv2D slides a small filter over the feature map; a pooling layer downsamples it; Flatten unrolls it to a vector; Dense fully connects. The builder computes each layer\'s output shape and parameter count exactly, so you can see where the parameters — and the cost — actually live.',
+      details: [
+        { label: 'Conv output', text: "H' = ⌈H/stride⌉ (same padding); channels = filter count." },
+        { label: 'Conv params', text: '(k·k·Cᵢₙ + 1)·Cₒᵤₜ — independent of image size (weight sharing).' },
+        { label: 'Dense params', text: '(Cᵢₙ + 1)·units — usually where most parameters sit, right after Flatten.' },
+        { label: 'Receptive field', text: 'How many input pixels one output unit sees — grows with depth, kernel size and stride.' },
+      ],
+    },
+    {
+      heading: 'The risks it flags',
+      body: 'Architecture choices have predictable failure modes. The builder applies deterministic rules and warns before you ever train.',
+      details: [
+        { label: 'Linear collapse', text: 'Two trainable layers with no activation between them = one linear layer. Non-linearity is what makes depth useful.' },
+        { label: 'Over / underfit', text: 'Far more parameters than data → memorisation; too little capacity → it can\'t fit the signal.' },
+        { label: 'Vanishing gradients', text: 'Stacked sigmoid/tanh multiply the backward signal toward zero; ReLU / BatchNorm / residuals keep it alive.' },
+        { label: 'Kernel & stride', text: 'Stride > kernel skips pixels; a receptive field larger than the input means deeper spatial layers add little.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    { category: 'METHODOLOGY', title: 'Params ≠ accuracy', description: 'More parameters is not better — it raises overfitting and compute cost.', recommendation: 'Match capacity to data; add regularisation; validate.' },
+    { category: 'CONCEPT', title: 'Analytic, not trained', description: 'This view computes shapes/params/risks; it does not train the network.', recommendation: 'Use the MLP/Dropout/ResNet labs to see training dynamics.' },
+  ],
+};

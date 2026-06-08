@@ -1,7 +1,7 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
 import {
-  RESNET_CONTENT, BATCHNORM_CONTENT, DROPOUT_CONTENT, TRANSFER_CONTENT, OPTIM_CONTENT,
+  RESNET_CONTENT, BATCHNORM_CONTENT, DROPOUT_CONTENT, TRANSFER_CONTENT, OPTIM_CONTENT, ARCH_BUILDER_CONTENT,
 } from './content';
 
 const ACCENT = '#f43f5e';
@@ -66,5 +66,17 @@ export const DEEP_LEARNING_LABS: LabDescriptor[] = [
     codeFile: 'optimizers.py',
     content: OPTIM_CONTENT,
     component: React.lazy(() => import('./Optimizers')),
+  },
+  {
+    id: 'architecture-builder',
+    category: 'deep-learning',
+    title: 'Architecture Builder',
+    subtitle: 'Compose a CNN / MLP · live params, shapes & risks',
+    blurb: 'Stack conv, pool and dense layers and watch parameter counts, output shapes and receptive fields update — with live warnings for overfitting, linear collapse and vanishing gradients.',
+    icon: 'M4 5h7v6H4zM13 5h7v4h-7zM13 13h7v6h-7zM4 15h7v4H4zM11 8h2M11 16h2M9 11v4',
+    accent: ACCENT,
+    codeFile: 'architecture_builder.py',
+    content: ARCH_BUILDER_CONTENT,
+    component: React.lazy(() => import('./ArchitectureBuilder')),
   },
 ];
