@@ -13,7 +13,8 @@ The platform is being expanded **one subject area at a time** beyond RL. Added a
 Classic ML, Search & Pathfinding, Unsupervised Learning, Supervised Learning, Logic & Reasoning,
 Neural Networks, Deep Learning, Model Checking, Image Classification, Audio & Speech, Large Language
 Models, Diffusion Models, Math Foundations, Probability & Bayesian, Information Theory, Sequence
-Models, Stochastic & Bayesian Models. See **Multi-area platform** below. The original RL app is
+Models, Stochastic & Bayesian Models, Natural Language Processing. See **Multi-area platform**
+below. The original RL app is
 deliberately left untouched and now lives at the `/rl` route; a catalog home (`/`) is the hub.
 
 ## Multi-area platform (catalog + non-RL labs)
@@ -53,8 +54,14 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
   vanishing/exploding), Lstm (gated memory / constant error carousel), Seq2Seq (context
   bottleneck → attention); `stochastic`: Bnn (Bayesian NN — point/dropout/ensemble/variational),
   GaussianProcess (kernel posterior + uncertainty band), Hmm (forward filtering / smoothing /
-  Viterbi)). Each area has `content.ts`, `python.ts`, `registry.ts` (+ area-specific helpers; the
-  `sequence` and `stochastic` areas add a `shared.ts` of hand-rolled cell maths / linear algebra).
+  Viterbi); `nlp`: WordEmbeddings (analogy arithmetic king−man+woman→queen + nearest neighbours),
+  TfIdf (doc-term heatmap + cosine document similarity), NgramLM (add-k smoothing + perplexity +
+  token-by-token generation via `useSimLoop`), Ner (PER/LOC/ORG/O Viterbi sequence labeling),
+  SemanticSearch (cosine top-k / RAG retrieval), TextClassification (logistic regression on 2-D
+  sentiment embeddings + decision field)). Each area has `content.ts`, `python.ts`, `registry.ts`
+  (+ area-specific helpers; the `sequence`, `stochastic`, and `nlp` areas add a `shared.ts` of
+  hand-rolled cell maths / linear algebra — for `nlp`, baked embedding tables + cosine / TF-IDF /
+  n-gram / Viterbi / a tiny logistic fit).
   Viz primitives in `components/labkit/viz/`: `ScatterPlot` (points/field/circles/ellipses/lines),
   `FunctionPlot`, `GridBoard`, `GraphCanvas`, `Dendrogram`, `LayerDiagram`, `Heatmap`,
   `DistributionBars` (a few labs also render a small purpose-built SVG inline, e.g. Bayes'

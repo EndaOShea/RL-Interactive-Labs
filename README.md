@@ -7,7 +7,7 @@
 An interactive platform for learning machine learning **by doing** — live, client-side
 simulations with real-time math and multi-provider AI tutoring, wrapped in a full-screen
 "Cinematic Stage" UI. It began as **Policy Playground** (Reinforcement Learning) and now spans
-eighteen subject areas, each added without touching the original RL app.
+nineteen subject areas, each added without touching the original RL app.
 
 View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
 
@@ -46,6 +46,10 @@ client-side** — no TF.js/ONNX and no servers.
   (mutual exclusion, river crossing).
 - **Image Classification** — convolution filters and CNN feature maps.
 - **Audio & Speech** — harmonic synthesis and live spectrograms (the Fourier front-end).
+- **Natural Language Processing** — word embeddings & analogy arithmetic (king − man + woman →
+  queen), TF-IDF document similarity, n-gram language models (add-k smoothing, perplexity,
+  token-by-token generation), named-entity recognition (Viterbi sequence labeling), semantic
+  search / RAG retrieval, and embedding-based text classification.
 - **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention.
 - **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
 - **Math Foundations** — gradient descent, Taylor series, linear transformations.
