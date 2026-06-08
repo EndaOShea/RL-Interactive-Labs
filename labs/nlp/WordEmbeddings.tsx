@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../components/labkit/viz/ScatterPlot';
+import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker, CLASS_COLORS } from '../../components/labkit/viz/ScatterPlot';
 import { AlgoPill, RunControls, Legend, MonoLabel } from '../../components/stage/primitives';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
@@ -93,8 +93,10 @@ const WordEmbeddingsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
       controls={<RunControls isPlaying={false} onPlay={run} onReset={() => { setLastLog(null); narration.cancel(); }} />}
       legend={(
         <Legend title="GROUPS" items={[
-          { color: '#14b8a6', label: 'gender' }, { color: '#34d399', label: 'royalty' },
-          { color: '#38bdf8', label: 'country' }, { color: '#fb7185', label: 'capital' },
+          { color: CLASS_COLORS[GROUP_CLS.gender], label: 'gender' },
+          { color: CLASS_COLORS[GROUP_CLS.royalty], label: 'royalty' },
+          { color: CLASS_COLORS[GROUP_CLS.country], label: 'country' },
+          { color: CLASS_COLORS[GROUP_CLS.capital], label: 'capital' },
           { color: '#fbbf24', label: 'analogy target' },
         ]} />
       )}
