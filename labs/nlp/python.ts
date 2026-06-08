@@ -355,3 +355,89 @@ for rank, (doc, sim) in enumerate(ranked, 1):
 #           + f"\\n\\nQuestion: {QUERY_LABEL}"
 # The LLM then answers grounded in the retrieved context instead of parametric memory.
 `;
+
+/* ---------- 6) Text Classification (sentiment) — logistic regression on 2-D embeddings ---------- */
+export const classifyPython = () => `import numpy as np
+
+# Text Classification (sentiment) via logistic regression on 2-D embeddings.
+# Mirrors the on-screen maths exactly: sigmoid activation, gradient-descent
+# weight update rule from fitLogistic (iters=400, lr=0.05, averaged gradient).
+
+# ---- Training data: 10 reviews with hand-placed 2-D embeddings ----
+# x = negative(0) -> positive(10) lexical tone; y = subjectivity (mild signal)
+SENTIMENT_POINTS = [
+    {"text": "a wonderful delightful movie",   "vec": [8.5, 6], "label": 1},
+    {"text": "loved every brilliant minute",   "vec": [9,   5], "label": 1},
+    {"text": "great fun and very enjoyable",   "vec": [7.5, 4], "label": 1},
+    {"text": "a pleasant charming surprise",   "vec": [7,   6], "label": 1},
+    {"text": "best film of the year",          "vec": [8,   3], "label": 1},
+    {"text": "terrible boring waste of time",  "vec": [1.5, 6], "label": 0},
+    {"text": "awful and painfully dull",       "vec": [1,   5], "label": 0},
+    {"text": "a disappointing weak script",    "vec": [2.5, 4], "label": 0},
+    {"text": "hated the clumsy ending",        "vec": [2,   6], "label": 0},
+    {"text": "worst movie in ages",            "vec": [1.2, 3], "label": 0},
+]
+
+# ---- Sigmoid and probability ----
+def sigmoid(z):
+    return 1.0 / (1.0 + np.exp(-z))
+
+def classify_prob(w, b, vec):
+    return sigmoid(np.dot(w, vec) + b)
+
+# ---- Fit logistic regression by gradient descent ----
+# Same update rule as fitLogistic in shared.ts:
+#   error e = yhat - label  (averaged over the batch)
+#   w -= lr * mean(e * x);  b -= lr * mean(e)
+def fit_logistic(points, iters=400, lr=0.05):
+    w = np.zeros(2, dtype=float)
+    b = 0.0
+    vecs   = np.array([p["vec"]   for p in points], dtype=float)  # (N, 2)
+    labels = np.array([p["label"] for p in points], dtype=float)  # (N,)
+    for _ in range(iters):
+        z    = vecs @ w + b              # (N,)
+        yhat = sigmoid(z)               # (N,)
+        e    = yhat - labels            # (N,)  error per sample
+        gw   = (e[:, None] * vecs).mean(axis=0)   # averaged gradient for w
+        gb   = e.mean()                            # averaged gradient for b
+        w   -= lr * gw
+        b   -= lr * gb
+    return w, b
+
+w, b = fit_logistic(SENTIMENT_POINTS)
+
+print("Learned model:")
+print(f"  w = [{w[0]:.4f}, {w[1]:.4f}]")
+print(f"  b = {b:.4f}")
+print(f"  Decision boundary: {w[0]:.4f}*x + {w[1]:.4f}*y + {b:.4f} = 0")
+
+# ---- Training accuracy ----
+correct = sum(
+    1 for p in SENTIMENT_POINTS
+    if (classify_prob(w, b, p["vec"]) > 0.5) == bool(p["label"])
+)
+acc = correct / len(SENTIMENT_POINTS)
+print(f"\\nTraining accuracy: {correct}/{len(SENTIMENT_POINTS)} = {acc:.2f}")
+
+# ---- Full predictions on training set ----
+print("\\nPer-review predictions:")
+for p in SENTIMENT_POINTS:
+    prob = classify_prob(w, b, p["vec"])
+    pred = "positive" if prob > 0.5 else "negative"
+    truth = "positive" if p["label"] == 1 else "negative"
+    ok = "OK" if pred == truth else "WRONG"
+    print(f"  {ok}  p={prob:.3f}  pred={pred:8s}  '{p['text']}'")
+
+# ---- Test reviews (same 2-D space, unseen at training time) ----
+TEST_REVIEWS = [
+    {"text": "a fun but flawed film",       "vec": [5.5, 5]},
+    {"text": "absolutely loved every moment","vec": [9,   4]},
+    {"text": "rather dull and forgettable", "vec": [3,   5]},
+    {"text": "not bad, fairly enjoyable",   "vec": [6, 4.5]},
+]
+print("\\nTest-set predictions:")
+for t in TEST_REVIEWS:
+    prob = classify_prob(w, b, t["vec"])
+    pred = "positive" if prob > 0.5 else "negative"
+    print(f"  p={prob:.3f}  pred={pred:8s}  '{t['text']}'")
+`;

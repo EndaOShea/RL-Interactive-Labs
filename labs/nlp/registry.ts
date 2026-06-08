@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT, NER_CONTENT, SEARCH_CONTENT } from './content';
+import { EMBEDDINGS_CONTENT, TFIDF_CONTENT, NGRAM_CONTENT, NER_CONTENT, SEARCH_CONTENT, CLASSIFY_CONTENT } from './content';
 
 export const ACCENT = '#14b8a6';
 
@@ -64,5 +64,17 @@ export const NLP_LABS: LabDescriptor[] = [
     codeFile: 'semantic_search.py',
     content: SEARCH_CONTENT,
     component: React.lazy(() => import('./SemanticSearch')),
+  },
+  {
+    id: 'text-classification',
+    category: 'nlp',
+    title: 'Text Classification',
+    subtitle: 'p = σ(w·x + b)  ·  embeddings → decision boundary',
+    blurb: 'Embed short reviews, fit a logistic boundary, and classify sentiment with a calibrated probability — the embed-then-separate recipe behind every fine-tuned text classifier.',
+    icon: 'M4 12h16M12 4v16M7 7l10 10',
+    accent: ACCENT,
+    codeFile: 'text_classification.py',
+    content: CLASSIFY_CONTENT,
+    component: React.lazy(() => import('./TextClassification')),
   },
 ];

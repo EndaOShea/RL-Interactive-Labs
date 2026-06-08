@@ -176,6 +176,52 @@ export const SEARCH_CONTENT: LabContent = {
   ],
 };
 
+export const CLASSIFY_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Text classification = embed then separate',
+      body: 'Classifying a review as positive or negative starts with the same step as every other NLP task: map the text to a vector. Once reviews live as points in a vector space, sentiment classification becomes a geometry problem — can you draw a boundary that separates positive points from negative ones? The logistic regression boundary is a hyperplane (a line in 2-D), and the same recipe — embed, then learn a linear separator — covers spam detection, topic tagging, and intent classification too. Only the label set and the embedding model change.',
+      details: [
+        { label: 'Embed → separate', text: 'Any classifier that reads text first embeds it. The embedding turns the discrete token sequence into a numeric vector that gradient descent can operate on.' },
+        { label: 'Running example: sentiment', text: 'A review\'s positivity/negativity maps cleanly to a direction in embedding space — high-tone words cluster on one side, low-tone words on the other.' },
+        { label: 'Same recipe, different labels', text: 'Spam vs ham, news topic, user intent — all use embed-then-classify. Swap the labels and retrain the head; the architecture is unchanged.' },
+      ],
+    },
+    {
+      heading: 'Logistic regression on embeddings',
+      body: 'Given an embedding vector x, logistic regression computes a linear score z = w·x + b and squashes it through the sigmoid: p = σ(z) = 1 / (1 + e⁻ᶻ). The decision boundary is the line w·x + b = 0 — exactly the set of points where the model is 50 % confident. Points on the positive side (w·x + b > 0) get p > 0.5 and are classified positive; the other side is negative. The weights w and bias b are learned by gradient descent, minimising the cross-entropy loss — the same cross-entropy covered in the Information Theory area. Because p is a proper probability, the output is a calibrated confidence, not just a label.',
+      details: [
+        { label: 'p = σ(w·x + b)', text: 'σ squashes any real-valued linear score into [0, 1]. The score is high for embeddings that look like the positive class; σ turns that into a probability.' },
+        { label: 'Boundary: w·x + b = 0', text: 'The decision boundary is a hyperplane perpendicular to the weight vector w. Moving along w increases the positive score; moving against it decreases it.' },
+        { label: 'Calibrated probability', text: 'Unlike a hard-threshold classifier, logistic regression outputs a genuine probability — useful for ranking, thresholding at a value other than 0.5, or measuring model confidence.' },
+      ],
+    },
+    {
+      heading: 'From bag-of-words to fine-tuned Transformers',
+      body: 'The embed-then-linear-head pattern scales across the full history of text classification. Bag-of-words embeddings gave way to static word vectors (word2vec, GloVe), then to contextual sentence embeddings (ELMo, sentence-BERT), and finally to fine-tuned Transformer classifiers (BERT + linear head). In each case the recipe is identical: map text to a dense vector, then train a linear (logistic) head on top. Fine-tuning BERT for sentiment means unfreezing the whole Transformer and updating every weight with the same cross-entropy gradient — but the final layer is still p = σ(w·x + b) and the boundary is still w·x + b = 0. The principle established by the toy 2-D model in this lab is unchanged.',
+      details: [
+        { label: 'Static → contextual → fine-tuned', text: 'Each generation improved the embedding quality; the linear head on top stayed conceptually identical. Better embeddings mean the classes separate more cleanly before the head even sees them.' },
+        { label: 'BERT + linear head', text: 'Fine-tuning BERT for classification appends a single linear layer to the [CLS] token embedding and trains end-to-end on labelled examples — exactly the logistic head from this lab, applied to 768-D or 1024-D contextual vectors.' },
+        { label: 'Bridge to the LLM area', text: 'LLMs used as classifiers via prompting skip the explicit linear head, but the internal geometry is the same: the model assigns high probability to a positive-class token because the residual-stream embedding at that position points in the right direction.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Class balance and the 0.5 threshold',
+      description: 'Logistic regression outputs p > 0.5 = positive by default, but that threshold assumes balanced classes and equal cost of false positives and false negatives. On an imbalanced dataset (e.g. 90 % negative reviews) the model will skew toward predicting the majority class, and moving the threshold — say to 0.3 — trades precision for recall.',
+      recommendation: 'Plot precision–recall curves and choose the threshold that optimises your operational goal (e.g. maximise recall for a safety-critical spam filter). Never report accuracy alone on an imbalanced dataset.',
+    },
+    {
+      category: 'METHODOLOGY',
+      title: 'Report precision / recall / F1 and a confusion matrix',
+      description: 'Accuracy is misleading whenever classes are imbalanced: a model that predicts "negative" for every review is 50 % accurate on a balanced set but completely useless. Precision (of the positives you predicted, how many were right?) and recall (of the actual positives, how many did you catch?) capture different failure modes. F1 is their harmonic mean. The confusion matrix reveals whether errors are mostly false positives or false negatives.',
+      recommendation: 'Always report per-class precision, recall, and F1 alongside the confusion matrix. For multi-class problems break these metrics down per label — a model can have high macro-F1 while failing badly on a minority class.',
+    },
+  ],
+};
+
 export const TFIDF_CONTENT: LabContent = {
   sections: [
     {
