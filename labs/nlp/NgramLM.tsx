@@ -3,15 +3,13 @@ import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import DistributionBars, { Bar } from '../../components/labkit/viz/DistributionBars';
-import { AlgoPill, RunControls, ParamSlider, MonoLabel, GOOD, ACC } from '../../components/stage/primitives';
+import { AlgoPill, RunControls, ParamSlider, MonoLabel, GOOD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { ngramPython } from './python';
-import { trainNgram, ngramDist, ngramProb, perplexity, NGRAM_CORPUS } from './shared';
-
-void ACC; // imported for type-checking completeness but ACCENT is used for teal theme
+import { trainNgram, ngramDist, perplexity, NGRAM_CORPUS } from './shared';
 
 const ACCENT = '#14b8a6';
 const MAX_LEN = 16;
@@ -32,9 +30,6 @@ function sampleToken(dist: { token: string; p: number }[], r: number): string {
   for (const d of dist) { acc -= d.p; if (acc <= 0) return d.token; }
   return dist[dist.length - 1].token;
 }
-
-// Silence unused-import warning on ngramProb (it's re-exported for the python template validation)
-void ngramProb;
 
 const NgramLMLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
