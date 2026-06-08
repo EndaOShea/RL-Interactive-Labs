@@ -30,6 +30,7 @@ const AppRouter: React.FC = () => (
       <Route path="/information/:labId?" element={<AreaHost category="information" />} />
       <Route path="/sequence/:labId?" element={<AreaHost category="sequence" />} />
       <Route path="/stochastic/:labId?" element={<AreaHost category="stochastic" />} />
+      <Route path="/nlp/:labId?" element={<AreaHost category="nlp" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   </BrowserRouter>
