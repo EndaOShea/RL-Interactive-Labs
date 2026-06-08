@@ -24,6 +24,7 @@ const SemanticSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
   const query = SEARCH_QUERIES[queryIdx];
 
   // Rank ALL docs so users can see the full ordering; topK is first k of ranked.
+  // query is SEARCH_QUERIES[queryIdx], a constant array — queryIdx fully determines query.vec
   const ranked = useMemo(() => retrieve(query.vec, SEARCH_DOCS.length), [queryIdx]);
   const topK = ranked.slice(0, k);
   const topIds = new Set(topK.map((r) => r.doc.id));
@@ -33,11 +34,11 @@ const SemanticSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
   const points: ScatterPoint[] = SEARCH_DOCS.map((d) => ({
     x: d.vec[0],
     y: d.vec[1],
-    cls: undefined,  // no cls-based color — overridden by explicit DOC_COLOR below
+    cls: 0,  // 0 → classColors[0] = DOC_COLOR, matching the legend
     faint: !topIds.has(d.id),
   }));
 
-  // Override ScatterPlot class colors so all points use our DOC_COLOR neutral grey.
+  // classColors[0] = DOC_COLOR so colorOf(0) = DOC_COLOR — matches the legend swatch exactly.
   const customClassColors = [DOC_COLOR];
 
   const markers: ScatterMarker[] = [
