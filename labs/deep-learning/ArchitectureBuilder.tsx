@@ -44,11 +44,11 @@ const ArchitectureBuilder: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
   const [layers, setLayers] = useState<Layer[]>(CNN_START);
   const [selId, setSelId] = useState<string>(CNN_START[0].id);
   const [trainSize, setTrainSize] = useState(5000);
-  const input: Shape = mode === 'cnn' ? { h: 32, w: 32, c: 3 } : { h: 1, w: 1, c: 8 };
+  const input = useMemo<Shape>(() => (mode === 'cnn' ? { h: 32, w: 32, c: 3 } : { h: 1, w: 1, c: 8 }), [mode]);
 
   const analysis = useMemo(
     () => analyse({ mode, input, layers, trainSize }),
-    [mode, layers, trainSize], // eslint-disable-line react-hooks/exhaustive-deps
+    [mode, input, layers, trainSize],
   );
   const sel = layers.find((l) => l.id === selId) || null;
   const riskByLayer = (id: string) => analysis.risks.filter((r) => r.layerIds.includes(id));
@@ -129,7 +129,7 @@ const ArchitectureBuilder: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
 /* ── centre stage: the layer stack ── */
 const LayerStack: React.FC<{
   mode: Mode; input: Shape; analysis: ReturnType<typeof analyse>;
-  selId: string; onSelect: (id: string) => void; riskByLayer: (id: string) => { severity: string; title: string }[];
+  selId: string; onSelect: (id: string) => void; riskByLayer: (id: string) => { id: string; severity: string; title: string }[];
 }> = ({ mode, input, analysis, selId, onSelect, riskByLayer }) => (
   <div style={{ width: 470, maxHeight: '100%', overflowY: 'auto' }} className="custom-scrollbar">
     <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginBottom: 8 }}>
@@ -151,7 +151,7 @@ const LayerStack: React.FC<{
             {s.layer.kind === 'pool' && ` ${s.layer.pool}×${s.layer.pool}`}
             {s.layer.kind === 'dense' && ` ${s.layer.units} · ${s.layer.activation}`}
             {s.layer.kind === 'dropout' && ` p=${s.layer.rate}`}
-            {risks.map((r, i) => <span key={i} style={{ marginLeft: 6, color: r.severity === 'danger' ? BAD : '#fbbf24' }}>⚠</span>)}
+            {risks.map((r) => <span key={r.id} style={{ marginLeft: 6, color: r.severity === 'danger' ? BAD : '#fbbf24' }}>⚠</span>)}
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', textAlign: 'right' }}>
             {shapeStr(s.outShape, mode)}<br />
@@ -197,11 +197,11 @@ const ActPicker: React.FC<{ value: Activation; onChange: (a: Activation) => void
   </div>
 );
 
-const RiskList: React.FC<{ risks: { severity: string; title: string; detail: string }[] }> = ({ risks }) => (
+const RiskList: React.FC<{ risks: { id: string; severity: string; title: string; detail: string }[] }> = ({ risks }) => (
   <div>
     <MonoLabel style={{ marginBottom: 7 }}>Risks</MonoLabel>
-    {risks.map((r, i) => (
-      <div key={i} style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 7, background: r.severity === 'danger' ? 'rgba(244,63,94,.10)' : 'rgba(251,191,36,.10)', border: `1px solid ${r.severity === 'danger' ? 'rgba(244,63,94,.4)' : 'rgba(251,191,36,.4)'}` }}>
+    {risks.map((r) => (
+      <div key={r.id} style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 7, background: r.severity === 'danger' ? 'rgba(244,63,94,.10)' : 'rgba(251,191,36,.10)', border: `1px solid ${r.severity === 'danger' ? 'rgba(244,63,94,.4)' : 'rgba(251,191,36,.4)'}` }}>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: r.severity === 'danger' ? '#fca5a5' : '#fcd34d' }}>{r.severity === 'danger' ? '⛔' : '⚠'} {r.title}</div>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 3, lineHeight: 1.5 }}>{r.detail}</div>
       </div>

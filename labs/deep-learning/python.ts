@@ -1,4 +1,5 @@
-// Runnable Python exports for the Deep Learning labs (PyTorch).
+// Runnable Python exports for the Deep Learning labs (PyTorch; the Architecture
+// Builder emits Keras so model.summary() can print exact per-layer params/shapes).
 import type { Layer, Shape, Mode } from './archBuilder';
 
 export const resnetPython = (depth = 20, residual = true, gain = 0.9) => `import torch, torch.nn as nn
@@ -112,10 +113,18 @@ print("final point:", p.detach().tolist(), " loss:", float(rosenbrock(p)))
 export const architectureBuilderPython = (mode: Mode, input: Shape, layers: Layer[]) => {
   const lines = layers.map((l) => {
     switch (l.kind) {
-      case 'conv': return `    layers.Conv2D(${l.filters}, ${l.kernel}, strides=${l.stride}, padding="${l.padding}", activation=${l.activation === 'none' ? 'None' : `"${l.activation}"`}),`;
+      case 'conv': {
+        const lr = l.activation === 'leaky';
+        const act = l.activation === 'none' || lr ? 'None' : `"${l.activation}"`;
+        return `    layers.Conv2D(${l.filters}, ${l.kernel}, strides=${l.stride}, padding="${l.padding}", activation=${act}),${lr ? '\n    layers.LeakyReLU(),' : ''}`;
+      }
       case 'pool': return `    layers.MaxPooling2D(${l.pool}),`;
       case 'flatten': return '    layers.Flatten(),';
-      case 'dense': return `    layers.Dense(${l.units}, activation=${l.activation === 'none' ? 'None' : `"${l.activation}"`}),`;
+      case 'dense': {
+        const lr = l.activation === 'leaky';
+        const act = l.activation === 'none' || lr ? 'None' : `"${l.activation}"`;
+        return `    layers.Dense(${l.units}, activation=${act}),${lr ? '\n    layers.LeakyReLU(),' : ''}`;
+      }
       case 'dropout': return `    layers.Dropout(${l.rate}),`;
       case 'batchnorm': return '    layers.BatchNormalization(),';
       default: return '';
