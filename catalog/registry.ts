@@ -23,6 +23,7 @@ import { PROBABILITY_LABS } from '../labs/probability/registry';
 import { INFORMATION_LABS } from '../labs/information/registry';
 import { SEQUENCE_LABS } from '../labs/sequence/registry';
 import { STOCHASTIC_LABS } from '../labs/stochastic/registry';
+import { NLP_LABS } from '../labs/nlp/registry';
 
 export const APP_NAME = 'ML Interactive Labs';
 
@@ -172,6 +173,14 @@ export const CATEGORIES: CategoryMeta[] = [
     order: 9.7,
     accent: '#e879f9',
   },
+  {
+    id: 'nlp',
+    label: 'Natural Language Processing',
+    blurb: 'How text becomes meaning — word embeddings and analogies, TF-IDF, n-gram language models, sequence tagging (NER), semantic retrieval and embedding-based classification.',
+    icon: 'M4 6h16M4 10h10M4 14h16M4 18h7M16 14l3 3 3-5',
+    order: 12.5,
+    accent: '#14b8a6',
+  },
 ];
 
 /* ─────────────────── link-only catalog items (RL) ─────────────────── */
@@ -208,6 +217,7 @@ export const LABS: LabDescriptor[] = [
   ...INFORMATION_LABS,
   ...SEQUENCE_LABS,
   ...STOCHASTIC_LABS,
+  ...NLP_LABS,
 ];
 
 export const LAB_BY_ID = new Map(LABS.map((l) => [l.id, l]));

@@ -1,0 +1,259 @@
+import { LabContent } from '../../catalog/types';
+
+// Co-located theory for the NLP labs, rendered in each lab's Context tab.
+
+export const EMBEDDINGS_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Words as vectors',
+      body: 'A word embedding maps every word to a dense vector so that geometric relationships capture meaning: similar words sit close together, and consistent semantic differences become consistent vector OFFSETS. Models like word2vec and GloVe learn these vectors from co-occurrence statistics over huge corpora — "you shall know a word by the company it keeps". This lab uses a small hand-placed 2-D table so the geometry is visible, but the ideas (cosine similarity, analogy arithmetic) are exactly those used in real high-dimensional embeddings.',
+      details: [
+        { label: 'Dense vector', text: 'A few hundred real numbers per word (here just 2 so we can plot it), not a one-hot index.' },
+        { label: 'Distributional hypothesis', text: 'Words in similar contexts get similar vectors — meaning emerges from co-occurrence.' },
+        { label: 'Cosine similarity', text: 'Closeness is measured by the angle between vectors, not Euclidean distance — length is ignored.' },
+      ],
+    },
+    {
+      heading: 'Analogies are vector arithmetic',
+      body: 'The famous result king − man + woman ≈ queen works because the "royal" and "gender" directions are roughly constant offsets in the space. Subtract man, add woman, and you have moved along the gender axis while keeping the royalty axis fixed — landing near queen. The same structure gives capital(country) analogies: paris − france + italy ≈ rome. The nearest word to the resulting vector (excluding the inputs) is the analogy\'s answer.',
+      details: [
+        { label: 'Offset = relationship', text: 'b − a encodes the relation from a to b; adding it to c transports that relation.' },
+        { label: 'Nearest neighbour', text: 'The answer is the vocabulary word with the highest cosine to the computed target vector.' },
+        { label: 'It is approximate', text: 'Real embeddings are noisy; the analogy lands NEAR, not exactly on, the target — top-k matters.' },
+      ],
+    },
+    {
+      heading: 'Why embeddings underpin modern NLP',
+      body: 'Embeddings turn discrete text into something a neural network can do arithmetic and gradients on. Every downstream task in this area — retrieval, classification, language modelling — starts by embedding tokens. Contextual models (ELMo, BERT, the LLMs in the LLM area) extend the idea: instead of one fixed vector per word, the vector depends on the surrounding sentence, so "bank" by a river differs from "bank" holding money.',
+      details: [
+        { label: 'Shared substrate', text: 'Semantic search and the classifier labs both embed text, then compare/separate vectors.' },
+        { label: 'Static vs contextual', text: 'word2vec gives one vector per word; Transformers give a context-dependent vector per token.' },
+        { label: 'Bridge to LLMs', text: 'An LLM\'s input embedding layer is exactly this idea, learned jointly with the rest of the model.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    { category: 'CONCEPT', title: 'Geometry encodes meaning', description: 'Directions in embedding space correspond to interpretable semantic relations (gender, plurality, capital-of).', recommendation: 'Probe an embedding with analogy and nearest-neighbour queries to sanity-check what it has learned before using it downstream.' },
+    { category: 'METHODOLOGY', title: 'Bias lives in the geometry', description: 'Because embeddings reflect their training corpus, social biases appear as real directions (e.g. gendered occupation analogies).', recommendation: 'Audit and, where needed, debias embeddings; never treat analogy outputs as ground truth about the world.' },
+  ],
+};
+
+export const NGRAM_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Predicting the next word from counts',
+      body: 'An n-gram language model assigns probability to a word by conditioning only on the previous n−1 words — the Markov assumption. A bigram (n=2) conditions on one word; a trigram (n=3) on two. To handle sentence boundaries each sentence is padded with n−1 <s> start tokens and a single </s> end token. Probability is then just a normalised count: P(wₜ | wₜ₋ₙ₊₁ … wₜ₋₁) = count(context, wₜ) / count(context). Despite its simplicity, the model can already produce fluent-sounding fragments on a small corpus because it captures common local collocations.',
+      details: [
+        { label: 'Markov assumption', text: 'The model ignores everything more than n−1 steps back. A bigram sees only the immediately preceding word; a trigram sees two. Longer histories need exponentially more data.' },
+        { label: 'Sentence padding', text: '<s> tokens fill the left context at the start of each sentence, and </s> marks the end — letting the model also learn where sentences typically stop.' },
+        { label: 'Probability from counts', text: 'Count how many times the context appeared, then how often each word followed it, and divide. The distribution is just a normalised frequency table.' },
+      ],
+    },
+    {
+      heading: 'Smoothing: the zero-probability problem',
+      body: 'A corpus covers only a tiny fraction of all possible n-grams. Any n-gram not seen in training has a count of 0, so its raw probability is 0. A single unseen word in a sentence drives the whole sentence probability to 0, making perplexity infinite. Add-k (Laplace) smoothing fixes this by pretending every possible n-gram was seen k extra times: P(wₜ | ctx) = (count + k) / (total + k·V), where V is the vocabulary size (including </s>). This reserves a small probability mass for unseen events. Setting k = 1 is classic Laplace smoothing; smaller k values stay closer to the raw counts. As k grows the distribution flattens toward uniform — a bias/variance trade-off between over-fitting the training counts and over-smoothing to ignorance.',
+      details: [
+        { label: 'Zero probability trap', text: 'Without smoothing, a single unseen n-gram in a test sentence gives P = 0 and log P = −∞, making perplexity undefined. This happens frequently even on small test sets.' },
+        { label: 'Add-k formula', text: '(count + k) / (total + k·V) where V = |vocab| + 1 for </s>. The extra +1 ensures </s> is always reachable even from contexts that never ended a sentence.' },
+        { label: 'k as a hyperparameter', text: 'k→0 recovers the raw MLE counts (risky); k=1 is Laplace (often over-smoothes); k≈0.1 is a common compromise. Interpolation and back-off are stronger alternatives.' },
+      ],
+    },
+    {
+      heading: 'Perplexity & generation',
+      body: 'Perplexity = exp(−(1/N) Σ log P(wₜ | ctx)) is the geometric mean inverse probability: roughly the model\'s average branching factor — how many equally likely next words it expects. A perplexity of 5 means the model is on average as uncertain as if it had to pick uniformly among 5 options. Lower is better. Smoothing raises perplexity because it spreads mass to unseen events; a trigram usually has lower perplexity than a bigram on the training distribution because it conditions on more context and can be more precise. To generate text, sample from the smoothed next-token distribution, append the drawn token, shift the context window, and repeat until </s>. This count-based sampling is the direct ancestor of neural language models and connects to the LLM Sampling lab, where a Transformer\'s learned distribution replaces the count table and temperature/top-k control the sharpness of sampling.',
+      details: [
+        { label: 'Perplexity interpretation', text: 'exp(cross-entropy) is the branching factor: a perplexity of 10 means the model is, on average, as confused as if choosing uniformly among 10 tokens. Lower = less surprised = better model.' },
+        { label: 'Smoothing vs perplexity', text: 'Every bit of probability mass moved from observed to unseen events raises perplexity. Optimal k minimises perplexity on held-out data, not on training data.' },
+        { label: 'Bridge to neural LMs', text: 'Neural language models (RNNs, Transformers) replace the count table with a learned distribution but keep the same predict-the-next-token objective and evaluate by the same perplexity metric.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Data sparsity explodes with n',
+      description: 'The number of possible n-grams is |V|ⁿ. Even for a modest 10 000-word vocabulary, trigrams number 10¹², of which a typical corpus covers a minuscule fraction. Most n-grams are never seen — the zero-probability problem grows rapidly with n, making smoothing and back-off essential rather than optional.',
+      recommendation: 'In practice, n > 5 is rarely useful without massive data. For small corpora use n = 2 or 3 with interpolation (mix unigram + bigram + trigram probabilities) rather than relying on pure high-order counts.',
+    },
+    {
+      category: 'METHODOLOGY',
+      title: 'Held-out perplexity and interpolation',
+      description: 'Always evaluate perplexity on held-out data, never on the training corpus — training perplexity decreases monotonically with n and tells you nothing about generalisation. Back-off (use a lower-order model when the high-order count is zero) and linear interpolation (λ₁P₁ + λ₂P₂ + λ₃P₃, with λ weights tuned on held-out data) outperform fixed add-k smoothing for any non-trivial application.',
+      recommendation: 'Use Kneser-Ney smoothing (a principled back-off that conditions on the number of distinct contexts a word appears in) as the practical baseline before reaching for a neural LM.',
+    },
+  ],
+};
+
+export const NER_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Sequence labeling: a tag per token',
+      body: 'Named Entity Recognition assigns a class label to every token in a sentence: Person (PER), Location (LOC), Organization (ORG), or Outside (O) for tokens that belong to no entity. The key challenge is ambiguity: "Amazon" is an organisation in most business contexts but a location when discussing the river, and "Paris" can be a person\'s name as well as a city. Resolving these cases requires context — the tokens around a word inform its tag. The BIO (Beginning-Inside-Outside) scheme extends these tags to handle multi-token spans ("New / York" as B-LOC / I-LOC), but for single-token entities the four tags used here capture the essential structure.',
+      details: [
+        { label: 'Per-token labels', text: 'Unlike sentence-level classification, NER assigns a tag to every individual token — even punctuation and articles receive the O tag.' },
+        { label: 'Context matters', text: '"Google" in a news article is ORG; in a sentence about verbs it might be O. Neighbouring tokens provide the disambiguating signal.' },
+        { label: 'BIO scheme', text: 'Real taggers use B-PER/I-PER (begin/inside) to mark multi-word entities; this lab uses the simpler 4-tag set to keep the Viterbi trellis readable.' },
+      ],
+    },
+    {
+      heading: 'Features: lexicon + word shape',
+      body: 'This lab scores each (word, tag) pair with an emission function that combines two signals: a hand-crafted gazetteer (a dictionary of known names and their entity types — Alice → PER:3, Berlin → LOC:3, Google → ORG:3) and a word-shape prior based on capitalisation. A capitalised word that is not in the gazetteer still likely names something, so entity tags receive a mild positive score (+0.4) while O receives a mild penalty (−0.5). A lowercase word is almost always O (+2.0) and rarely an entity (−2.0). Real industrial taggers replace the hand-crafted lexicon with features learned by a BiLSTM or Transformer encoder, but the emission-score concept remains the same.',
+      details: [
+        { label: 'Gazetteer', text: 'A lookup table mapping known surface forms to their entity type and a log-probability score. High coverage but misses novel names.' },
+        { label: 'Word shape', text: 'Capitalisation, digits, and punctuation patterns provide soft features for words absent from the gazetteer.' },
+        { label: 'Neural replacement', text: 'In modern taggers the emission score is a softmax over a BiLSTM or Transformer hidden state — learned end-to-end from labelled corpora.' },
+      ],
+    },
+    {
+      heading: 'Viterbi: the best tag SEQUENCE, not the best per-token tag',
+      body: 'A greedy decoder picks the highest-scoring tag for each token independently, ignoring whether neighbouring tag assignments are consistent. Viterbi dynamic programming instead finds the globally optimal tag sequence by considering all O(T·S²) transitions together. At each time step t it tracks, for every possible current tag s, the score of the best path that ends in s, carrying a backpointer to the best previous tag. At the end it traces back to recover the full sequence. Viterbi guarantees the argmax over the entire sequence — something greedy cannot provide. Modern CRF-based taggers keep exactly this Viterbi decode step but replace the hand-crafted scores with parameters learned by conditional maximum-likelihood training.',
+      details: [
+        { label: 'Greedy vs global', text: 'Greedy per-token argmax can pick O, PER, O, PER alternately when the correct sequence is a single PER span — Viterbi respects the transition structure.' },
+        { label: 'O(T·S²) complexity', text: 'For each of the T tokens and S² tag transitions the algorithm does O(1) work: linear in sentence length and quadratic in tag-set size.' },
+        { label: 'CRF extension', text: 'A linear-chain CRF adds the same Viterbi decode on top of learned feature weights, training end-to-end to maximise P(y|x) — the same decode, learned scores.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Entity boundaries and surface ambiguity',
+      description: 'The same surface form can denote entities of different types ("Amazon" the company vs "Amazon" the river) or no entity at all, depending on context. Even with a perfect per-token classifier, incorrect boundary detection (e.g., labelling only the head noun of a multi-word name) counts as a full span error in evaluation.',
+      recommendation: 'Augment the lexicon with contextual signals (surrounding POS tags, sentence-level topic) and always use a structured prediction layer (CRF or Viterbi) to enforce valid tag sequences (e.g. I-LOC cannot follow B-PER).',
+    },
+    {
+      category: 'METHODOLOGY',
+      title: 'Evaluate with span-level F1, not per-token accuracy',
+      description: 'Per-token accuracy is a misleading metric for NER because O tokens dominate most sentences, making a model that predicts O everywhere look 90%+ accurate. The standard evaluation is span-level precision, recall, and F1: a span is correct only if both its boundaries and its entity type exactly match the gold annotation.',
+      recommendation: 'Report entity-level F1 broken down by type (PER/LOC/ORG) to diagnose which entity classes the model struggles with; use the CoNLL-2003 script or seqeval library for reproducible evaluation.',
+    },
+  ],
+};
+
+export const SEARCH_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'From keyword match to meaning',
+      body: 'TF-IDF retrieval matches on exact words: a query containing "football" can only retrieve documents that also contain the word "football". Embedding-based retrieval matches on meaning instead. Both the query and every document are mapped into the same dense vector space by a sentence-embedding model, so a query about "football" can retrieve "the striker scored a last-minute goal" even though the two share no words — they simply point in the same direction in the embedding space. This lab uses hand-placed 2-D vectors to make the geometry visible, but the cosine comparisons are identical to those used with real high-dimensional transformer embeddings (e.g. sentence-BERT).',
+      details: [
+        { label: 'Shared vector space', text: 'The query and every document are embedded into the same space, so cosine similarity directly measures topical relatedness regardless of surface vocabulary.' },
+        { label: 'No shared words needed', text: 'Synonyms, paraphrases, and topic-related terms naturally cluster together in embedding space — something bag-of-words TF-IDF cannot capture at all.' },
+        { label: 'Keyword baseline', text: 'The TF-IDF lab in this area is the keyword-matching baseline; semantic search improves on it by replacing sparse term counts with dense meaning vectors.' },
+      ],
+    },
+    {
+      heading: 'Cosine ranking & top-k',
+      body: 'Retrieval is a three-step process: (1) embed the query into the same vector space as the pre-indexed documents; (2) compute the cosine similarity between the query vector and every document vector; (3) return the k documents with the highest scores. Cosine measures the angle between vectors, comparing their direction (topic) while ignoring their magnitude (document length), so a short document and a long document on the same topic score equally. The result is an ordered list of the most semantically relevant documents — the "top-k retrieved set".',
+      details: [
+        { label: 'cos(q, d) = q·d / (|q||d|)', text: 'Dot product divided by the product of norms. Ranges from -1 (opposite) to +1 (identical direction). Values near 1 mean same topic.' },
+        { label: 'Magnitude invariance', text: 'Cosine ignores vector length, so a 500-word article and a 50-word summary on the same topic receive similar scores.' },
+        { label: 'argsort descending', text: 'Sort all documents by descending cosine score and take the first k. No model inference at query time — just dot products against a pre-built index.' },
+      ],
+    },
+    {
+      heading: 'Retrieval-Augmented Generation (RAG)',
+      body: 'Large language models are powerful but their knowledge is frozen at training time and they can hallucinate facts. RAG patches both problems by splitting the workflow in two: first, a retrieval step fetches the most semantically relevant documents from a live corpus using exactly the cosine-retrieval mechanism in this lab; second, those documents are injected into the LLM\'s prompt as context, grounding the generated answer in real sources. The LLM then reads, synthesises, and cites the retrieved passages rather than relying on parametric memory alone. This lab demonstrates the retrieval half of that pipeline — the step that determines what the LLM gets to see.',
+      details: [
+        { label: 'Retrieval → prompt injection', text: 'Top-k documents are concatenated into the prompt as "context:" blocks before the user\'s question, giving the LLM up-to-date, source-specific information.' },
+        { label: 'Reduces hallucination', text: 'When the LLM is told to answer from the provided context, it is far less likely to fabricate details — it can quote or paraphrase real retrieved text.' },
+        { label: 'Bridge to the LLM area', text: 'The LLM Sampling and Attention labs in this platform show what happens inside the generator; this lab is the retrieval step that feeds it.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Retrieval quality is bounded by embedding quality',
+      description: 'If the embedding model clusters unrelated topics together or separates synonyms, the retrieval step will return irrelevant documents no matter how good the downstream LLM is. The embedding model is the weakest link: domain mismatch (a general-purpose model on medical text), poor training data, or low-dimensional compression can all cause systematic retrieval failures.',
+      recommendation: 'Evaluate retrieval quality independently with recall@k and mean reciprocal rank (MRR) on labelled query-document pairs before wiring retrieval into a RAG pipeline. Fine-tune or swap the embedding model if domain recall is poor.',
+    },
+    {
+      category: 'DEPLOYMENT',
+      title: 'Exact cosine over millions of docs is too slow — use ANN indexes',
+      description: 'Computing exact cosine similarity against 10 million documents at query time is impractical even with vectorised hardware. Approximate nearest-neighbour (ANN) indexes — FAISS (flat or HNSW graphs), ScaNN, or Pinecone/Weaviate/Qdrant in the cloud — trade a small amount of recall for orders-of-magnitude speed improvements, reducing retrieval latency from seconds to milliseconds.',
+      recommendation: 'For production RAG, pre-embed all documents offline and build an HNSW or IVF-Flat index with FAISS. Use exact search only for small corpora (< ~50 k documents) or offline evaluation.',
+    },
+  ],
+};
+
+export const CLASSIFY_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Text classification = embed then separate',
+      body: 'Classifying a review as positive or negative starts with the same step as every other NLP task: map the text to a vector. Once reviews live as points in a vector space, sentiment classification becomes a geometry problem — can you draw a boundary that separates positive points from negative ones? The logistic regression boundary is a hyperplane (a line in 2-D), and the same recipe — embed, then learn a linear separator — covers spam detection, topic tagging, and intent classification too. Only the label set and the embedding model change.',
+      details: [
+        { label: 'Embed → separate', text: 'Any classifier that reads text first embeds it. The embedding turns the discrete token sequence into a numeric vector that gradient descent can operate on.' },
+        { label: 'Running example: sentiment', text: 'A review\'s positivity/negativity maps cleanly to a direction in embedding space — high-tone words cluster on one side, low-tone words on the other.' },
+        { label: 'Same recipe, different labels', text: 'Spam vs ham, news topic, user intent — all use embed-then-classify. Swap the labels and retrain the head; the architecture is unchanged.' },
+      ],
+    },
+    {
+      heading: 'Logistic regression on embeddings',
+      body: 'Given an embedding vector x, logistic regression computes a linear score z = w·x + b and squashes it through the sigmoid: p = σ(z) = 1 / (1 + e⁻ᶻ). The decision boundary is the line w·x + b = 0 — exactly the set of points where the model is 50 % confident. Points on the positive side (w·x + b > 0) get p > 0.5 and are classified positive; the other side is negative. The weights w and bias b are learned by gradient descent, minimising the cross-entropy loss — the same cross-entropy covered in the Information Theory area. Because p is a proper probability, the output is a calibrated confidence, not just a label.',
+      details: [
+        { label: 'p = σ(w·x + b)', text: 'σ squashes any real-valued linear score into [0, 1]. The score is high for embeddings that look like the positive class; σ turns that into a probability.' },
+        { label: 'Boundary: w·x + b = 0', text: 'The decision boundary is a hyperplane perpendicular to the weight vector w. Moving along w increases the positive score; moving against it decreases it.' },
+        { label: 'Calibrated probability', text: 'Unlike a hard-threshold classifier, logistic regression outputs a genuine probability — useful for ranking, thresholding at a value other than 0.5, or measuring model confidence.' },
+      ],
+    },
+    {
+      heading: 'From bag-of-words to fine-tuned Transformers',
+      body: 'The embed-then-linear-head pattern scales across the full history of text classification. Bag-of-words embeddings gave way to static word vectors (word2vec, GloVe), then to contextual sentence embeddings (ELMo, sentence-BERT), and finally to fine-tuned Transformer classifiers (BERT + linear head). In each case the recipe is identical: map text to a dense vector, then train a linear (logistic) head on top. Fine-tuning BERT for sentiment means unfreezing the whole Transformer and updating every weight with the same cross-entropy gradient — but the final layer is still p = σ(w·x + b) and the boundary is still w·x + b = 0. The principle established by the toy 2-D model in this lab is unchanged.',
+      details: [
+        { label: 'Static → contextual → fine-tuned', text: 'Each generation improved the embedding quality; the linear head on top stayed conceptually identical. Better embeddings mean the classes separate more cleanly before the head even sees them.' },
+        { label: 'BERT + linear head', text: 'Fine-tuning BERT for classification appends a single linear layer to the [CLS] token embedding and trains end-to-end on labelled examples — exactly the logistic head from this lab, applied to 768-D or 1024-D contextual vectors.' },
+        { label: 'Bridge to the LLM area', text: 'LLMs used as classifiers via prompting skip the explicit linear head, but the internal geometry is the same: the model assigns high probability to a positive-class token because the residual-stream embedding at that position points in the right direction.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    {
+      category: 'CONCEPT',
+      title: 'Class balance and the 0.5 threshold',
+      description: 'Logistic regression outputs p > 0.5 = positive by default, but that threshold assumes balanced classes and equal cost of false positives and false negatives. On an imbalanced dataset (e.g. 90 % negative reviews) the model will skew toward predicting the majority class, and moving the threshold — say to 0.3 — trades precision for recall.',
+      recommendation: 'Plot precision–recall curves and choose the threshold that optimises your operational goal (e.g. maximise recall for a safety-critical spam filter). Never report accuracy alone on an imbalanced dataset.',
+    },
+    {
+      category: 'METHODOLOGY',
+      title: 'Report precision / recall / F1 and a confusion matrix',
+      description: 'Accuracy is misleading whenever classes are imbalanced: a model that predicts "negative" for every review is 50 % accurate on a balanced set but completely useless. Precision (of the positives you predicted, how many were right?) and recall (of the actual positives, how many did you catch?) capture different failure modes. F1 is their harmonic mean. The confusion matrix reveals whether errors are mostly false positives or false negatives.',
+      recommendation: 'Always report per-class precision, recall, and F1 alongside the confusion matrix. For multi-class problems break these metrics down per label — a model can have high macro-F1 while failing badly on a minority class.',
+    },
+  ],
+};
+
+export const TFIDF_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Bag-of-words: documents as count vectors',
+      body: 'The simplest way to represent text is to count how often each vocabulary word appears in a document, ignoring word order entirely. This produces a term-frequency (tf) vector: a sparse, high-dimensional point in a space whose axes are all the vocabulary words. Two documents that use similar words will have similar vectors even if the sentences are structured differently. The bag-of-words assumption trades away grammatical information for the huge practical benefit of a fixed-size, numeric representation that any machine-learning algorithm can consume.',
+      details: [
+        { label: 'Term frequency', text: 'tf(w, d) is the raw count of word w in document d — how many times it appears, regardless of document length.' },
+        { label: 'Sparse & high-dimensional', text: 'Real corpora have hundreds of thousands of vocabulary words; each document uses only a tiny fraction, so tf vectors are almost entirely zeros.' },
+        { label: 'Word order lost', text: 'The vectors for "the dog bit the man" and "the man bit the dog" are identical — a fundamental limitation bag-of-words shares with n-gram counts.' },
+      ],
+    },
+    {
+      heading: 'TF-IDF: down-weighting the common words',
+      body: 'Raw term frequencies are dominated by stop words like "the", "a", and "is" that appear in every document and carry almost no discriminating information. TF-IDF (term frequency–inverse document frequency) multiplies each tf count by idf(w) = ln(N / df(w)), where N is the number of documents and df(w) is how many contain the word. Words present in every document get idf ≈ 0 and essentially vanish; rare, informative words get a large idf weight and dominate the similarity calculation. This simple reweighting transforms a noisy count vector into a practical information-retrieval representation that held the state of the art for decades.',
+      details: [
+        { label: 'idf = ln(N/df)', text: 'If a word appears in all N documents, df = N, so idf = ln(1) = 0. If it appears in one document, idf = ln(N) — strongly boosted.' },
+        { label: 'Stop words vanish', text: 'Ubiquitous function words like "the" and "and" are neutralised automatically without an explicit stop-word list.' },
+        { label: 'Rare terms amplified', text: 'A domain-specific term appearing in only one or two documents gets a high idf weight, making it the primary signal for similarity.' },
+      ],
+    },
+    {
+      heading: 'Cosine similarity for retrieval',
+      body: 'Once documents are tf-idf vectors, the natural similarity measure is cosine: the cosine of the angle between two vectors. Cosine ignores vector magnitude, so a long document that simply uses the same words more often scores the same as a short one — verbosity is neutralised. Two documents on the same topic will share the same rare, high-idf terms and therefore point in the same direction, giving a cosine near 1. Documents on different topics share only low-idf words (or nothing), giving a cosine near 0. This is the classical search baseline: index all documents as tf-idf vectors, embed the query the same way, return the documents with the highest cosine. The Semantic Search lab improves on this by using dense contextual embeddings, capturing synonyms and paraphrases that TF-IDF misses entirely.',
+      details: [
+        { label: 'Length invariance', text: 'Cosine similarity depends only on the direction of the vectors, not their length, so short and long documents are treated fairly.' },
+        { label: 'Classical search baseline', text: 'TF-IDF + cosine retrieval (BM25 is a refinement) was the dominant search paradigm before dense neural embeddings.' },
+        { label: 'Bag-of-words blind spots', text: 'TF-IDF cannot recognise synonyms ("car" ≠ "automobile") or antonyms; dense embeddings in the Semantic Search lab handle both.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    { category: 'CONCEPT', title: 'Sparse vectors and the curse of dimensionality', description: 'With a vocabulary of 50 000+ words, each document vector lives in a very high-dimensional sparse space. Most cosine computations are cheap (only shared non-zero terms contribute), but clustering and nearest-neighbour search degrade as dimension grows, and out-of-vocabulary words simply have no representation.', recommendation: 'Apply dimensionality reduction (LSA/SVD, or switch to dense embeddings) when vocabulary is large or when generalisation across synonyms matters more than interpretability.' },
+    { category: 'METHODOLOGY', title: 'Normalisation, stop-words, and sublinear tf', description: 'Raw tf counts can be inflated by repetition; a word appearing 10 times is not 10× as informative as one appearing once. Common refinements are: remove explicit stop-word lists before counting; apply sublinear tf scaling tf → 1 + ln(tf); L2-normalise each document vector before comparison (equivalent to always using cosine).', recommendation: 'At minimum, lowercase and remove punctuation before tokenising; consider sublinear tf and stop-word removal for any production retrieval system to avoid over-counting repeated terms.' },
+  ],
+};
