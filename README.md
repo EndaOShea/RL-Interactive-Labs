@@ -40,8 +40,10 @@ client-side** — no TF.js/ONNX and no servers.
 - **Logic & Reasoning** — truth tables and a DPLL SAT-solver search tree.
 - **Neural Networks** — a single perceptron, a backprop-trained MLP, and activation functions.
 - **Deep Learning** — residual/skip connections (ResNet) vs vanishing gradients, batch
-  normalization, dropout, transfer learning, and optimizers (SGD / Momentum / RMSProp / Adam)
-  with learning-rate schedules.
+  normalization, dropout, transfer learning, optimizers (SGD / Momentum / RMSProp / Adam)
+  with learning-rate schedules, and an architecture builder (compose a CNN/MLP and see live
+  parameter counts, output shapes, receptive fields, and risk flags: overfitting, linear
+  collapse, vanishing gradients).
 - **Model Checking** — exhaustive reachability with safety invariants and counterexamples
   (mutual exclusion, river crossing).
 - **Image Classification** — convolution filters and CNN feature maps.

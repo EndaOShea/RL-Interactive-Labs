@@ -45,7 +45,7 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
   DecisionTree, GradientBoosting (XGBoost/LightGBM/CatBoost tree-growth toggle), SVM, NaiveBayes;
   `logic`: TruthTable, DPLL; `neural`: Perceptron, MLP, Activations; `deep-learning`: ResNet
   (vanishing-gradient vs skip connections), BatchNorm, Dropout, TransferLearning, Optimizers
-  (SGD/Momentum/RMSProp/Adam + LR schedules); `model-checking`: MutualExclusion, RiverCrossing;
+  (SGD/Momentum/RMSProp/Adam + LR schedules), ArchitectureBuilder (compose CNN/MLP; analytic params/shapes/receptive-field + risk diagnostics: overfit/underfit/linear-collapse/vanishing-gradient/kernel-size); `model-checking`: MutualExclusion, RiverCrossing;
   `image`: Convolution, FeatureMaps; `audio`: Fourier, Spectrogram; `llm`: Tokenizer, Sampling,
   Attention; `diffusion`: ForwardReverse, NoiseSchedule; `math`: GradientDescent, Taylor,
   LinearTransform; `probability`: Bayes (diagnostic-test grid + Beta–Bernoulli), Distributions
