@@ -38,7 +38,8 @@ client-side** — no TF.js/ONNX and no servers.
 - **Supervised Learning** — decision trees, gradient boosting (XGBoost / LightGBM / CatBoost
   tree-growth toggle), max-margin SVMs, Gaussian Naive Bayes.
 - **Logic & Reasoning** — truth tables and a DPLL SAT-solver search tree.
-- **Neural Networks** — a single perceptron, a backprop-trained MLP, and activation functions.
+- **Neural Networks** — a single perceptron, a backprop-trained MLP, activation functions, and a
+  step-through backpropagation lab (forward values + chain-rule gradient flow, with a dead-ReLU demo).
 - **Deep Learning** — residual/skip connections (ResNet) vs vanishing gradients, batch
   normalization, dropout, transfer learning, optimizers (SGD / Momentum / RMSProp / Adam)
   with learning-rate schedules, and an architecture builder (compose a CNN/MLP and see live
@@ -54,7 +55,10 @@ client-side** — no TF.js/ONNX and no servers.
   search / RAG retrieval, and embedding-based text classification.
 - **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention.
 - **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
-- **Math Foundations** — gradient descent, Taylor series, linear transformations.
+- **Math Foundations** — gradient descent, Taylor series, linear transformations, derivatives
+  (tangent slope and the secant→limit), the chain rule (composite functions as a product of local
+  derivatives), matrix multiplication and dot products, convex vs non-convex optimization, and
+  eigenvalues & SVD (the rotate–scale–rotate view behind PCA).
 - **Probability & Bayesian** — Bayes' theorem & base rates (with sequential Beta–Bernoulli
   updating), the distribution zoo (PMF/PDF + sampling and the Law of Large Numbers), and MCMC
   (Metropolis–Hastings) sampling of a multimodal target.

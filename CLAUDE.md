@@ -43,12 +43,16 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
 - **Labs** — under `labs/<area>/` (`classic-ml`: kNN, linear/logistic regression, k-means, PCA;
   `search`: Pathfinding, GraphSearch; `unsupervised`: DBSCAN, GMM/EM, Hierarchical; `supervised`:
   DecisionTree, GradientBoosting (XGBoost/LightGBM/CatBoost tree-growth toggle), SVM, NaiveBayes;
-  `logic`: TruthTable, DPLL; `neural`: Perceptron, MLP, Activations; `deep-learning`: ResNet
+  `logic`: TruthTable, DPLL; `neural`: Perceptron, MLP, Activations, Backpropagation (step-through forward z/a + chain-rule δ flow on a fixed 3→4→4→1 net; dead-ReLU demo); `deep-learning`: ResNet
   (vanishing-gradient vs skip connections), BatchNorm, Dropout, TransferLearning, Optimizers
   (SGD/Momentum/RMSProp/Adam + LR schedules), ArchitectureBuilder (compose CNN/MLP; analytic params/shapes/receptive-field + risk diagnostics: overfit/underfit/linear-collapse/vanishing-gradient/kernel-size); `model-checking`: MutualExclusion, RiverCrossing;
   `image`: Convolution, FeatureMaps; `audio`: Fourier, Spectrogram; `llm`: Tokenizer, Sampling,
   Attention; `diffusion`: ForwardReverse, NoiseSchedule; `math`: GradientDescent, Taylor,
-  LinearTransform; `probability`: Bayes (diagnostic-test grid + Beta–Bernoulli), Distributions
+  LinearTransform, Derivatives (tangent slope + secant→limit), ChainRule (composite graph =
+  product of local derivatives), MatrixMultiplication (dot product/projection + matrix·vector as
+  composed transform), ConvexOptimization (convex vs non-convex; multi-start GD into different
+  minima), EigenSvd (2×2 closed-form; unit-circle→ellipse, rotate–scale–rotate);
+  `probability`: Bayes (diagnostic-test grid + Beta–Bernoulli), Distributions
   (PMF/PDF + sampling/LLN), Mcmc (Metropolis–Hastings); `information`: Entropy, KlDivergence
   (cross-entropy = H + KL), SourceCoding (Huffman vs the entropy bound); `sequence`: Rnn (BPTT
   vanishing/exploding), Lstm (gated memory / constant error carousel), Seq2Seq (context
