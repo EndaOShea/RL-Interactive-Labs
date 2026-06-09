@@ -186,7 +186,7 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     if (phase !== 'applied') { doApply(); return; }
     startCycle();
   };
-  const sim = useSimLoop(stepOnce, { initialSpeed: 650 });
+  const sim = useSimLoop(stepOnce, { initialSpeed: 800 });
 
   const restart = () => { setPhase('idle'); setFwdCursor(0); setBwdCursor(0); setActive(null); setLastLog(null); setPrevLoss(null); };
   const onActivation = (a: ActName) => { sim.stop(); setActivation(a); restart(); };
@@ -244,14 +244,25 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
               const width = isActive ? 3 : isInspected ? 2.6 : sw;
               const opacity = isActive ? 1 : active ? (flowing ? 0.38 : 0.3) : (flowing ? 0.85 : 0.7);
               return (
-                <line
-                  key={`e-${l}-${j}-${i}`}
-                  x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-                  stroke={stroke}
-                  strokeWidth={width}
-                  opacity={opacity}
-                  strokeDasharray={isActive ? '5 3' : isInspected ? '4 3' : undefined}
-                />
+                <g key={`e-${l}-${j}-${i}`}>
+                  <line
+                    x1={from.x} y1={from.y} x2={to.x} y2={to.y}
+                    stroke={stroke}
+                    strokeWidth={width}
+                    opacity={opacity}
+                    strokeDasharray={isActive ? '5 3' : isInspected ? '4 3' : undefined}
+                  />
+                  {/* show the weight on each highlighted edge so z = Σ w·a + b is followable */}
+                  {isActive && (
+                    <text
+                      x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 3} textAnchor="middle"
+                      fontSize={10} fontFamily="var(--mono)" fill="#fff"
+                      stroke="rgba(8,11,20,0.95)" strokeWidth={2.6} paintOrder="stroke"
+                    >
+                      w={fmt(w, 2)}
+                    </text>
+                  )}
+                </g>
               );
             }),
           ),
@@ -355,7 +366,7 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button style={sbBtn()} className="sb-btn" onClick={reset}>↺ Reset</button>
           <button style={sbBtn(true)} className="sb-btn" onClick={() => { sim.stop(); stepOnce(); }}>{nextLabel}</button>
-          <RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />
+          <RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} />
         </div>
       )}
       lastLog={lastLog}
@@ -363,6 +374,7 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
       params={(
         <ParamsWrap>
           <ParamsHead title="Backpropagation" hint="Forward → Backward → Apply; every value is computed live." />
+          <ParamSlider name="Auto-play speed" value={`${sim.speed}ms`} min={100} max={1000} step={50} current={sim.speed} onChange={sim.setSpeed} hint="interval per step — drag right to slow down (up to 1000ms)" />
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Activation</MonoLabel>
             <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
