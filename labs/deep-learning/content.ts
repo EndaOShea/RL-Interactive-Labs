@@ -150,9 +150,19 @@ export const ARCH_BUILDER_CONTENT: LabContent = {
         { label: 'Kernel & stride', text: 'Stride > kernel skips pixels; a receptive field larger than the input means deeper spatial layers add little.' },
       ],
     },
+    {
+      heading: 'MLP mode trains live',
+      body: 'In MLP mode the network you compose is actually trained (real backprop + SGD) on 2-D toy data — XOR, concentric circles or interleaved spirals. The decision boundary and the train vs validation loss curves update every epoch, so the over/underfit the rules warn about becomes something you watch happen rather than just read.',
+      details: [
+        { label: 'Output head', text: 'Your Dense layers are the hidden stack; a 1-unit sigmoid head + binary cross-entropy is added for the 2-class task.' },
+        { label: 'Overfitting', text: 'Make the net wide/deep on noisy data: training loss keeps falling while validation loss turns back up — the GAP chip grows.' },
+        { label: 'Underfitting', text: 'Remove the hidden layers (logistic regression) and XOR stays near 50% — capacity too low for a non-linear boundary.' },
+        { label: 'Dropout helps', text: 'Add a Dropout layer and the train–validation gap shrinks; CNN mode stays analytic (in-browser conv training needs a GPU).' },
+      ],
+    },
   ],
   lifecycle: [
     { category: 'METHODOLOGY', title: 'Params ≠ accuracy', description: 'More parameters is not better — it raises overfitting and compute cost.', recommendation: 'Match capacity to data; add regularisation; validate.' },
-    { category: 'CONCEPT', title: 'Analytic, not trained', description: 'This view computes shapes/params/risks; it does not train the network.', recommendation: 'Use the MLP/Dropout/ResNet labs to see training dynamics.' },
+    { category: 'CONCEPT', title: 'MLP trains, CNN is analytic', description: 'MLP mode trains the composed net live on 2-D data; CNN mode computes shapes/params/risks only (no in-browser conv training).', recommendation: 'Use MLP mode to see overfit/underfit empirically; the Dropout/ResNet labs cover deeper training dynamics.' },
   ],
 };

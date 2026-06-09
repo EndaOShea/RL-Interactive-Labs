@@ -1,16 +1,23 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import { AlgoPill, ParamSlider, MonoLabel, GOOD, BAD } from '../../components/stage/primitives';
+import { AlgoPill, ParamSlider, MonoLabel, RunControls, GOOD, BAD } from '../../components/stage/primitives';
+import ScatterPlot, { ScatterPoint } from '../../components/labkit/viz/ScatterPlot';
+import { useSimLoop } from '../../hooks/useSimLoop';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { architectureBuilderPython } from './python';
 import {
   analyse, Layer, LayerKind, Mode, Shape, Activation, flat,
 } from './archBuilder';
+import {
+  ToyKind, DataPoint, Net, Arch, makeData, archFromLayers, initNet, trainEpoch, evaluate, predictProb, archSummary,
+} from './mlpTrainer';
 
 const ACCENT = '#f43f5e';
+const MAX_EPOCHS = 250;
+type TrainMetrics = { trainLoss: number; valLoss: number; trainAcc: number; valAcc: number };
 let uid = 0;
 const nid = () => `L${uid++}`;
 
@@ -33,6 +40,7 @@ const CNN_START: Layer[] = [
 ];
 const MLP_START: Layer[] = [
   { id: nid(), kind: 'dense', units: 16, activation: 'relu' },
+  { id: nid(), kind: 'dense', units: 8, activation: 'relu' },
   { id: nid(), kind: 'dense', units: 1, activation: 'sigmoid' },
 ];
 
@@ -52,6 +60,53 @@ const ArchitectureBuilder: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
   );
   const sel = layers.find((l) => l.id === selId) || null;
   const riskByLayer = (id: string) => analysis.risks.filter((r) => r.layerIds.includes(id));
+
+  // ── MLP live-training (increment 2): the composed Dense stack actually trains
+  //    on 2-D toy data, so overfit/underfit are EMPIRICAL, not just rule-flagged. ──
+  const [dataset, setDataset] = useState<ToyKind>('xor');
+  const [lr, setLr] = useState(0.5);
+  const netRef = useRef<Net | null>(null);
+  const dataRef = useRef<DataPoint[]>([]);
+  const [epoch, setEpoch] = useState(0);
+  const [metrics, setMetrics] = useState<TrainMetrics>({ trainLoss: 0, valLoss: 0, trainAcc: 0, valAcc: 0 });
+  const [lossHist, setLossHist] = useState<{ t: number; v: number }[]>([]);
+  const [fieldVer, setFieldVer] = useState(0);
+  const mlpArch: Arch = useMemo(() => archFromLayers(layers), [layers]);
+
+  const resetTrain = useCallback((newData: boolean) => {
+    if (newData || dataRef.current.length === 0) dataRef.current = makeData(dataset);
+    netRef.current = initNet(archFromLayers(layers));
+    setEpoch(0); setLossHist([]);
+    setMetrics(evaluate(netRef.current, dataRef.current));
+    setFieldVer((v) => v + 1);
+  }, [dataset, layers]);
+
+  const step = () => {
+    if (mode !== 'mlp' || !netRef.current) return;
+    if (epoch >= MAX_EPOCHS) { sim.pause(); return; }
+    trainEpoch(netRef.current, dataRef.current, lr, mlpArch.dropout);
+    const m = evaluate(netRef.current, dataRef.current);
+    setEpoch((e) => e + 1);
+    setMetrics(m);
+    setLossHist((h) => [...h, { t: m.trainLoss, v: m.valLoss }].slice(-MAX_EPOCHS));
+    setFieldVer((v) => v + 1);
+  };
+  const sim = useSimLoop(step, { initialSpeed: 25 });
+
+  // Reinit training when the architecture / dataset / mode changes. New toy data
+  // only when the dataset changes (or on first MLP entry); an architecture edit
+  // keeps the SAME points and just reinitialises the weights, so capacities are
+  // compared on identical data. Single effect → exactly one reinit per change.
+  const archSig = JSON.stringify(layers.map((l) => [l.kind, l.units, l.activation, l.rate]));
+  const dataKeyRef = useRef('');
+  useEffect(() => {
+    if (mode !== 'mlp') { sim.stop(); return; }
+    sim.stop();
+    const newData = dataKeyRef.current !== dataset || dataRef.current.length === 0;
+    dataKeyRef.current = dataset;
+    resetTrain(newData);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archSig, dataset, mode]);
 
   const switchMode = (m: Mode) => {
     if (m === mode) return;
@@ -90,37 +145,59 @@ const ArchitectureBuilder: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
   return (
     <LabStage
       descriptor={descriptor}
-      running={false}
-      stats={[
+      running={mode === 'mlp' && sim.isPlaying}
+      stats={mode === 'cnn' ? [
         { label: 'PARAMS', value: fmt(analysis.totalParams), color: ACCENT },
         { label: 'OUTPUT', value: shapeStr(analysis.finalShape, mode) },
         { label: 'DEPTH', value: layers.length },
         { label: 'RISKS', value: analysis.risks.length, color: danger ? BAD : analysis.risks.length ? '#fbbf24' : GOOD },
+      ] : [
+        { label: 'PARAMS', value: fmt(analysis.totalParams), color: ACCENT },
+        { label: 'EPOCH', value: epoch },
+        { label: 'TRAIN', value: `${(metrics.trainAcc * 100).toFixed(0)}%`, color: GOOD },
+        { label: 'VAL', value: `${(metrics.valAcc * 100).toFixed(0)}%` },
+        { label: 'GAP', value: `${Math.round((metrics.trainAcc - metrics.valAcc) * 100)}%`, color: (metrics.trainAcc - metrics.valAcc) >= 0.15 ? BAD : 'var(--t0)' },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, architectureBuilderPython(mode, input, layers))}
-      grid={<LayerStack mode={mode} input={input} analysis={analysis} selId={selId} onSelect={setSelId} riskByLayer={riskByLayer} />}
+      grid={mode === 'cnn'
+        ? <LayerStack mode={mode} input={input} analysis={analysis} selId={selId} onSelect={setSelId} riskByLayer={riskByLayer} />
+        : (
+          <div style={{ display: 'flex', gap: 18, alignItems: 'flex-start' }}>
+            <LayerStack mode={mode} input={input} analysis={analysis} selId={selId} onSelect={setSelId} riskByLayer={riskByLayer} width={250} />
+            <MlpTrainPanel dataset={dataset} setDataset={setDataset} data={dataRef.current} net={netRef.current}
+              epoch={epoch} metrics={metrics} lossHist={lossHist} fieldVer={fieldVer} arch={mlpArch}
+              isPlaying={sim.isPlaying} speed={sim.speed} onToggle={sim.toggle} onSpeed={sim.setSpeed}
+              onReset={() => resetTrain(false)} onNewData={() => resetTrain(true)} />
+          </div>
+        )}
       controls={<div style={{ display: 'flex', gap: 8 }}>{palette.map((k) => (
         <AlgoPill key={k} active={false} accent={ACCENT} onClick={() => addLayer(k)}>+ {k}</AlgoPill>
       ))}</div>}
       lastLog={lastLog}
-      contextInsight={`Compose a ${mode.toUpperCase()} from the layer palette and watch exact output shapes, parameter counts${mode === 'cnn' ? ', receptive fields' : ''} and risk flags update live. Every number is computed analytically — no training in this view.`}
+      contextInsight={mode === 'cnn'
+        ? 'Compose a CNN from the layer palette and watch exact output shapes, parameter counts, receptive fields and risk flags update live. Every number is computed analytically — CNN mode does not train in-browser (that needs a GPU/servers).'
+        : `Compose an MLP and TRAIN it live on 2-D ${dataset} data. The decision boundary and the train/validation loss curves update every epoch: when the net is too big for the data, validation loss rises while training loss keeps falling (overfitting — watch the GAP); when it is too small both stay high (underfitting). The risk panel flags these analytically; here you watch them happen.`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Architecture Builder" hint="Add layers from the stage; select a layer to edit it here." />
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Mode</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
-              <AlgoPill active={mode === 'cnn'} accent={ACCENT} onClick={() => switchMode('cnn')}>CNN</AlgoPill>
-              <AlgoPill active={mode === 'mlp'} accent={ACCENT} onClick={() => switchMode('mlp')}>MLP</AlgoPill>
+              <AlgoPill active={mode === 'cnn'} accent={ACCENT} onClick={() => switchMode('cnn')}>CNN · analytic</AlgoPill>
+              <AlgoPill active={mode === 'mlp'} accent={ACCENT} onClick={() => switchMode('mlp')}>MLP · trains</AlgoPill>
             </div>
           </div>
           {sel ? <LayerEditor layer={sel} onPatch={(p) => patch(sel.id, p)} onRemove={() => removeLayer(sel.id)} /> : <p style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>Select a layer on the stage to edit it.</p>}
-          <ParamSlider name="Training-set size" value={trainSize.toLocaleString()} min={200} max={50000} step={200} current={trainSize} onChange={setTrainSize} hint="used by the overfit-risk rule" />
+          {mode === 'mlp' && <ParamSlider name="Learning rate" value={lr.toFixed(2)} min={0.05} max={1} step={0.05} current={lr} onChange={setLr} hint="SGD step size for live training" />}
+          <ParamSlider name="Training-set size" value={trainSize.toLocaleString()} min={200} max={50000} step={200} current={trainSize} onChange={setTrainSize} hint="used by the analytic overfit-risk rule" />
           {analysis.risks.length > 0 && <RiskList risks={analysis.risks} />}
         </ParamsWrap>
       )}
+      rewardLabel={mode === 'mlp' ? 'VALIDATION LOSS' : undefined}
+      rewardValue={mode === 'mlp' ? metrics.valLoss.toFixed(3) : undefined}
+      rewardSeries={mode === 'mlp' ? lossHist.map((h) => h.v) : undefined}
       tutor={tutor}
-      currentParams={{ lab: 'ArchitectureBuilder', mode, totalParams: analysis.totalParams, outputShape: shapeStr(analysis.finalShape, mode), layers: layers.map((l) => l.kind), risks: analysis.risks.map((r) => r.title) }}
+      currentParams={{ lab: 'ArchitectureBuilder', mode, totalParams: analysis.totalParams, outputShape: shapeStr(analysis.finalShape, mode), layers: layers.map((l) => l.kind), risks: analysis.risks.map((r) => r.title), ...(mode === 'mlp' ? { dataset, epoch, trainAcc: +metrics.trainAcc.toFixed(3), valAcc: +metrics.valAcc.toFixed(3) } : {}) }}
       apiPanel={apiPanel}
     />
   );
@@ -129,9 +206,9 @@ const ArchitectureBuilder: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
 /* ── centre stage: the layer stack ── */
 const LayerStack: React.FC<{
   mode: Mode; input: Shape; analysis: ReturnType<typeof analyse>;
-  selId: string; onSelect: (id: string) => void; riskByLayer: (id: string) => { id: string; severity: string; title: string }[];
-}> = ({ mode, input, analysis, selId, onSelect, riskByLayer }) => (
-  <div style={{ width: 470, maxHeight: '100%', overflowY: 'auto' }} className="custom-scrollbar">
+  selId: string; onSelect: (id: string) => void; riskByLayer: (id: string) => { id: string; severity: string; title: string }[]; width?: number;
+}> = ({ mode, input, analysis, selId, onSelect, riskByLayer, width = 470 }) => (
+  <div style={{ width, maxHeight: '100%', overflowY: 'auto' }} className="custom-scrollbar">
     <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginBottom: 8 }}>
       INPUT · {shapeStr(input, mode)}
     </div>
@@ -183,7 +260,7 @@ const LayerEditor: React.FC<{ layer: Layer; onPatch: (p: Partial<Layer>) => void
       <ParamSlider name="Units" value={String(layer.units)} min={1} max={512} step={1} current={layer.units!} onChange={(v) => onPatch({ units: v })} hint="output neurons" />
       <ActPicker value={layer.activation!} onChange={(a) => onPatch({ activation: a })} />
     </>}
-    {layer.kind === 'dropout' && <ParamSlider name="Rate" value={layer.rate!.toFixed(2)} min={0} max={0.7} step={0.05} current={layer.rate!} onChange={(v) => onPatch({ rate: v })} hint="display only (no training here)" />}
+    {layer.kind === 'dropout' && <ParamSlider name="Rate" value={layer.rate!.toFixed(2)} min={0} max={0.7} step={0.05} current={layer.rate!} onChange={(v) => onPatch({ rate: v })} hint="fraction of units dropped — regularises MLP training; feeds the overfit-risk rule in CNN" />}
     {layer.kind === 'batchnorm' && <p style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)' }}>BatchNorm adds 2·C learnable params (γ, β).</p>}
   </div>
 );
@@ -208,5 +285,60 @@ const RiskList: React.FC<{ risks: { id: string; severity: string; title: string;
     ))}
   </div>
 );
+
+/* ── MLP mode: live training panel (decision boundary + loss curves) ── */
+const MlpTrainPanel: React.FC<{
+  dataset: ToyKind; setDataset: (k: ToyKind) => void; data: DataPoint[]; net: Net | null;
+  epoch: number; metrics: TrainMetrics; lossHist: { t: number; v: number }[]; fieldVer: number; arch: Arch;
+  isPlaying: boolean; speed: number; onToggle: () => void; onSpeed: (n: number) => void; onReset: () => void; onNewData: () => void;
+}> = ({ dataset, setDataset, data, net, epoch, metrics, lossHist, fieldVer, arch, isPlaying, speed, onToggle, onSpeed, onReset, onNewData }) => {
+  const points: ScatterPoint[] = data.filter((d) => d.train).map((d) => ({ x: d.x, y: d.y, cls: d.label }));
+  const gap = metrics.trainAcc - metrics.valAcc;
+  return (
+    <div style={{ width: 330 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+        {(['xor', 'circles', 'spirals'] as ToyKind[]).map((k) => (
+          <AlgoPill key={k} active={dataset === k} accent={ACCENT} onClick={() => setDataset(k)}>{k}</AlgoPill>
+        ))}
+      </div>
+      <ScatterPlot
+        width={330} height={300} points={points}
+        classify={net ? (x, y) => (predictProb(net, x, y) >= 0.5 ? 1 : 0) : undefined}
+        fieldKey={`${epoch}-${fieldVer}`} xLabel="x₁" yLabel="x₂"
+      />
+      <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '6px 0 3px' }}>
+        {archSummary(arch)} · epoch {epoch}/{MAX_EPOCHS}
+      </div>
+      <LossCurve hist={lossHist} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 10.5, margin: '4px 0 9px' }}>
+        <span style={{ color: '#2dd4bf' }}>train {metrics.trainLoss.toFixed(3)}</span>
+        <span style={{ color: '#fbbf24' }}>val {metrics.valLoss.toFixed(3)}</span>
+        <span style={{ color: gap >= 0.15 ? BAD : 'var(--t2)' }}>gap {Math.round(gap * 100)}%</span>
+      </div>
+      <RunControls isPlaying={isPlaying} onPlay={onToggle} onReset={onReset} onNewMap={onNewData} speed={speed} onSpeed={onSpeed} />
+    </div>
+  );
+};
+
+const LossCurve: React.FC<{ hist: { t: number; v: number }[] }> = ({ hist }) => {
+  const W = 330; const H = 78; const pad = 5;
+  if (hist.length < 2) {
+    return (
+      <div style={{ height: H, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', border: '1px solid var(--border)', borderRadius: 6 }}>
+        press ▶ to train — train (teal) vs validation (gold) loss appears here
+      </div>
+    );
+  }
+  const max = Math.max(0.05, ...hist.map((h) => Math.max(h.t, h.v)));
+  const xAt = (i: number) => pad + (i / (hist.length - 1)) * (W - 2 * pad);
+  const yAt = (v: number) => pad + (1 - v / max) * (H - 2 * pad);
+  const path = (key: 't' | 'v') => hist.map((h, i) => `${i === 0 ? 'M' : 'L'}${xAt(i).toFixed(1)},${yAt(h[key]).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: H, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 6 }}>
+      <path d={path('t')} fill="none" stroke="#2dd4bf" strokeWidth={1.6} />
+      <path d={path('v')} fill="none" stroke="#fbbf24" strokeWidth={1.6} strokeDasharray="3 2" />
+    </svg>
+  );
+};
 
 export default ArchitectureBuilder;
