@@ -57,6 +57,14 @@ const Plane: React.FC<{ arrows: Arrow[]; dots?: Dot[]; lim?: number; size?: numb
       {/* axes */}
       <line x1={pad} y1={sy(0)} x2={size - pad} y2={sy(0)} stroke="rgba(120,130,170,.32)" strokeWidth="1.2" />
       <line x1={s(0)} y1={pad} x2={s(0)} y2={size - pad} stroke="rgba(120,130,170,.32)" strokeWidth="1.2" />
+      {/* numeric tick labels along the axes */}
+      {ticks.filter((t) => t !== 0).map((t) => (
+        <g key={`tl${t}`}>
+          <text x={s(t)} y={sy(0) + 13} textAnchor="middle" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">{t}</text>
+          <text x={s(0) - 7} y={sy(t) + 3} textAnchor="end" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">{t}</text>
+        </g>
+      ))}
+      <text x={s(0) - 7} y={sy(0) + 13} textAnchor="end" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">0</text>
       {/* arrows */}
       {arrows.map((a, i) => {
         const from = a.from ?? [0, 0];
