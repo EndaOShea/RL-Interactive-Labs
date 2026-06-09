@@ -105,3 +105,48 @@ export const PERCEPTRON_CONTENT: LabContent = {
     { category: 'METHODOLOGY', title: 'Any separating line', description: 'The perceptron stops at the first separator it finds, not the best one.', recommendation: 'Use max-margin (SVM) when boundary quality / generalisation matters.' },
   ],
 };
+
+export const BACKPROP_CONTENT: LabContent = {
+  sections: [
+    {
+      heading: 'Forward pass',
+      body: 'A feed-forward net computes layer by layer: zˡ = Wˡaˡ⁻¹ + bˡ is the pre-activation, then aˡ = act(zˡ). The input flows 3 → 4 → 4 → 1, and the final activation ŷ is the network’s prediction. Loss is L = ½(ŷ − y)², so a perfect prediction gives zero loss.',
+      details: [
+        { label: 'Pre-activation z', text: 'Weighted sum of the previous layer plus a bias — the blue number is aˡ.' },
+        { label: 'Activation a', text: 'act(z) bends the signal; without it the whole net collapses to one linear map.' },
+        { label: 'Loss L', text: '½(ŷ − y)² — half-squared error so its derivative is simply (ŷ − y).' },
+      ],
+    },
+    {
+      heading: 'Backward pass (the chain rule)',
+      body: 'Backprop reuses the forward values to get ∂L/∂w for every weight in one sweep. It defines a per-neuron error signal δ. At the output δ_out = (ŷ − y)·act′(z_out). For a hidden layer δˡ = (Wˡ⁺¹ᵀ δˡ⁺¹) ⊙ act′(zˡ): the downstream deltas are pulled back through the transposed weights and gated by the local slope.',
+      details: [
+        { label: 'δ — neuron error', text: 'How much a neuron’s pre-activation moves the loss; shown in gold.' },
+        { label: 'act′(z)', text: 'The local gradient. Flat regions (saturated sigmoid/tanh, dead ReLU) make δ ≈ 0.' },
+        { label: 'Wᵀ propagation', text: 'Error flows backward along the same edges, transposed — gradients reuse the forward graph.' },
+      ],
+    },
+    {
+      heading: 'Weight gradients & the update',
+      body: 'Once every δ is known, each weight gradient is a product of two numbers you already have: ∂L/∂Wˡ = δˡ⁺¹ (aˡ)ᵀ and ∂L/∂bˡ = δˡ⁺¹. Gradient descent then steps every parameter downhill by W ← W − η·∂L/∂W. Recomputing the forward pass after the step shows the loss visibly drop.',
+      details: [
+        { label: '∂L/∂w = δ·a_in', text: 'The gradient of a weight is its downstream δ times the activation flowing into it.' },
+        { label: 'Learning rate η', text: 'Step size. Too large overshoots; too small crawls — watch the loss after Apply.' },
+        { label: 'One step lowers L', text: 'For a small enough η the recomputed loss is strictly smaller — that is gradient descent.' },
+      ],
+    },
+    {
+      heading: 'Dead units & vanishing gradients',
+      body: 'Where the activation is flat its derivative is ~0, so δ and every gradient feeding that neuron vanish. A ReLU unit with z ≤ 0 outputs 0 and has zero gradient — it is "dead" and stops learning (shown dashed/red here). Saturated sigmoid/tanh units behave the same way, the historical reason deep saturating nets were hard to train.',
+      details: [
+        { label: 'Dead ReLU', text: 'z ≤ 0 ⇒ a = 0, act′ = 0, δ = 0 — no gradient ever reaches it.' },
+        { label: 'Saturation', text: 'sigmoid′ ≤ 0.25 and tanh′ → 0 near ±1; chaining them shrinks gradients toward zero.' },
+        { label: 'Fixes', text: 'Leaky ReLU keeps a small slope; good init and normalisation keep gradients alive.' },
+      ],
+    },
+  ],
+  lifecycle: [
+    { category: 'CONCEPT', title: 'Gradient flow', description: 'Backprop multiplies act′(z) at every layer, so saturated or dead units zero out the gradient and stall learning.', recommendation: 'Prefer non-saturating activations (ReLU/Leaky), sensible init and normalisation to keep δ non-zero.' },
+    { category: 'METHODOLOGY', title: 'Learning-rate sensitivity', description: 'The update W ← W − η·∂L/∂W only guarantees a lower loss for a small enough η; too large a step can raise the loss.', recommendation: 'Tune η (or use an adaptive optimiser) and confirm the loss actually decreases after each step.' },
+  ],
+};

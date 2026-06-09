@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { MLP_CONTENT, ACT_CONTENT, PERCEPTRON_CONTENT } from './content';
+import { MLP_CONTENT, ACT_CONTENT, PERCEPTRON_CONTENT, BACKPROP_CONTENT } from './content';
 
 const ACCENT = '#2dd4bf';
 
@@ -40,5 +40,17 @@ export const NEURAL_LABS: LabDescriptor[] = [
     codeFile: 'perceptron.py',
     content: PERCEPTRON_CONTENT,
     component: React.lazy(() => import('./Perceptron')),
+  },
+  {
+    id: 'backpropagation',
+    category: 'neural',
+    title: 'Backpropagation',
+    subtitle: 'Forward values & chain-rule gradient flow',
+    blurb: 'Step a fixed 3→4→4→1 net through Forward → Backward → Apply: watch z and a fill in, δ propagate by the chain rule, and one gradient step drop the loss.',
+    icon: 'M4 6a2 2 0 1 0 0-.01M4 18a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M20 12a2 2 0 1 0 0-.01M6 6l5 5M6 18l5-5M13 12h6M16 9l3 3-3 3',
+    accent: '#2dd4bf',
+    codeFile: 'backpropagation.py',
+    content: BACKPROP_CONTENT,
+    component: React.lazy(() => import('./Backpropagation'))
   },
 ];

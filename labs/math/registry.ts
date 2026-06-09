@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { GD_CONTENT, TAYLOR_CONTENT, LINTRANSFORM_CONTENT } from './content';
+import { GD_CONTENT, TAYLOR_CONTENT, LINTRANSFORM_CONTENT, DERIVATIVES_CONTENT, CHAINRULE_CONTENT, MATMUL_CONTENT, CONVEX_CONTENT, EIGENSVD_CONTENT } from './content';
 
 const ACCENT = '#22d3ee';
 
@@ -40,5 +40,65 @@ export const MATH_LABS: LabDescriptor[] = [
     codeFile: 'linear_transform.py',
     content: LINTRANSFORM_CONTENT,
     component: React.lazy(() => import('./LinearTransform')),
+  },
+  {
+    id: 'derivatives',
+    category: 'math',
+    title: 'Derivatives',
+    subtitle: 'Tangent slope & the limit definition',
+    blurb: 'Pivot a secant about a point and watch it snap onto the tangent — the numeric slope [f(x+dx)−f(x)]/dx converging to the exact f′(x) as dx→0.',
+    icon: 'M3 18c5 0 6-13 10-13M3 18h7M13 7l6-3',
+    accent: '#22d3ee',
+    codeFile: 'derivatives.py',
+    content: DERIVATIVES_CONTENT,
+    component: React.lazy(() => import('./Derivatives'))
+  },
+  {
+  id: 'chain-rule',
+  category: 'math',
+  title: 'Chain Rule',
+  subtitle: 'Composite functions · derivative as a product',
+  blurb: 'Walk a composite x → u → y and watch dy/dx fall out as the product of each link’s local derivative — the rule that powers backprop, cross-checked against a finite difference.',
+  icon: 'M5 12a2 2 0 1 0 0-.01M12 12a2 2 0 1 0 0-.01M19 12a2 2 0 1 0 0-.01M7 12h3M14 12h3',
+  accent: '#22d3ee',
+  codeFile: 'chain_rule.py',
+  content: CHAINRULE_CONTENT,
+  component: React.lazy(() => import('./ChainRule')),
+},
+  {
+    id: 'matrix-multiplication',
+    category: 'math',
+    title: 'Matrix Multiplication',
+    subtitle: 'Dot products & composed transforms',
+    blurb: 'Slide two vectors and see a·b = a₁b₁ + a₂b₂ = |a||b|cos θ with its projection, then watch y = A x land the basis vectors — the dot product every neuron and dense layer computes.',
+    icon: 'M4 4h6v16H4zM14 4h6v16h-6M7 8h.01M7 12h.01M17 8h.01M17 12h.01',
+    accent: '#22d3ee',
+    codeFile: 'matrix_multiplication.py',
+    content: MATMUL_CONTENT,
+    component: React.lazy(() => import('./MatrixMultiplication'))
+  },
+  {
+    id: 'convex-optimization',
+    category: 'math',
+    title: 'Convex vs Non-convex',
+    subtitle: 'Why initialization matters',
+    blurb: 'Drop N gradient-descent runners on a convex bowl vs a rippled non-convex loss — convex agrees from anywhere, non-convex settles in different minima depending on where each one started.',
+    icon: 'M3 4v16h18M6 16c2.5 0 3.5-7 7-7s4.5 5 8 5M6 10c1.5 0 2-2 3-2',
+    accent: '#22d3ee',
+    codeFile: 'convex_optimization.py',
+    content: CONVEX_CONTENT,
+    component: React.lazy(() => import('./ConvexOptimization'))
+  },
+  {
+    id: 'eigen-svd',
+    category: 'math',
+    title: 'Eigenvalues & SVD',
+    subtitle: 'Rotate-scale-rotate · the math under PCA',
+    blurb: 'Bend the plane with a 2×2 matrix and watch the unit circle become an ellipse — eigenvectors that hold their direction (A v = λ v) and the SVD A = U Σ Vᵀ whose singular values are the ellipse semi-axes.',
+    icon: 'M12 3a9 9 0 1 0 .01 0M3 12h18M12 3l6 18',
+    accent: '#22d3ee',
+    codeFile: 'eigen_svd.py',
+    content: EIGENSVD_CONTENT,
+    component: React.lazy(() => import('./EigenSvd'))
   },
 ];

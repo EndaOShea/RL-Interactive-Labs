@@ -123,3 +123,80 @@ if __name__ == "__main__":
     X = np.vstack([A, B]); y = np.array([-1] * 25 + [1] * 25)
     print(train(X, y))
 `;
+
+export const backpropPython = (activation: string, lr: number, target = 1, x: number[] = [1.0, 0.5, -0.5]) => `import numpy as np
+
+# Backpropagation from scratch — fixed feed-forward net 3 -> 4 -> 4 -> 1.
+# Mirrors the lab exactly: same hardcoded weights/biases, activation and input,
+# so the printed activations / deltas / gradients match what you see on screen.
+ACT, LR, TARGET = "${activation}", ${lr}, ${target}
+X = np.array(${JSON.stringify(x)})
+LEAKY = 0.01
+
+# Fixed initial parameters. W[l] has shape [out, in]: row j = incoming weights of unit j.
+INIT_W = [
+    np.array([[0.50, -0.30, 0.20], [-0.40, 0.60, 0.10], [0.30, 0.20, -0.50], [-0.20, -0.40, 0.70]]),
+    np.array([[0.40, -0.50, 0.30, 0.10], [0.20, 0.30, -0.60, 0.40], [-0.30, 0.50, 0.20, -0.40], [0.60, -0.20, 0.40, 0.30]]),
+    np.array([[0.50, -0.40, 0.30, 0.60]]),
+]
+INIT_B = [np.array([0.10, -0.20, 0.30, -0.10]), np.array([-0.10, 0.20, 0.10, -0.30]), np.array([0.10])]
+
+def act(z):
+    if ACT == "relu":  return np.maximum(0, z)
+    if ACT == "leaky": return np.where(z > 0, z, LEAKY * z)
+    if ACT == "tanh":  return np.tanh(z)
+    return 1 / (1 + np.exp(-z))                 # sigmoid
+
+def dact(z, a):                                 # derivative wrt pre-activation z
+    if ACT == "relu":  return (z > 0).astype(float)
+    if ACT == "leaky": return np.where(z > 0, 1.0, LEAKY)
+    if ACT == "tanh":  return 1 - a * a
+    return a * (1 - a)                          # sigmoid a(1-a)
+
+def forward(W, B, x):
+    a, z = [x.astype(float)], [x.astype(float)]   # z[0] is a placeholder (the input)
+    for l in range(len(W)):
+        zl = W[l] @ a[-1] + B[l]
+        z.append(zl); a.append(act(zl))
+    yhat = a[-1][0]
+    loss = 0.5 * (yhat - TARGET) ** 2
+    return a, z, yhat, loss
+
+def backward(W, a, z, yhat):
+    L = len(W)
+    delta = [None] * (L + 1)
+    delta[L] = np.array([(yhat - TARGET) * dact(z[L][0], a[L][0])])   # output delta
+    for l in range(L - 1, 0, -1):
+        delta[l] = (W[l].T @ delta[l + 1]) * dact(z[l], a[l])         # (W^T delta) ⊙ act'(z)
+    gW = [np.outer(delta[l + 1], a[l]) for l in range(L)]             # dL/dW = delta a^T
+    gB = [delta[l + 1] for l in range(L)]                            # dL/db = delta
+    return delta, gW, gB
+
+if __name__ == "__main__":
+    W = [w.copy() for w in INIT_W]
+    B = [b.copy() for b in INIT_B]
+
+    a, z, yhat, loss = forward(W, B, X)
+    print("=== FORWARD ===")
+    for l in range(1, len(a)):
+        print(f"layer {l}: z = {np.round(z[l], 4)}")
+        print(f"         a = {np.round(a[l], 4)}")
+    print(f"yhat = {yhat:.4f}   loss = {loss:.5f}")
+
+    delta, gW, gB = backward(W, a, z, yhat)
+    print("\\n=== BACKWARD (deltas) ===")
+    for l in range(1, len(W) + 1):
+        print(f"layer {l}: delta = {np.round(delta[l], 4)}")
+    print("\\n=== GRADIENTS ===")
+    for l in range(len(W)):
+        print(f"dL/dW[{l}] =\\n{np.round(gW[l], 4)}")
+        print(f"dL/db[{l}] = {np.round(gB[l], 4)}")
+
+    # one gradient-descent step: W -= LR * dL/dW, b -= LR * dL/db
+    for l in range(len(W)):
+        W[l] -= LR * gW[l]
+        B[l] -= LR * gB[l]
+    _, _, yhat2, loss2 = forward(W, B, X)
+    print("\\n=== AFTER ONE STEP ===")
+    print(f"yhat: {yhat:.4f} -> {yhat2:.4f}   loss: {loss:.5f} -> {loss2:.5f}   (dropped {loss - loss2:.5f})")
+`;
