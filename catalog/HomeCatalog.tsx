@@ -1,24 +1,74 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import { getCatalog, APP_NAME } from './registry';
 import CatalogCard from './CatalogCard';
 import { ACC } from '../components/stage/primitives';
 
 // Scrollable landing page. Uses its own height:100vh; overflow:auto container
 // so it scrolls despite the global body{overflow:hidden} (index.css untouched).
+// A sticky top nav jumps to each category; a floating button returns to the top.
 const HomeCatalog: React.FC = () => {
   const groups = getCatalog();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
+
+  const scrollToCat = (id: string) =>
+    document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const scrollTop = () => scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
 
   return (
     <div
+      ref={scrollRef}
       className="scope custom-scrollbar"
+      onScroll={() => setScrolled((scrollRef.current?.scrollTop ?? 0) > 360)}
       style={{
-        width: '100vw', height: '100vh', overflowY: 'auto',
+        width: '100vw', height: '100vh', overflowY: 'auto', position: 'relative',
         background: 'radial-gradient(130% 90% at 30% 0%, #131b30, #080b14 70%)',
         color: 'var(--t0)',
       }}
     >
+      {/* sticky top navigation */}
+      <nav
+        style={{
+          position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 16,
+          padding: '10px 22px', background: 'rgba(8,11,20,.82)', backdropFilter: 'blur(10px)',
+          WebkitBackdropFilter: 'blur(10px)', borderBottom: '1px solid var(--border)',
+        }}
+      >
+        <span onClick={scrollTop} title="Back to top" style={{ display: 'flex', alignItems: 'center', gap: 9, cursor: 'pointer', flexShrink: 0 }}>
+          <span style={{
+            width: 26, height: 26, borderRadius: 8, background: 'linear-gradient(135deg,var(--acc),#6d28d9)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+              <path d="M12 2 2 7l10 5 10-5-10-5Z" />
+            </svg>
+          </span>
+          <span style={{ fontFamily: 'var(--disp)', fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>{APP_NAME}</span>
+        </span>
+        <div className="custom-scrollbar" style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 2 }}>
+          {groups.map(({ category }) => {
+            const accent = category.accent || ACC;
+            return (
+              <button
+                key={category.id}
+                onClick={() => scrollToCat(category.id)}
+                style={{
+                  flexShrink: 0, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11,
+                  color: 'var(--t1)', background: 'rgba(20,26,44,.5)', border: '1px solid var(--border)',
+                  borderRadius: 20, padding: '5px 11px', whiteSpace: 'nowrap',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: accent, flexShrink: 0 }} />
+                {category.label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
       {/* hero */}
-      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '64px 32px 28px' }}>
+      <div style={{ maxWidth: 1180, margin: '0 auto', padding: '52px 32px 28px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 13, marginBottom: 20 }}>
           <span style={{
             width: 44, height: 44, borderRadius: 12,
@@ -48,7 +98,7 @@ const HomeCatalog: React.FC = () => {
         {groups.map(({ category, items }) => {
           const accent = category.accent || ACC;
           return (
-            <section key={category.id} style={{ marginTop: 40 }}>
+            <section key={category.id} id={`cat-${category.id}`} style={{ marginTop: 40, scrollMarginTop: 64 }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 4 }}>
                 <h2 style={{ fontFamily: 'var(--disp)', fontSize: 21, fontWeight: 600, margin: 0, color: 'var(--t0)' }}>
                   {category.label}
@@ -80,6 +130,26 @@ const HomeCatalog: React.FC = () => {
           );
         })}
       </div>
+
+      {/* floating scroll-to-top button */}
+      {scrolled && (
+        <button
+          onClick={scrollTop}
+          title="Back to top"
+          aria-label="Back to top"
+          style={{
+            position: 'fixed', right: 26, bottom: 26, zIndex: 30, cursor: 'pointer',
+            width: 46, height: 46, borderRadius: '50%', border: '1px solid var(--border)',
+            background: 'rgba(13,18,32,.92)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+            color: 'var(--t0)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 8px 24px -8px rgba(0,0,0,.65)',
+          }}
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 };
