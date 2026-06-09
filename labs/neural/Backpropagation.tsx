@@ -28,6 +28,15 @@ const node = (layer: number, unit: number, count: number) => {
   return { x: LAYER_X[layer], y: gap * (unit + 1) };
 };
 
+// One micro-step per neuron so the pass is followable. Forward visits the
+// hidden/output neurons left→right; backward visits them right→left.
+const FWD_SEQ: { layer: number; unit: number }[] = [];
+for (let l = 1; l < SIZES.length; l++) for (let u = 0; u < SIZES[l]; u++) FWD_SEQ.push({ layer: l, unit: u });
+const BWD_SEQ = [...FWD_SEQ].reverse();
+const NSTEPS = FWD_SEQ.length;                 // 9 neurons (4 + 4 + 1)
+const seqIndex = (seq: { layer: number; unit: number }[], l: number, u: number) =>
+  seq.findIndex((s) => s.layer === l && s.unit === u);
+
 const fmt = (v: number, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : '0');
 
 const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
@@ -41,6 +50,9 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
   const [B, setB] = useState<number[][]>(() => cloneB(INIT_B));
 
   const [phase, setPhase] = useState<Phase>('idle');
+  const [fwdCursor, setFwdCursor] = useState(0);  // # forward neurons revealed so far
+  const [bwdCursor, setBwdCursor] = useState(0);  // # δ values revealed so far
+  const [active, setActive] = useState<{ layer: number; unit: number; dir: 'fwd' | 'bwd' } | null>(null);
   const [step, setStepN] = useState(0);          // count of applied GD steps
   const [sel, setSel] = useState<Sel>({ layer: 2, unit: 0 });
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
@@ -60,26 +72,29 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     [W, fwd, activation, target],
   );
 
-  // What to reveal depends on the phase machine.
-  const showFwd = phase !== 'idle';
-  const showBwd = phase === 'backward' || phase === 'applied';
+  // Per-neuron reveal: a forward activation / a δ appears only once the cursor
+  // reaches that neuron, so each transition is shown one at a time.
+  const aRevealed = (l: number, u: number) => l === 0 || seqIndex(FWD_SEQ, l, u) < fwdCursor;
+  const dRevealed = (l: number, u: number) => l >= 1 && seqIndex(BWD_SEQ, l, u) < bwdCursor;
+  const anyBwd = bwdCursor > 0;
 
   const reset = () => {
     sim.stop();
     setW(cloneW(INIT_W));
     setB(cloneB(INIT_B));
     setPhase('idle');
+    setFwdCursor(0); setBwdCursor(0); setActive(null);
     setStepN(0);
     setPrevLoss(null);
     setLastLog(null);
   };
 
   // ----- chain-rule log for the inspected weight ----------------------------
-  const logForInspected = (f: ForwardResult, g: BackwardResult, ph: Phase) => {
-    // inspected weight: into selected unit `sel.unit` of layer (sel.layer+1),
-    // from input unit 0 of layer sel.layer. Use the first incoming weight.
-    const l = sel.layer;                 // weight-matrix index 0..2
-    const j = Math.min(sel.unit, W[l].length - 1);
+  const logForInspected = (f: ForwardResult, g: BackwardResult, ph: Phase, s: Sel = sel) => {
+    // inspected weight: into selected unit `s.unit` of layer (s.layer+1),
+    // from input unit 0 of layer s.layer. Use the first incoming weight.
+    const l = s.layer;                   // weight-matrix index 0..2
+    const j = Math.min(s.unit, W[l].length - 1);
     const i = 0;                         // first incoming connection
     const dOut = (f.yhat - target);
     const aIn = f.a[l][i];
@@ -125,42 +140,57 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     });
   };
 
-  // ----- phase machine ------------------------------------------------------
-  const doForward = () => {
+  // ----- phase machine: ONE neuron per micro-step ---------------------------
+  // reveal the next forward neuron (compute its z → a)
+  const advanceForward = () => {
+    if (fwdCursor >= NSTEPS) return false;
+    const nx = FWD_SEQ[fwdCursor];
+    const s: Sel = { layer: nx.layer - 1, unit: nx.unit };   // the weight INTO this neuron
+    setFwdCursor((c) => c + 1);
+    setActive({ ...nx, dir: 'fwd' });
+    setSel(s);
     setPhase('forward');
-    logForInspected(fwd, bwd, 'forward');
+    logForInspected(fwd, bwd, 'forward', s);
+    return true;
   };
-  const doBackward = () => {
-    if (phase === 'idle') { doForward(); }
+  // reveal the next backward neuron (compute its δ)
+  const advanceBackward = () => {
+    if (bwdCursor >= NSTEPS) return false;
+    const nx = BWD_SEQ[bwdCursor];
+    const s: Sel = { layer: nx.layer - 1, unit: nx.unit };
+    setBwdCursor((c) => c + 1);
+    setActive({ ...nx, dir: 'bwd' });
+    setSel(s);
     setPhase('backward');
-    logForInspected(fwd, bwd, 'backward');
+    logForInspected(fwd, bwd, 'backward', s);
+    return true;
   };
   const doApply = () => {
-    // need a forward+backward first
-    const g = bwd;
     setPrevLoss(fwd.loss);
-    const next = applyStep(W, B, g, lr);
+    const next = applyStep(W, B, bwd, lr);
     setW(next.W);
     setB(next.B);
     setStepN((s) => s + 1);
     setPhase('applied');
-    // recompute forward with the NEW params for the log result
+    setActive(null);
     const f2 = forward(next.W, next.B, x, activation, target);
     const g2 = backward(next.W, f2, activation, target);
     logForInspected(f2, g2, 'applied');
   };
+  const startCycle = () => { setFwdCursor(0); setBwdCursor(0); setActive(null); setPhase('idle'); };
 
-  // auto-play: cycle forward -> backward -> apply
-  const autoStep = () => {
-    if (phase === 'idle') doForward();
-    else if (phase === 'forward') doBackward();
-    else if (phase === 'backward') doApply();
-    else doForward();   // applied -> start next cycle
+  // one micro-step: next forward neuron → next δ neuron → apply → new cycle
+  const stepOnce = () => {
+    if (fwdCursor < NSTEPS) { advanceForward(); return; }
+    if (bwdCursor < NSTEPS) { advanceBackward(); return; }
+    if (phase !== 'applied') { doApply(); return; }
+    startCycle();
   };
-  const sim = useSimLoop(autoStep, { initialSpeed: 700 });
+  const sim = useSimLoop(stepOnce, { initialSpeed: 650 });
 
-  const onActivation = (a: ActName) => { sim.stop(); setActivation(a); setPhase('idle'); setLastLog(null); setPrevLoss(null); };
-  const onPreset = (i: number) => { sim.stop(); setPresetIdx(i); setPhase('idle'); setLastLog(null); setPrevLoss(null); };
+  const restart = () => { setPhase('idle'); setFwdCursor(0); setBwdCursor(0); setActive(null); setLastLog(null); setPrevLoss(null); };
+  const onActivation = (a: ActName) => { sim.stop(); setActivation(a); restart(); };
+  const onPreset = (i: number) => { sim.stop(); setPresetIdx(i); restart(); };
 
   // ----- inspected-neuron activation-curve inset ----------------------------
   // pick a hidden neuron to draw: selected unit if it's hidden, else hidden(1,0).
@@ -174,7 +204,15 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
   const lossDrop = prevLoss != null ? prevLoss - fwd.loss : 0;
   const lossColor = phase === 'applied' && lossDrop > 0 ? GOOD : 'var(--t0)';
 
-  const phaseLabel = phase === 'idle' ? 'IDLE' : phase === 'forward' ? 'FORWARD' : phase === 'backward' ? 'BACKWARD' : 'APPLIED';
+  const phaseLabel = phase === 'idle' ? 'IDLE'
+    : phase === 'forward' ? `FWD ${fwdCursor}/${NSTEPS}`
+    : phase === 'backward' ? `BWD ${bwdCursor}/${NSTEPS}`
+    : 'APPLIED';
+  // label for the single-step button: what the NEXT micro-step will do
+  const nextLabel = fwdCursor < NSTEPS ? `▶ forward · L${FWD_SEQ[fwdCursor].layer}·u${FWD_SEQ[fwdCursor].unit}`
+    : bwdCursor < NSTEPS ? `▶ backward · L${BWD_SEQ[bwdCursor].layer}·u${BWD_SEQ[bwdCursor].unit}`
+      : phase !== 'applied' ? '▶ apply (η·∇)'
+        : '↻ next pass';
 
   // selectable-neuron click target maps SVG layer (0..3) -> weight-layer index.
   const selectNeuron = (svgLayer: number, unit: number) => {
@@ -194,18 +232,25 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
             row.map((w, i) => {
               const from = node(l, i, SIZES[l]);
               const to = node(l + 1, j, SIZES[l + 1]);
-              const flowing = showBwd; // gradients flow during/after backward
-              const stroke = flowing ? GOLD : (w >= 0 ? 'rgba(56,189,248,0.45)' : 'rgba(248,113,113,0.42)');
+              const flowing = anyBwd; // gradients flow once backward has started
+              const baseStroke = flowing ? GOLD : (w >= 0 ? 'rgba(56,189,248,0.45)' : 'rgba(248,113,113,0.42)');
               const sw = Math.max(0.6, Math.min(3.2, Math.abs(w) * 2.4));
               const isInspected = (l === sel.layer && j === Math.min(sel.unit, Wl.length - 1) && i === 0);
+              // edges touching the active neuron: forward → edges feeding it; backward → edges carrying its δ onward
+              const isActive = !!active && (active.dir === 'fwd'
+                ? (l === active.layer - 1 && j === active.unit)
+                : (l === active.layer && i === active.unit));
+              const stroke = isActive || isInspected ? '#fff' : baseStroke;
+              const width = isActive ? 3 : isInspected ? 2.6 : sw;
+              const opacity = isActive ? 1 : active ? (flowing ? 0.38 : 0.3) : (flowing ? 0.85 : 0.7);
               return (
                 <line
                   key={`e-${l}-${j}-${i}`}
                   x1={from.x} y1={from.y} x2={to.x} y2={to.y}
-                  stroke={isInspected ? '#fff' : stroke}
-                  strokeWidth={isInspected ? 2.6 : sw}
-                  opacity={flowing ? 0.85 : 0.7}
-                  strokeDasharray={isInspected ? '4 3' : undefined}
+                  stroke={stroke}
+                  strokeWidth={width}
+                  opacity={opacity}
+                  strokeDasharray={isActive ? '5 3' : isInspected ? '4 3' : undefined}
                 />
               );
             }),
@@ -216,20 +261,25 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
         {SIZES.map((count, l) =>
           Array.from({ length: count }, (_, u) => {
             const p = node(l, u, count);
-            const aVal = showFwd ? (l === 0 ? x[u] : fwd.a[l][u]) : (l === 0 ? x[u] : undefined);
+            const aShown = aRevealed(l, u);
+            const dShown = dRevealed(l, u);
+            const aVal = l === 0 ? x[u] : (aShown ? fwd.a[l][u] : undefined);
             const zVal = l === 0 ? undefined : fwd.z[l][u];
-            const dead = l > 0 && (activation === 'relu') && zVal != null && zVal <= 0;
-            const dVal = showBwd && l > 0 ? bwd.delta[l][u] : undefined;
+            const dead = l > 0 && activation === 'relu' && zVal != null && zVal <= 0 && aShown;
+            const dVal = dShown ? bwd.delta[l][u] : undefined;
             const selected = (l > 0 && sel.layer === l - 1 && Math.min(sel.unit, SIZES[l] - 1) === u);
+            const isActive = !!active && active.layer === l && active.unit === u;
+            const glow = active && active.dir === 'bwd' ? GOLD : BLUE;
             const fill = dead ? 'rgba(248,113,113,0.12)' : 'rgba(13,18,32,0.92)';
-            const ring = selected ? '#fff' : dead ? BAD : (showFwd ? BLUE : 'rgba(120,130,170,0.45)');
+            const ring = isActive ? '#fff' : selected ? '#fff' : dead ? BAD : (aShown ? BLUE : 'rgba(120,130,170,0.45)');
             return (
               <g key={`n-${l}-${u}`} style={{ cursor: 'pointer' }} onClick={() => selectNeuron(l, u)}>
+                {isActive && <circle cx={p.x} cy={p.y} r={27} fill="none" stroke={glow} strokeWidth={2} opacity={0.6} />}
                 <circle
-                  cx={p.x} cy={p.y} r={20}
+                  cx={p.x} cy={p.y} r={isActive ? 22 : 20}
                   fill={fill}
                   stroke={ring}
-                  strokeWidth={selected ? 2.6 : 1.6}
+                  strokeWidth={isActive ? 3.2 : selected ? 2.6 : 1.6}
                   strokeDasharray={dead ? '3 3' : undefined}
                 />
                 {/* activation value (blue) */}
@@ -304,14 +354,12 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
       controls={(
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button style={sbBtn()} className="sb-btn" onClick={reset}>↺ Reset</button>
-          <button style={sbBtn(phase === 'idle')} className="sb-btn" onClick={doForward}>① Forward</button>
-          <button style={sbBtn(phase === 'forward')} className="sb-btn" onClick={doBackward}>② Backward</button>
-          <button style={sbBtn(phase === 'backward')} className="sb-btn" onClick={doApply}>③ Apply (η·∇)</button>
+          <button style={sbBtn(true)} className="sb-btn" onClick={() => { sim.stop(); stepOnce(); }}>{nextLabel}</button>
           <RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />
         </div>
       )}
       lastLog={lastLog}
-      contextInsight={`A fixed 3→4→4→1 net. Forward computes z and a per layer (blue). Backward propagates δ (gold) by the chain rule δ=(Wₙₑₓₜᵀδₙₑₓₜ)⊙act′(z). Apply does one gradient step W−=η·∂L/∂W and the loss drops from ${prevLoss != null ? fmt(prevLoss) : '—'} toward ${fmt(fwd.loss)}. Click any neuron to inspect its z→a breakdown and the chain rule for an incoming weight.`}
+      contextInsight={`A fixed 3→4→4→1 net, stepped ONE neuron at a time so each transition is followable. Press ▶ (or play) to advance: forward lights up each neuron left→right and computes its z→a (blue); backward then lights up each neuron right→left and computes its δ (gold) by the chain rule δ=(Wₙₑₓₜᵀδₙₑₓₜ)⊙act′(z). The currently-computed neuron is highlighted (white ring) along with the edges feeding it, and the right panel + Math tab follow it. Apply does one step W−=η·∂L/∂W; loss drops from ${prevLoss != null ? fmt(prevLoss) : '—'} toward ${fmt(fwd.loss)}.`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Backpropagation" hint="Forward → Backward → Apply; every value is computed live." />
@@ -353,7 +401,7 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
               <div>{selRow.map((w, i) => `${fmt(w, 2)}·${fmt(inVec[i], 2)}`).join(' + ')} + {fmt(B[selL][selJ], 2)}</div>
               <div>= <b style={{ color: BLUE }}>{fmt(selZ)}</b></div>
               <div style={{ marginTop: 4 }}>a = {activation}(z) = <b style={{ color: BLUE }}>{fmt(selA)}</b></div>
-              {showBwd && <div style={{ marginTop: 4 }}>δ = <b style={{ color: GOLD }}>{fmt(bwd.delta[selL + 1][selJ])}</b></div>}
+              {dRevealed(selL + 1, selJ) && <div style={{ marginTop: 4 }}>δ = <b style={{ color: GOLD }}>{fmt(bwd.delta[selL + 1][selJ])}</b></div>}
             </div>
           </div>
         </ParamsWrap>
