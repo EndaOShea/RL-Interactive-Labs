@@ -42,7 +42,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
   centroids, markers, lines, circles, ellipses, showAxes = true, xLabel, yLabel, onAddPoint,
 }) => {
   const ref = useRef<SVGSVGElement | null>(null);
-  const padL = 36, padR = 14, padT = 14, padB = 30;
+  const padL = 44, padR = 14, padT = 14, padB = 36;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
   const [dx0, dx1] = domain;
@@ -50,6 +50,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
 
   const sx = (x: number) => padL + ((x - dx0) / (dx1 - dx0)) * plotW;
   const sy = (y: number) => padT + (1 - (y - dy0) / (dy1 - dy0)) * plotH;
+  const fmtTick = (v: number) => (Math.abs(v) < 1e-9 ? '0' : parseFloat(v.toFixed(2)).toString());
   const colorOf = (cls?: number) => (cls == null || cls < 0 ? 'var(--t2)' : classColors[cls % classColors.length]);
 
   // Decision field (memoised — recompute only when fieldKey/geometry changes).
@@ -96,14 +97,25 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
         <rect key={i} x={c.x} y={c.y} width={c.w} height={c.h} fill={classColors[c.cls % classColors.length]} opacity={0.16} />
       ))}
 
-      {/* plot frame + grid */}
+      {/* plot frame + grid + numeric ticks */}
       <rect x={padL} y={padT} width={plotW} height={plotH} fill="none" stroke="var(--border)" strokeWidth="1" />
-      {showAxes && [0.25, 0.5, 0.75].map((t) => (
-        <g key={t}>
-          <line x1={padL + t * plotW} y1={padT} x2={padL + t * plotW} y2={padT + plotH} stroke="rgba(120,130,170,.08)" />
-          <line x1={padL} y1={padT + t * plotH} x2={padL + plotW} y2={padT + t * plotH} stroke="rgba(120,130,170,.08)" />
-        </g>
-      ))}
+      {showAxes && [0, 0.25, 0.5, 0.75, 1].map((t) => {
+        const xpos = padL + t * plotW;
+        const ypos = padT + (1 - t) * plotH;
+        const xv = dx0 + t * (dx1 - dx0);
+        const yv = dy0 + t * (dy1 - dy0);
+        const interior = t > 0 && t < 1;
+        return (
+          <g key={t}>
+            {interior && <line x1={xpos} y1={padT} x2={xpos} y2={padT + plotH} stroke="rgba(120,130,170,.08)" />}
+            {interior && <line x1={padL} y1={ypos} x2={padL + plotW} y2={ypos} stroke="rgba(120,130,170,.08)" />}
+            <line x1={xpos} y1={padT + plotH} x2={xpos} y2={padT + plotH + 3} stroke="var(--border)" />
+            <text x={xpos} y={padT + plotH + 14} textAnchor="middle" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">{fmtTick(xv)}</text>
+            <line x1={padL - 3} y1={ypos} x2={padL} y2={ypos} stroke="var(--border)" />
+            <text x={padL - 6} y={ypos + 3} textAnchor="end" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">{fmtTick(yv)}</text>
+          </g>
+        );
+      })}
 
       {/* lines (boundaries, axes, links) */}
       {lines?.map((l, i) => (
