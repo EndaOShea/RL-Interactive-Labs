@@ -1,6 +1,6 @@
 // labs/llm/rag/graph.ts — a baked knowledge graph over the corpus + community
 // summaries, powering GraphRAG local (ego-graph) and global (map-reduce) search.
-import { DOCS, Category, embedText, cosine, tokenize } from './corpus';
+import { Category, embedText, cosine, tokenize } from './corpus';
 import { Chunk } from './retrieval';
 
 export type RelKind = 'orbits' | 'has-moon' | 'has-atmosphere' | 'visited-by' | 'has-feature';
@@ -71,4 +71,28 @@ export function graphLayout(): Record<string, [number, number]> {
     mem.forEach((e, i) => { const a = (2 * Math.PI * i) / mem.length; pos[e.id] = [centers[c][0] + 0.13 * Math.cos(a), centers[c][1] + 0.13 * Math.sin(a)]; });
   }
   return pos;
+}
+
+// --- RAPTOR: recursive summary tree over the same chunks/communities ---
+// 3 levels: leaves = chunks, level-1 = one summary node per community, root =
+// a single corpus-wide summary. Retrieval (below) scores EVERY node — any
+// level — against the query, so a broad question can surface a high-level
+// summary node instead of many individual leaf chunks.
+export interface TreeNode { id: string; level: number; label: string; text: string; childIds: string[] }
+export function buildTree(chunks: Chunk[]): TreeNode[] {
+  const nodes: TreeNode[] = [];
+  chunks.forEach((c) => nodes.push({ id: c.id, level: 0, label: c.id, text: c.text, childIds: [] }));
+  COMMUNITIES.forEach((cm) => {
+    const kids = chunks.filter((c) => DOC_COMMUNITY[c.docId] === cm.id).map((c) => c.id);
+    if (kids.length) nodes.push({ id: `s${cm.id}`, level: 1, label: cm.label, text: cm.summary, childIds: kids });
+  });
+  nodes.push({ id: 'root', level: 2, label: 'Solar System', text: 'The Solar System: the Sun, terrestrial planets, gas and ice giants, their moons, and the missions that explored them.', childIds: COMMUNITIES.map((c) => `s${c.id}`) });
+  return nodes;
+}
+// Flat scoring, no traversal: every node's own text is embedded and compared
+// to the query by cosine, then sorted — a leaf and a summary compete on equal
+// footing, so a high-level node can outrank individual leaves.
+export function retrieveTree(query: string, tree: TreeNode[], k: number): { id: string; score: number }[] {
+  const q = embedText(query);
+  return tree.map((n) => ({ id: n.id, score: cosine(q, embedText(n.text)) })).sort((a, b) => b.score - a.score).slice(0, k);
 }

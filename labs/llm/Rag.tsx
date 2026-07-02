@@ -23,9 +23,9 @@ import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
   multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
-  ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout,
+  ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout, buildTree, retrieveTree,
 } from './rag/index';
-import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity } from './rag/index';
+import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode } from './rag/index';
 
 const ACCENT = '#a78bfa';
 // per-community identity colour (GraphRAG graphbuild/graphsearch), distinct from
@@ -74,6 +74,13 @@ interface Pipe {
   graphMode?: 'local' | 'global';
   localResult?: ReturnType<typeof localSearch>;
   globalResult?: ReturnType<typeof globalSearch>;
+  // RAPTOR: `tree` is the built 3-level node list (buildTree); `treeHits` is
+  // retrieveTree's top-k {id,score} over EVERY node (leaf chunk or summary/
+  // root) — `ranked`/`candidates`/`gen` above are already built by mapping each
+  // hit to a chunk-like Ranked entry (see the pipe useMemo's `hasTree` branch),
+  // so Augment/Generate need no RAPTOR-specific code at all.
+  tree?: TreeNode[];
+  treeHits?: { id: string; score: number }[];
 }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
@@ -500,6 +507,66 @@ const GraphGlobalView: React.FC<{
   );
 };
 
+// RAPTOR's 3-level summary tree — root (corpus) atop community-summary nodes
+// atop leaf chunks, edges drawn parent→child. `hits` is this run's
+// `retrieveTree` top-k (any level) — those nodes glow, independent of level,
+// since the whole point of RAPTOR is that a summary node can win right
+// alongside leaves. No traversal is drawn (retrieveTree doesn't walk the
+// tree, it flatly scores every node), so edges stay a neutral structural
+// grey — only the nodes themselves carry the retrieval signal.
+const TreeView: React.FC<{ tree: TreeNode[]; hits: { id: string; score: number }[]; accent: string }> = ({ tree, hits, accent }) => {
+  const leaves = tree.filter((n) => n.level === 0);
+  const mids = tree.filter((n) => n.level === 1);
+  const root = tree.find((n) => n.level === 2);
+  const hitScore = new Map(hits.map((h) => [h.id, h.score]));
+
+  const gap = 42, padX = 30, padT = 26, rowGap = 118;
+  const W = Math.max(560, padX * 2 + Math.max(0, leaves.length - 1) * gap);
+  const H = padT * 2 + rowGap * 2;
+  const yRoot = padT, yMid = padT + rowGap, yLeaf = padT + rowGap * 2;
+  const step = leaves.length > 1 ? (W - padX * 2) / (leaves.length - 1) : 0;
+  const leafX = new Map(leaves.map((n, i) => [n.id, leaves.length > 1 ? padX + i * step : W / 2] as const));
+  const midX = new Map(mids.map((m) => {
+    const xs = m.childIds.map((id) => leafX.get(id)).filter((x): x is number => x != null);
+    return [m.id, xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : W / 2] as const;
+  }));
+  const rootX = W / 2, rLeaf = 11, rMid = 17, rRoot = 21;
+  const fill = (id: string) => (hitScore.has(id) ? accent : 'rgba(148,158,196,.4)');
+  const glow = (id: string) => (hitScore.has(id) ? { filter: `drop-shadow(0 0 7px ${accent})` } : undefined);
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)' }}>
+      {root && mids.map((m) => (
+        <line key={`rm-${m.id}`} x1={rootX} y1={yRoot + rRoot} x2={midX.get(m.id)!} y2={yMid - rMid} stroke="rgba(120,130,170,.3)" strokeWidth={1.3} />
+      ))}
+      {mids.flatMap((m) => m.childIds.map((cid) => {
+        const lx = leafX.get(cid); if (lx == null) return null;
+        return <line key={`ml-${m.id}-${cid}`} x1={midX.get(m.id)!} y1={yMid + rMid} x2={lx} y2={yLeaf - rLeaf} stroke="rgba(120,130,170,.18)" strokeWidth={1} />;
+      }))}
+      {leaves.map((n) => (
+        <g key={n.id}>
+          <circle cx={leafX.get(n.id)!} cy={yLeaf} r={rLeaf} fill={fill(n.id)} stroke="rgba(8,11,20,.6)" strokeWidth={1.2} style={glow(n.id)} />
+          <text x={leafX.get(n.id)!} y={yLeaf + rLeaf + 11} textAnchor="middle" fontSize={7.5} fontFamily="var(--mono)" fill={hitScore.has(n.id) ? accent : 'var(--t2)'}>{n.id}</text>
+        </g>
+      ))}
+      {mids.map((m) => (
+        <g key={m.id}>
+          <circle cx={midX.get(m.id)!} cy={yMid} r={rMid} fill={fill(m.id)} stroke="rgba(8,11,20,.6)" strokeWidth={1.4} style={glow(m.id)} />
+          <text x={midX.get(m.id)!} y={yMid + 3} textAnchor="middle" fontSize={9} fontWeight={700} fontFamily="var(--mono)" fill={hitScore.has(m.id) ? '#0b0e18' : 'var(--t0)'}>{m.id}</text>
+          <text x={midX.get(m.id)!} y={yMid + rMid + 13} textAnchor="middle" fontSize={9} fontFamily="var(--mono)" fill={hitScore.has(m.id) ? accent : 'var(--t2)'}>{truncate(m.label, 18)}{hitScore.has(m.id) ? ` · ${hitScore.get(m.id)!.toFixed(3)}` : ''}</text>
+        </g>
+      ))}
+      {root && (
+        <g>
+          <circle cx={rootX} cy={yRoot} r={rRoot} fill={fill(root.id)} stroke="rgba(8,11,20,.6)" strokeWidth={1.6} style={glow(root.id)} />
+          <text x={rootX} y={yRoot + 4} textAnchor="middle" fontSize={9.5} fontWeight={700} fontFamily="var(--mono)" fill={hitScore.has(root.id) ? '#0b0e18' : 'var(--t0)'}>root</text>
+          <text x={rootX} y={yRoot - rRoot - 8} textAnchor="middle" fontSize={9.5} fontFamily="var(--mono)" fill={hitScore.has(root.id) ? accent : 'var(--t2)'}>{root.label}{hitScore.has(root.id) ? ` · ${hitScore.get(root.id)!.toFixed(3)}` : ''}</text>
+        </g>
+      )}
+    </svg>
+  );
+};
+
 /* ---------- active-stage detail: one titled text panel per stage kind ---------- */
 const StageDetail: React.FC<{
   stage: Stage; pipe: Pipe; params: RagParams; query: string;
@@ -684,18 +751,27 @@ const StageDetail: React.FC<{
     }
     case 'retrieve': {
       const top = pipe.ranked.slice(0, params.k);
-      const topIds = new Set(top.map((r) => r.chunk.id));
       // RAG-Fusion overwrote `pipe.ranked` with the RRF-fused order (see Pipe's
       // comment) — `r.score` below is then a fused score, not a `params.retrieval`
       // score, and the Dense/Sparse/Hybrid toggle has no effect on it, so both are
       // relabeled/hidden here rather than showing a misleading "by dense score".
       const isFused = pipe.queries != null;
-      const scoreLabel = isFused ? 'fused (RRF)' : params.retrieval;
+      // RAPTOR overwrote `pipe.ranked` too — with `retrieveTree`'s flat score
+      // over EVERY tree node, so the toggle is equally inert here.
+      const isTree = pipe.tree != null;
+      const scoreLabel = isFused ? 'fused (RRF)' : isTree ? 'tree-node cosine' : params.retrieval;
       // Embed/plot `pipe.retrievalQuery` (not the raw `query` prop) — when a
       // rewrite stage ran, `pipe.ranked` was scored against the rewritten text,
       // so the marker must match or the lines/ranking below would look wrong.
       const qPt = project2(embedText(pipe.retrievalQuery));
       const chunkPts = pipe.chunks.map((c) => project2(c.vec));
+      // RAPTOR's top-k can include summary/root pseudo-chunks (docId -1) that
+      // have no vector position among `pipe.chunks` (the leaf-only corpus) —
+      // split them out so the scatter only ever plots/lines real leaf chunks
+      // (never a missing-point crash) and list any summary/root hits below it.
+      const leafTop = isTree ? top.filter((r) => r.chunk.docId !== -1) : top;
+      const summaryTop = isTree ? top.filter((r) => r.chunk.docId === -1) : [];
+      const leafTopIds = new Set(leafTop.map((r) => r.chunk.id));
       // fit the domain over chunks AND the query point so the ringed query
       // marker can never land outside the plotted box (SVGs clip by default).
       const { dx, dy } = fitDomain(
@@ -703,17 +779,17 @@ const StageDetail: React.FC<{
         [...chunkPts.map((p) => p[1]), qPt[1]],
       );
       const points: ScatterPoint[] = pipe.chunks.map((c, i) => ({
-        x: chunkPts[i][0], y: chunkPts[i][1], cls: 0, faint: !topIds.has(c.id),
+        x: chunkPts[i][0], y: chunkPts[i][1], cls: 0, faint: !leafTopIds.has(c.id),
       }));
       const markers: ScatterMarker[] = [{ x: qPt[0], y: qPt[1], color: ACCENT, r: 7, ring: true }];
       const ptById = new Map(pipe.chunks.map((c, i) => [c.id, chunkPts[i]] as const));
-      const lines: ScatterLine[] = top.map((r) => {
+      const lines: ScatterLine[] = leafTop.map((r) => {
         const p = ptById.get(r.chunk.id)!;
         return { x1: qPt[0], y1: qPt[1], x2: p[0], y2: p[1], color: ACCENT, width: 2 };
       });
       return (
-        <Panel title={`Retrieve · top-${params.k} of ${pipe.chunks.length} chunks by ${scoreLabel} score for "${pipe.retrievalQuery}"`} note={stage.note}>
-          {!isFused && (
+        <Panel title={`Retrieve · top-${params.k} of ${isTree ? `${pipe.tree!.length} tree nodes` : `${pipe.chunks.length} chunks`} by ${scoreLabel} score for "${pipe.retrievalQuery}"`} note={stage.note}>
+          {!isFused && !isTree && (
             <div style={{ display: 'flex', gap: 7 }}>
               <AlgoPill accent={ACCENT} active={params.retrieval === 'dense'} onClick={() => onRetrieval('dense')}>Dense</AlgoPill>
               <AlgoPill accent={ACCENT} active={params.retrieval === 'sparse'} onClick={() => onRetrieval('sparse')}>Sparse (BM25)</AlgoPill>
@@ -726,6 +802,18 @@ const StageDetail: React.FC<{
               width={460} height={340} markers={markers} lines={lines} xLabel="PC1" yLabel="PC2"
             />
           </div>
+          {isTree && summaryTop.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <MonoLabel style={{ marginBottom: 2 }}>summary/root node(s) also retrieved (no leaf position on the scatter above)</MonoLabel>
+              {summaryTop.map((r) => (
+                <div key={r.chunk.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', border: `1px solid ${ACCENT}`, borderRadius: 6, background: 'rgba(167,139,250,.08)' }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: ACCENT, fontWeight: 700, flexShrink: 0 }}>[{r.chunk.id}]</span>
+                  <span style={{ ...row, color: 'var(--t0)' }}>{truncate(r.chunk.text, 70)}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginLeft: 'auto', flexShrink: 0 }}>{r.score.toFixed(3)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 230, overflowY: 'auto' }}>
             <MonoLabel style={{ marginBottom: 4 }}>full ranking · {scoreLabel} score</MonoLabel>
             {pipe.ranked.map((r, rank) => {
@@ -1024,6 +1112,25 @@ Question: ${query}`}
         </div>
       );
     }
+    case 'tree': {
+      const tree = pipe.tree ?? [];
+      const hits = pipe.treeHits ?? [];
+      const nLeafHit = hits.filter((h) => pipe.chunks.some((c) => c.id === h.id)).length;
+      const nHighHit = hits.length - nLeafHit;
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+          <MonoLabel>
+            Tree · {tree.filter((n) => n.level === 0).length} leaf chunks · {tree.filter((n) => n.level === 1).length} community summaries · 1 root · {stage.note}
+          </MonoLabel>
+          <TreeView tree={tree} hits={hits} accent={ACCENT} />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 640, textAlign: 'center', lineHeight: 1.6 }}>
+            Every node — leaf chunk, community summary, or the corpus root — is embedded and scored against the query the same way (no traversal, just a flat rank over the whole tree). {nHighHit > 0
+              ? `This run's top-${params.k} retrieval (glowing above) pulled in ${nHighHit} summary/root node${nHighHit === 1 ? '' : 's'} alongside ${nLeafHit} leaf chunk${nLeafHit === 1 ? '' : 's'} — a high-level node standing in for many individual chunks at once, better for a "big picture" question.`
+              : `This run's top-${params.k} retrieval (glowing above) happened to land entirely on leaf chunks — try "Which moon of Saturn has a thick atmosphere?", where the Gas giants & moons summary outranks every individual chunk.`}
+          </div>
+        </div>
+      );
+    }
     default:
       return (
         <Panel title={stage.label} note={stage.note}>
@@ -1157,12 +1264,15 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
     case 'index':
       return log('indexing', 'ANN over chunk vectors', { entries: pipe.chunks.length }, 'index built');
     case 'retrieve': {
-      // RAG-Fusion already overwrote pipe.ranked with the fused order by this
-      // point (see Pipe's comment) — label the formula/score for what it really
-      // is instead of claiming a cos/BM25 score the Math tab didn't compute.
+      // RAG-Fusion / RAPTOR already overwrote pipe.ranked (fused order / tree-node
+      // scores) by this point (see Pipe's comment) — label the formula/score for
+      // what it really is instead of claiming a cos/BM25 score the Math tab didn't
+      // compute.
       const isFused = pipe.queries != null;
+      const isTree = pipe.tree != null;
       return log(
-        'retrieval', isFused ? 'RRF(d)=Σ 1/(k+rankᵢ(d))' : params.retrieval === 'sparse' ? 'score = BM25(q, c)' : 'score = cos(q, c)',
+        'retrieval',
+        isFused ? 'RRF(d)=Σ 1/(k+rankᵢ(d))' : isTree ? 'score(n) = cos(q, embed(text(n))), n ∈ tree' : params.retrieval === 'sparse' ? 'score = BM25(q, c)' : 'score = cos(q, c)',
         { k: params.k, top: pipe.ranked[0]?.chunk.id ?? '—', best: +(pipe.ranked[0]?.score ?? 0).toFixed(3) },
         `top-${params.k}: ${pipe.ranked.slice(0, params.k).map((r) => r.chunk.id).join(', ')}`,
       );
@@ -1240,7 +1350,16 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         seeds.length ? `seeds: ${seeds.map((s) => s.label).join(', ')} → ${chunkIds.length} chunk(s) in scope` : 'no entity matched the query',
       );
     }
-    // Milestone C adds: route, tree
+    case 'tree': {
+      const tree = pipe.tree ?? [];
+      const hits = pipe.treeHits ?? [];
+      return log(
+        'tree construction', 'leaves = chunks; level-1 = summary(community); root = summary(corpus)',
+        { leaves: tree.filter((n) => n.level === 0).length, summaries: tree.filter((n) => n.level === 1).length, nodes: tree.length },
+        `${tree.length} nodes built · top-${params.k} hit: ${hits.map((h) => h.id).join(', ')}`,
+      );
+    }
+    // Milestone C adds: route
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -1318,6 +1437,14 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // instead of running `retrieveRanked` at all. No variant's rail owns 'graphsearch'
   // together with 'fuse'/'rewrite'/'hyde', so these stay mutually exclusive.
   const hasGraph = stages.some((s) => s.kind === 'graphbuild' || s.kind === 'graphsearch');
+  // True when the rail owns a 'tree' stage (RAPTOR) — the pipe below then
+  // OVERWRITES `ranked` outright (like Fusion/GraphRAG do): `buildTree` turns
+  // the leaf chunks into a 3-level tree (chunks → per-community summaries →
+  // one corpus root), and `retrieveTree` scores EVERY node — any level — by
+  // cosine to the query, so a summary/root node can outrank individual leaves
+  // for a broad question. No variant's rail owns 'tree' together with
+  // 'fuse'/'graphsearch', so these stay mutually exclusive.
+  const hasTree = stages.some((s) => s.kind === 'tree');
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -1333,6 +1460,8 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     let fusedMap: Map<number, number> | undefined;
     let localResult: ReturnType<typeof localSearch> | undefined;
     let globalResult: ReturnType<typeof globalSearch> | undefined;
+    let tree: TreeNode[] | undefined;
+    let treeHits: { id: string; score: number }[] | undefined;
     if (hasFusion) {
       // RAG-Fusion deliberately ignores the Dense/Sparse/Hybrid retrieval-mode
       // toggle: that toggle picks one scorer for one query, while Fusion's whole
@@ -1373,6 +1502,23 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           score: c.score, rank: i,
         }));
       }
+    } else if (hasTree) {
+      // RAPTOR: score EVERY tree node (leaf chunk or summary/root) against the
+      // query — retrieveTree does no traversal, just a flat rank over the whole
+      // tree, so a broad question can surface a high-level summary node instead
+      // of many individual leaf chunks.
+      retrievalQuery = query.label;
+      tree = buildTree(chunks);
+      const hits = retrieveTree(query.label, tree, params.k);
+      treeHits = hits;
+      const chunkById = new Map(chunks.map((c) => [c.id, c] as const));
+      const nodeById = new Map(tree.map((n) => [n.id, n] as const));
+      ranked = hits.map((h, i) => {
+        const leaf = chunkById.get(h.id);
+        const node = nodeById.get(h.id)!;
+        const chunk: Chunk = leaf ?? { id: node.id, docId: -1, title: node.label, tags: ['summary'], text: node.text, vec: embedText(node.text) };
+        return { chunk, score: h.score, rank: i };
+      });
     } else {
       retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
       ranked = retrieveRanked(retrievalQuery, chunks, params);
@@ -1411,9 +1557,9 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     const supported = hasCritique ? isSupported(gen.answer, candidates.map((r) => r.chunk)) : undefined;
     return {
       chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
-      graphMode: hasGraph ? graphMode : undefined, localResult, globalResult,
+      graphMode: hasGraph ? graphMode : undefined, localResult, globalResult, tree, treeHits,
     };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, graphMode]);
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, graphMode]);
 
   const stage = stages[stageIdx];
 
@@ -1438,7 +1584,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // canvas than the chunk/retrieve/augment/generate text-and-card panels, which
   // stay at the original 620px.
   const wideStage = stage.kind === 'embed' || stage.kind === 'index' || stage.kind === 'fuse'
-    || stage.kind === 'graphbuild' || stage.kind === 'graphsearch';
+    || stage.kind === 'graphbuild' || stage.kind === 'graphsearch' || stage.kind === 'tree';
   // LabStage's centre stage is `overflow:hidden` and vertically centers this
   // grid with no scrollbar of its own, so a tall stage-detail panel (embed's
   // heatmap+scatter, index's ANN diagram, and future RAPTOR/ColBERT visuals) can

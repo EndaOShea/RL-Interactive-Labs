@@ -206,6 +206,25 @@ const GRAPH_RAG: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag'];
+// --- RAPTOR: recursive summary tree (leaves=chunks, per-community summaries, one corpus root) ---
+// The tree itself and its flat, level-agnostic scoring (`buildTree`/`retrieveTree`)
+// live in ./graph, reusing the SAME COMMUNITIES GraphRAG above already defines —
+// this rail just names the extra 'tree' stage; Rag.tsx's pipe branch (gated on
+// `hasTree`) calls buildTree/retrieveTree and feeds the hits into the same
+// augment/generate every other variant shares.
+const RAPTOR: Variant = {
+  id: 'raptor', name: 'RAPTOR', group: 'Structured', year: '2024',
+  blurb: 'Recursively summarizes the corpus into a tree instead of indexing a flat chunk list: leaf nodes are the chunks, one summary node sits above each community, and a single root node summarizes the whole corpus. Retrieval scores every node — leaf or summary, at any level — against the query, so a broad, corpus-spanning question can be answered by one high-level summary node instead of stitching together many individual chunks.',
+  stages: () => [
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
+    { kind: 'tree', label: 'Tree', note: 'Recursively summarize: chunks roll up into per-community summary nodes, which roll up into one corpus root.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Score every tree node — leaf chunk or summary — against the query and keep the top-k.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the retrieved nodes (chunks and/or summaries) into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor'];
 export { QUERIES };
