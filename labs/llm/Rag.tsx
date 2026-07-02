@@ -21,9 +21,9 @@ import { ragPython } from './python';
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
-  multiQuery, denseScores, topK, rrf, isRelevant, isSupported,
+  multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback,
 } from './rag/index';
-import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
+import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade } from './rag/index';
 
 const ACCENT = '#a78bfa';
 
@@ -56,6 +56,11 @@ interface Pipe {
   // pipe useMemo). `supported` is Reflect's isSupported(answer, kept chunks).
   critique?: { chunk: Chunk; relevant: boolean }[];
   supported?: boolean;
+  // CRAG: `grade` is the top-1 retrieval-confidence band; `webChunks` is what
+  // webFallback pulled from the web corpus (only set when grade !== 'correct') —
+  // `candidates` above already merges it in per the grade (see the pipe useMemo).
+  grade?: Grade;
+  webChunks?: Ranked[];
 }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
@@ -663,6 +668,56 @@ const StageDetail: React.FC<{
         </Panel>
       );
     }
+    case 'grade': {
+      const grade: Grade = pipe.grade ?? 'correct';
+      const top = pipe.ranked[0]?.score ?? 0;
+      const hi = 0.5, lo = 0.2;
+      const gradeColor = grade === 'correct' ? '#34d399' : grade === 'ambiguous' ? '#fbbf24' : '#f87171';
+      const branch = grade === 'correct' ? 'correct → use index' : grade === 'ambiguous' ? 'ambiguous → index + web' : 'incorrect → web search';
+      const meterMax = Math.max(1, top * 1.15, hi * 1.4);
+      const pct = (v: number) => Math.min(100, Math.max(0, (v / meterMax) * 100));
+      const web = pipe.webChunks ?? [];
+      return (
+        <Panel title={`Grade · retrieval confidence for "${query}"`} note={stage.note}>
+          <div>
+            <MonoLabel style={{ marginBottom: 8 }}>top-1 retrieval score vs thresholds (lo {lo} / hi {hi})</MonoLabel>
+            <div style={{ position: 'relative', height: 26, background: 'rgba(8,11,20,.5)', border: '1px solid var(--border)', borderRadius: 6 }}>
+              <div style={{ position: 'absolute', left: `${pct(top)}%`, top: 0, bottom: 0, width: 0, borderLeft: `3px solid ${gradeColor}`, transition: 'left .2s ease' }} />
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct(top)}%`, background: gradeColor, opacity: 0.28, borderRadius: '6px 0 0 6px' }} />
+              <div style={{ position: 'absolute', left: `${pct(lo)}%`, top: 0, bottom: 0, width: 1, background: 'var(--t2)', opacity: 0.6 }} />
+              <div style={{ position: 'absolute', left: `${pct(hi)}%`, top: 0, bottom: 0, width: 1, background: 'var(--t2)', opacity: 0.6 }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)', marginTop: 3 }}>
+              <span>0</span><span>lo {lo}</span><span>hi {hi}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, letterSpacing: '.04em', padding: '3px 10px', borderRadius: 5,
+              color: gradeColor, border: `1px solid ${gradeColor}`, background: `color-mix(in srgb, ${gradeColor} 10%, transparent)`,
+            }}>{grade.toUpperCase()}</span>
+            <span style={{ ...row, color: 'var(--t1)' }}>top-1 score {top.toFixed(3)} · {branch}</span>
+          </div>
+          {web.length > 0 && (
+            <div>
+              <MonoLabel style={{ marginBottom: 6 }}>web-fallback chunks entering (BM25-matched)</MonoLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {web.map((r) => (
+                  <div key={r.chunk.id} style={{ border: '1px solid #38bdf8', borderRadius: 7, padding: '6px 10px', background: 'rgba(56,189,248,.06)' }}>
+                    <div style={row}><b style={{ color: '#38bdf8' }}>[{r.chunk.id}]</b> {truncate(r.chunk.text, 84)} <span style={{ color: 'var(--t2)' }}>· bm25 {r.score.toFixed(3)}</span></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            {grade === 'correct' && 'The top retrieved chunk is confidently on-topic — CRAG trusts the index as-is, no web search needed.'}
+            {grade === 'ambiguous' && 'The top retrieved chunk is only weakly on-topic — CRAG keeps it but also pulls in web results as backup evidence.'}
+            {grade === 'incorrect' && 'The index has nothing confidently relevant — CRAG discards it and falls back to a web search instead.'}
+          </div>
+        </Panel>
+      );
+    }
     case 'fuse': {
       const queries = pipe.queries ?? [];
       const perQueryRankings = pipe.perQueryRankings ?? [];
@@ -979,7 +1034,16 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
       const supported = pipe.supported ?? false;
       return log('support reflection', 'covered = |tokens(answer) ∩ tokens(kept)| / |tokens(answer)|', { supported: supported ? 1 : 0 }, supported ? 'Supported' : 'Unsupported');
     }
-    // Milestone C adds: grade, route, graphbuild, graphsearch, tree
+    case 'grade': {
+      const grade = pipe.grade ?? 'correct';
+      const top = +(pipe.ranked[0]?.score ?? 0).toFixed(3);
+      const web = pipe.webChunks?.length ?? 0;
+      return log(
+        'retrieval grading', 'grade = top₁≥hi ? correct : top₁≤lo ? incorrect : ambiguous', { top1: top, grade },
+        grade === 'correct' ? 'correct · index trusted as-is' : `${grade} · ${web} web chunk(s) pulled in`,
+      );
+    }
+    // Milestone C adds: route, graphbuild, graphsearch, tree
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -1044,6 +1108,11 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // grades the top-k RETRIEVED chunks Relevant/Irrelevant and narrows what Augment/
   // Generate/`candidates` consume to just the Relevant survivors (see below).
   const hasCritique = stages.some((s) => s.kind === 'critique');
+  // True when the rail owns a 'grade' stage (CRAG) — the pipe below then grades
+  // the top-1 retrieval confidence and, when it isn't 'correct', merges web
+  // chunks into what Augment/Generate/`candidates` consume (see below). No
+  // variant's rail owns both 'critique' and 'grade', so these stay exclusive.
+  const hasGrade = stages.some((s) => s.kind === 'grade');
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -1081,7 +1150,19 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     const critique = hasCritique
       ? retrievedTopK.map((r) => ({ chunk: r.chunk, relevant: isRelevant(query.label, r.chunk) }))
       : undefined;
-    const firstStage = critique ? retrievedTopK.filter((_, i) => critique[i].relevant) : retrievedTopK;
+    // CRAG's grade: grade the top-1 retrieval confidence, then — when it isn't
+    // 'correct' — pull in web chunks (BM25-matched, see webFallback). 'ambiguous'
+    // keeps the index result and adds the web as backup evidence; 'incorrect'
+    // discards the index result outright and relies on the web alone (the OOD
+    // story: no dense signal at all, so the index is graded incorrect and the
+    // web doc is what actually grounds the answer).
+    const grade = hasGrade ? gradeRetrieval(ranked) : undefined;
+    const webChunks = grade && grade !== 'correct' ? webFallback(query.label) : undefined;
+    let firstStage: Ranked[];
+    if (critique) firstStage = retrievedTopK.filter((_, i) => critique[i].relevant);
+    else if (grade === 'incorrect') firstStage = webChunks ?? [];
+    else if (grade === 'ambiguous') firstStage = [...retrievedTopK, ...(webChunks ?? [])];
+    else firstStage = retrievedTopK;
     const candidates: Ranked[] = rerankActive
       ? firstStage
           .map((r) => ({ chunk: r.chunk, score: rerankScore(query.label, r.chunk), rank: 0 }))
@@ -1092,8 +1173,8 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     // Self-RAG's reflect: is the generated answer actually backed by the chunks
     // Critique kept, rather than trusted just because generation produced text?
     const supported = hasCritique ? isSupported(gen.answer, candidates.map((r) => r.chunk)) : undefined;
-    return { chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique]);
+    return { chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks };
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade]);
 
   const stage = stages[stageIdx];
 
@@ -1169,6 +1250,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       currentParams={{
         topic: 'Retrieval-Augmented Generation', variant: variant.name, stage: stage.kind, query: query.label,
         topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded, supported: pipe.supported,
+        grade: pipe.grade,
       }}
       apiPanel={apiPanel}
     />

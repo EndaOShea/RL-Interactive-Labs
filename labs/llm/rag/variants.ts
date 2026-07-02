@@ -1,7 +1,7 @@
 // labs/llm/rag/variants.ts — a Variant is an ordered Stage list (the rail) + the
 // compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind.
 import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS, rerankScore } from './retrieval';
-import { QUERIES, contentTokens, embedText, cosine, tokenize } from './corpus';
+import { QUERIES, contentTokens, embedText, cosine, tokenize, WEB_DOCS } from './corpus';
 
 export type StageKind =
   | 'chunk' | 'embed' | 'index' | 'retrieve' | 'rerank' | 'augment' | 'generate'
@@ -152,6 +152,39 @@ const SELF_RAG: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag'];
+// --- Corrective RAG (CRAG): retrieval grading + web fallback ---
+export type Grade = 'correct' | 'ambiguous' | 'incorrect';
+// Retrieval evaluator — grade the top-1 retrieval confidence: a high top score
+// means the index hit is trustworthy; a very low one means it is not even
+// on-topic; anything in between is ambiguous.
+export function gradeRetrieval(ranked: Ranked[], hi = 0.5, lo = 0.2): Grade {
+  const top = ranked[0]?.score ?? 0;
+  return top >= hi ? 'correct' : top <= lo ? 'incorrect' : 'ambiguous';
+}
+// On incorrect/ambiguous, pull from the web corpus and merge (knowledge
+// refinement). Scored with BM25 (lexical), NOT dense: an out-of-corpus query
+// embeds to a zero vector (no lexicon signal), so dense similarity can never
+// match the web doc — but the query still shares literal words with it.
+export function webFallback(query: string): Ranked[] {
+  const chunks = WEB_DOCS.map((d) => ({ id: `w${d.id}`, docId: d.id, title: d.title, tags: d.tags, text: d.text, vec: embedText(d.text) }));
+  const s = bm25Scores(query, chunks);
+  return topK(s, chunks.length).map((idx, rank) => ({ chunk: chunks[idx], score: s[idx], rank }));
+}
+
+const CRAG: Variant = {
+  id: 'crag', name: 'Corrective RAG (CRAG)', group: 'Self-reflective', year: '2024',
+  blurb: 'Grades the top retrieved chunk before trusting it: a confident match uses the index as-is, an ambiguous one keeps the index but backs it up with a web search, and a confidently wrong (or empty) match discards the index result entirely and falls back to the web.',
+  stages: () => [
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
+    { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks.' },
+    { kind: 'grade', label: 'Grade', note: 'Grade the top retrieval’s confidence: correct, ambiguous, or incorrect.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack index and/or web chunks into the prompt, per the grade.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag'];
 export { QUERIES };
