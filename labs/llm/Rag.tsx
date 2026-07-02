@@ -9,7 +9,7 @@ import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import Heatmap from '../../components/labkit/viz/Heatmap';
-import ScatterPlot, { ScatterPoint } from '../../components/labkit/viz/ScatterPlot';
+import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../components/labkit/viz/ScatterPlot';
 import { RunControls, MonoLabel, AlgoPill } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { downloadCode } from '../../utils/downloadCode';
@@ -20,7 +20,7 @@ import { ragPython } from './python';
 // very file (Rag.tsx) and self-resolves instead of hitting the directory.
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
-  chunkAll, retrieveRanked, generate, AXES, project2, cosine,
+  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
@@ -220,7 +220,8 @@ const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> 
 const StageDetail: React.FC<{
   stage: Stage; pipe: Pipe; params: RagParams; query: string;
   indexMode: IndexMode; onIndexMode: (m: IndexMode) => void;
-}> = ({ stage, pipe, params, query, indexMode, onIndexMode }) => {
+  onRetrieval: (m: RagParams['retrieval']) => void;
+}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval }) => {
   switch (stage.kind) {
     case 'chunk': {
       return (
@@ -278,14 +279,56 @@ const StageDetail: React.FC<{
     }
     case 'retrieve': {
       const top = pipe.ranked.slice(0, params.k);
+      const topIds = new Set(top.map((r) => r.chunk.id));
+      const qPt = project2(embedText(query));
+      const chunkPts = pipe.chunks.map((c) => project2(c.vec));
+      // fit the domain over chunks AND the query point so the ringed query
+      // marker can never land outside the plotted box (SVGs clip by default).
+      const { dx, dy } = fitDomain(
+        [...chunkPts.map((p) => p[0]), qPt[0]],
+        [...chunkPts.map((p) => p[1]), qPt[1]],
+      );
+      const points: ScatterPoint[] = pipe.chunks.map((c, i) => ({
+        x: chunkPts[i][0], y: chunkPts[i][1], cls: 0, faint: !topIds.has(c.id),
+      }));
+      const markers: ScatterMarker[] = [{ x: qPt[0], y: qPt[1], color: ACCENT, r: 7, ring: true }];
+      const ptById = new Map(pipe.chunks.map((c, i) => [c.id, chunkPts[i]] as const));
+      const lines: ScatterLine[] = top.map((r) => {
+        const p = ptById.get(r.chunk.id)!;
+        return { x1: qPt[0], y1: qPt[1], x2: p[0], y2: p[1], color: ACCENT, width: 2 };
+      });
       return (
-        <Panel title={`Retrieve · top-${params.k} by ${params.retrieval} score for "${query}"`} note={stage.note}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {top.map((r, i) => (
-              <div key={r.chunk.id} style={row}>
-                <b style={{ color: ACCENT }}>#{i + 1}</b> {r.chunk.id} <span style={{ color: 'var(--t2)' }}>score {r.score.toFixed(3)}</span> — {truncate(r.chunk.text, 54)}
-              </div>
-            ))}
+        <Panel title={`Retrieve · top-${params.k} of ${pipe.chunks.length} chunks by ${params.retrieval} score for "${query}"`} note={stage.note}>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <AlgoPill accent={ACCENT} active={params.retrieval === 'dense'} onClick={() => onRetrieval('dense')}>Dense</AlgoPill>
+            <AlgoPill accent={ACCENT} active={params.retrieval === 'sparse'} onClick={() => onRetrieval('sparse')}>Sparse (BM25)</AlgoPill>
+            <AlgoPill accent={ACCENT} active={params.retrieval === 'hybrid'} onClick={() => onRetrieval('hybrid')}>Hybrid (RRF)</AlgoPill>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <ScatterPlot
+              points={points} classColors={['#6b7494']} domain={dx} range={dy}
+              width={460} height={340} markers={markers} lines={lines} xLabel="PC1" yLabel="PC2"
+            />
+          </div>
+          <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 230, overflowY: 'auto' }}>
+            <MonoLabel style={{ marginBottom: 4 }}>full ranking · {params.retrieval} score</MonoLabel>
+            {pipe.ranked.map((r, rank) => {
+              const isTop = rank < params.k;
+              return (
+                <div key={r.chunk.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '3px 6px',
+                  borderLeft: isTop ? `3px solid ${ACCENT}` : '3px solid transparent', borderRadius: 4,
+                  background: isTop ? 'rgba(167,139,250,.08)' : 'transparent',
+                }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: isTop ? ACCENT : 'var(--t2)', minWidth: 98, flexShrink: 0 }}>
+                    #{rank + 1} {r.score.toFixed(3)}
+                  </span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: isTop ? 'var(--t0)' : 'var(--t2)', opacity: isTop ? 1 : 0.55 }}>
+                    {r.chunk.id}: &quot;{truncate(r.chunk.text, 56)}&quot;
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </Panel>
       );
@@ -528,7 +571,11 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', width: wideStage ? 740 : 620 }}>
       <Rail stages={stages} active={stageIdx} accent={ACCENT} />
       <div className="custom-scrollbar" style={{ width: '100%', maxHeight: 'calc(100dvh - 300px)', overflowY: 'auto' }}>
-        <StageDetail stage={stage} pipe={pipe} params={params} query={query.label} indexMode={indexMode} onIndexMode={setIndexMode} />
+        <StageDetail
+          stage={stage} pipe={pipe} params={params} query={query.label}
+          indexMode={indexMode} onIndexMode={setIndexMode}
+          onRetrieval={(m) => setParams({ ...params, retrieval: m })}
+        />
       </div>
     </div>
   );
