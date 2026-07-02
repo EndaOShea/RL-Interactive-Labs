@@ -938,7 +938,10 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const stages: Stage[] = useMemo(() => {
     const base = variant.stages(params);
     if (!params.rerank || base.some((s) => s.kind === 'rerank')) return base;
-    const idx = base.findIndex((s) => s.kind === 'retrieve');
+    const idx = Math.max(
+      base.findIndex((s) => s.kind === 'retrieve'),
+      base.findIndex((s) => s.kind === 'fuse')
+    );
     if (idx === -1) return base;
     const rerankStage: Stage = {
       kind: 'rerank', label: 'Rerank',
