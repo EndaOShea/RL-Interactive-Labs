@@ -92,6 +92,20 @@ const ADVANCED: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced'];
+const HYDE: Variant = {
+  id: 'hyde', name: 'HyDE', group: 'Pre-retrieval', year: '2022',
+  blurb: 'Fabricates a hypothetical answer document from the query and embeds THAT instead of the bare query — closing the short-question-vs-long-passage embedding gap before retrieval even runs.',
+  stages: () => [
+    { kind: 'hyde', label: 'HyDE', note: 'Generate a hypothetical answer document from the query.' },
+    { kind: 'chunk', label: 'Chunk', note: 'Split documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Vectorize chunks.' },
+    { kind: 'index', label: 'Index', note: 'Build the vector index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve using the hypothetical document’s embedding.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the retrieved chunks into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde'];
 export { QUERIES };

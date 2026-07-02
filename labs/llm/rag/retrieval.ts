@@ -12,6 +12,14 @@ export function rewriteQuery(query: string): { rewritten: string; added: string[
   return { rewritten: added.length ? `${query} ${added.join(' ')}` : query, added };
 }
 
+// HyDE: fabricate a hypothetical answer document from the query, then retrieve by
+// ITS embedding (not the bare query's). The pseudo-answer is a deterministic
+// template — richer in topic words than the short question, so it embeds better.
+export function hydeDoc(query: string): string {
+  const { added } = rewriteQuery(query);
+  return `${query.replace(/\?$/, '')}. In the Solar System, this concerns ${added.join(', ') || 'planets and moons'}. A likely answer describes the relevant body and its ${added.join(' and ') || 'properties'}.`;
+}
+
 export interface Chunk { id: string; docId: number; title: string; tags: string[]; text: string; vec: number[]; }
 export type ChunkStrategy = 'fixed' | 'recursive' | 'semantic' | 'sentence';
 export const CHUNK_DEFAULTS = { size: 160, overlap: 24 };

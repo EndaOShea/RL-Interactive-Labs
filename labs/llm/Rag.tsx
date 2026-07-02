@@ -20,7 +20,7 @@ import { ragPython } from './python';
 // very file (Rag.tsx) and self-resolves instead of hitting the directory.
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
-  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery,
+  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
@@ -34,9 +34,11 @@ const ACCENT = '#a78bfa';
 // structurally owns a rerank stage (Advanced RAG always reranks, toggle or not) —
 // see the single `rerankActive` predicate in RagLab, used everywhere rerank is
 // gated. `retrievalQuery` is the string actually embedded/scored for Retrieve: the
-// raw query, unless the rail owns a `rewrite` stage, in which case it is
-// `rewriteQuery(query).rewritten` — Augment/Generate still answer the ORIGINAL
-// query, only first-stage retrieval sees the rewritten one.
+// raw query, unless the rail owns a `rewrite` stage (→ `rewriteQuery(query).rewritten`)
+// or a `hyde` stage (→ `hydeDoc(query)`, the fabricated hypothetical-answer text — HyDE
+// takes precedence, since no variant's rail carries both stages at once) —
+// Augment/Generate still answer the ORIGINAL query, only first-stage retrieval sees
+// the substituted one.
 interface Pipe { chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string; }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
@@ -275,6 +277,66 @@ const StageDetail: React.FC<{
   rerankActive: boolean;
 }> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive }) => {
   switch (stage.kind) {
+    case 'hyde': {
+      const doc = hydeDoc(query);
+      const qVec = embedText(query);
+      const hVec = embedText(doc);
+      const qPt = project2(qVec);
+      const hPt = project2(hVec);
+      const top = pipe.ranked.slice(0, params.k);
+      const topIds = new Set(top.map((r) => r.chunk.id));
+      const chunkPts = pipe.chunks.map((c) => project2(c.vec));
+      // fit the domain over the chunks AND both marker points — otherwise the
+      // raw-query or HyDE marker can land outside the plotted box and clip
+      // (SVGs clip content outside their own viewport by default).
+      const { dx, dy } = fitDomain(
+        [...chunkPts.map((p) => p[0]), qPt[0], hPt[0]],
+        [...chunkPts.map((p) => p[1]), qPt[1], hPt[1]],
+      );
+      const points: ScatterPoint[] = pipe.chunks.map((c, i) => ({
+        x: chunkPts[i][0], y: chunkPts[i][1], cls: 0, faint: !topIds.has(c.id),
+      }));
+      // blue = raw query embedding (for comparison only); purple (ACCENT) = the
+      // HyDE document embedding — the same accent `retrieve` uses for whatever
+      // vector actually drove retrieval, since here that IS the HyDE point.
+      const markers: ScatterMarker[] = [
+        { x: qPt[0], y: qPt[1], color: '#38bdf8', r: 6, ring: true },
+        { x: hPt[0], y: hPt[1], color: ACCENT, r: 7, ring: true },
+      ];
+      const ptById = new Map(pipe.chunks.map((c, i) => [c.id, chunkPts[i]] as const));
+      const lines: ScatterLine[] = top.map((r) => {
+        const p = ptById.get(r.chunk.id)!;
+        return { x1: hPt[0], y1: hPt[1], x2: p[0], y2: p[1], color: ACCENT, width: 2 };
+      });
+      const bestChunk = top[0]?.chunk;
+      const simShift = bestChunk
+        ? `sim(query, top-1) ${cosine(qVec, bestChunk.vec).toFixed(3)} → sim(HyDE doc, top-1) ${cosine(hVec, bestChunk.vec).toFixed(3)}`
+        : 'no chunk cleared retrieval for this query';
+      return (
+        <Panel title="HyDE · fabricate a hypothetical answer, embed & retrieve by IT" note={stage.note}>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>original query</MonoLabel>
+            <div style={{ ...row, color: 'var(--t1)' }}>&quot;{query}&quot;</div>
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>generated hypothetical document</MonoLabel>
+            <div style={{
+              ...row, color: 'var(--t0)', fontSize: 12.5, background: 'rgba(167,139,250,.12)',
+              border: `1px solid ${ACCENT}`, borderRadius: 7, padding: '8px 10px',
+            }}>{doc}</div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <ScatterPlot
+              points={points} classColors={['#6b7494']} domain={dx} range={dy}
+              width={460} height={340} markers={markers} lines={lines} xLabel="PC1" yLabel="PC2"
+            />
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            <span style={{ color: '#38bdf8' }}>blue</span> = raw-query embedding (not used below) · <span style={{ color: ACCENT }}>purple</span> = the HyDE document&apos;s embedding (what retrieval actually scores against) — writing a plausible, topic-rich answer instead of a short question shifts the vector toward the corpus&apos;s own phrasing, so it lands nearer the relevant cluster. {simShift}.
+          </div>
+        </Panel>
+      );
+    }
     case 'rewrite': {
       const { added } = rewriteQuery(query);
       return (
@@ -645,6 +707,10 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
     algorithm: `${variantName} · ${stage.label}`, stepDescription: stage.note, formula, variables, result,
   });
   switch (stage.kind) {
+    case 'hyde': {
+      const doc = hydeDoc(query);
+      return log("HyDE generation", "d' = fabricate(q); retrieve by embed(d')", { chars: doc.length }, `hypothetical doc: "${truncate(doc, 60)}"`);
+    }
     case 'rewrite': {
       const { added } = rewriteQuery(query);
       return log("query rewrite", "q' = q ⊕ inferred(keywords)", { added: added.length }, added.length ? added.join(', ') : 'no new axis keywords');
@@ -679,7 +745,7 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         'generation', 'answer ⊕ citations', { grounded: pipe.gen.grounded ? 1 : 0, cites: pipe.gen.citations.length },
         pipe.gen.grounded ? `grounded · ${pipe.gen.citations.join(', ')}` : 'refused (ungrounded)',
       );
-    // Milestone C adds: hyde, multiquery, fuse, grade, critique, route, reflect, graphbuild, graphsearch, tree
+    // Milestone C adds: multiquery, fuse, grade, critique, route, reflect, graphbuild, graphsearch, tree
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -726,6 +792,10 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // pipe below then retrieves on `rewriteQuery(query).rewritten` instead of the
   // raw query; Augment/Generate still answer the original query either way.
   const hasRewrite = stages.some((s) => s.kind === 'rewrite');
+  // Same idea for a pre-retrieval 'hyde' stage (HyDE) — the pipe retrieves on
+  // `hydeDoc(query)` (a fabricated hypothetical answer) instead of the raw query.
+  // HyDE takes precedence over rewrite below; no variant's rail owns both stages.
+  const hasHyde = stages.some((s) => s.kind === 'hyde');
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -734,7 +804,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // reflects reranking the same way the Rerank stage visualises it.
   const pipe: Pipe = useMemo(() => {
     const chunks = chunkAll(params.strategy, params.size, params.overlap);
-    const retrievalQuery = hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
+    const retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
     const ranked = retrieveRanked(retrievalQuery, chunks, params);
     const firstStage = ranked.slice(0, params.k);
     const candidates: Ranked[] = rerankActive
@@ -745,7 +815,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       : firstStage;
     const gen = generate(query.label, candidates, params.budget);
     return { chunks, ranked, candidates, gen, retrievalQuery };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite]);
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde]);
 
   const stage = stages[stageIdx];
 
