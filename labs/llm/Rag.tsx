@@ -8,6 +8,8 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
+import Heatmap from '../../components/labkit/viz/Heatmap';
+import ScatterPlot, { ScatterPoint } from '../../components/labkit/viz/ScatterPlot';
 import { RunControls, MonoLabel, AlgoPill } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { downloadCode } from '../../utils/downloadCode';
@@ -18,7 +20,7 @@ import { ragPython } from './python';
 // very file (Rag.tsx) and self-resolves instead of hitting the directory.
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
-  chunkAll, retrieveRanked, generate,
+  chunkAll, retrieveRanked, generate, AXES, project2, cosine,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
@@ -73,7 +75,30 @@ const Rail: React.FC<{ stages: Stage[]; active: number; accent: string }> = ({ s
   </div>
 );
 
-/* ---------- stage-specific visualizations (chunk) ---------- */
+/* ---------- stage-specific visualizations (chunk / embed / index) ---------- */
+
+// project2's PCA scale is "honest" (see corpus.ts) but not fitted to any
+// particular box — pad the real spread of the plotted points so every point
+// stays inside the ScatterPlot/SVG viewport instead of clipping off-canvas
+// (SVGs clip content outside their own box by default).
+function fitDomain(xs: number[], ys: number[], pad = 0.15): { dx: [number, number]; dy: [number, number] } {
+  const span = (vals: number[]): [number, number] => {
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (!isFinite(lo) || !isFinite(hi)) return [0, 10];
+    if (hi - lo < 1e-6) { lo -= 1; hi += 1; }
+    const m = (hi - lo) * pad;
+    return [lo - m, hi + m];
+  };
+  return { dx: span(xs), dy: span(ys) };
+}
+
+// Evenly-strided subsample so a capped preview still spans every document
+// instead of just the first few (chunks are grouped by doc in array order).
+function strideSample<T>(arr: T[], cap: number): T[] {
+  if (arr.length <= cap) return arr;
+  const step = arr.length / cap;
+  return Array.from({ length: cap }, (_, i) => arr[Math.floor(i * step)]);
+}
 
 const Tag: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span style={{
@@ -125,8 +150,77 @@ const ChunkView: React.FC<{ chunks: Chunk[]; strategy: ChunkStrategy; accent: st
   );
 };
 
+type IndexMode = 'flat' | 'ivf' | 'hnsw';
+
+// Purpose-built ANN illustration over the project2 landing. Flat = points
+// only (exact/brute-force — what Naive RAG actually runs). IVF = a coarse
+// grid partition tinted by occupancy (the cells a coarse quantizer would
+// probe). HNSW = every point wired to its 2 nearest neighbours by cosine —
+// the navigable graph a real HNSW index greedily walks at query time.
+const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> = ({ chunks, mode, accent }) => {
+  const W = 460, H = 380, padL = 44, padR = 14, padT = 14, padB = 36;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const pts = chunks.map((c) => project2(c.vec));
+  const { dx: [dx0, dx1], dy: [dy0, dy1] } = fitDomain(pts.map((p) => p[0]), pts.map((p) => p[1]));
+  const sx = (x: number) => padL + ((x - dx0) / (dx1 - dx0)) * plotW;
+  const sy = (y: number) => padT + (1 - (y - dy0) / (dy1 - dy0)) * plotH;
+
+  const G = 3; // coarse IVF partition — nlist = G×G cells
+  const cellW = (dx1 - dx0) / G, cellH = (dy1 - dy0) / G;
+  const cellN = Array.from({ length: G }, () => new Array(G).fill(0));
+  pts.forEach(([x, y]) => {
+    const cx = Math.min(G - 1, Math.max(0, Math.floor((x - dx0) / cellW)));
+    const cy = Math.min(G - 1, Math.max(0, Math.floor((y - dy0) / cellH)));
+    cellN[cx][cy]++;
+  });
+  const maxN = Math.max(1, ...cellN.flat());
+
+  const edges: [number, number][] = [];
+  if (mode === 'hnsw') {
+    const seen = new Set<string>();
+    chunks.forEach((c, i) => {
+      chunks
+        .map((c2, j) => [j, cosine(c.vec, c2.vec)] as [number, number])
+        .filter(([j]) => j !== i)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 2)
+        .forEach(([j]) => {
+          const key = i < j ? `${i}:${j}` : `${j}:${i}`;
+          if (!seen.has(key)) { seen.add(key); edges.push([i, j]); }
+        });
+    });
+  }
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+      <rect x={padL} y={padT} width={plotW} height={plotH} fill="none" stroke="var(--border)" />
+      {mode === 'ivf' && cellN.map((col, cx) => col.map((n, cy) => {
+        const x0 = dx0 + cx * cellW, x1 = x0 + cellW, y0 = dy0 + cy * cellH, y1 = y0 + cellH;
+        return (
+          <rect key={`c${cx}-${cy}`} x={sx(x0)} y={sy(y1)} width={sx(x1) - sx(x0)} height={sy(y0) - sy(y1)}
+            fill={accent} opacity={n ? 0.12 + 0.45 * (n / maxN) : 0.03} stroke="rgba(120,130,170,.22)" strokeWidth={1} />
+        );
+      }))}
+      {mode === 'hnsw' && edges.map(([i, j], k) => (
+        <line key={k} x1={sx(pts[i][0])} y1={sy(pts[i][1])} x2={sx(pts[j][0])} y2={sy(pts[j][1])}
+          stroke={accent} strokeWidth={1.1} opacity={0.4} />
+      ))}
+      {pts.map((p, i) => (
+        <circle key={chunks[i].id} cx={sx(p[0])} cy={sy(p[1])} r={4.2} fill="#8f97b8" stroke="rgba(8,11,20,.75)" strokeWidth={0.8} />
+      ))}
+      {mode === 'ivf' && cellN.map((col, cx) => col.map((n, cy) => n > 0 && (
+        <text key={`n${cx}-${cy}`} x={sx(dx0 + (cx + 0.86) * cellW)} y={sy(dy0 + (cy + 0.86) * cellH) + 3}
+          textAnchor="end" fontSize={9} fontFamily="var(--mono)" fill="var(--t2)">{n}</text>
+      )))}
+    </svg>
+  );
+};
+
 /* ---------- active-stage detail: one titled text panel per stage kind ---------- */
-const StageDetail: React.FC<{ stage: Stage; pipe: Pipe; params: RagParams; query: string }> = ({ stage, pipe, params, query }) => {
+const StageDetail: React.FC<{
+  stage: Stage; pipe: Pipe; params: RagParams; query: string;
+  indexMode: IndexMode; onIndexMode: (m: IndexMode) => void;
+}> = ({ stage, pipe, params, query, indexMode, onIndexMode }) => {
   switch (stage.kind) {
     case 'chunk': {
       return (
@@ -136,24 +230,52 @@ const StageDetail: React.FC<{ stage: Stage; pipe: Pipe; params: RagParams; query
       );
     }
     case 'embed': {
-      const sample = pipe.chunks[0];
+      const chunks = pipe.chunks;
+      const CAP = 16;
+      const shown = strideSample(chunks, CAP);
+      const matrix = shown.map((c) => c.vec);
+      const flat = matrix.flat();
+      const points: ScatterPoint[] = chunks.map((c) => { const [x, y] = project2(c.vec); return { x, y, cls: 0 }; });
+      const { dx, dy } = fitDomain(points.map((p) => p.x), points.map((p) => p.y));
       return (
-        <Panel title="Embed · lexicon → 8-D axis vector, L2-normalised" note={stage.note}>
-          <div style={row}>Axes: distance · size · atmosphere · moons · rings · ice · life · explored.</div>
-          {sample && (
-            <div style={row}><b style={{ color: ACCENT }}>{sample.id}</b> → [{sample.vec.map((v) => v.toFixed(2)).join(', ')}]</div>
-          )}
-          <div style={{ ...row, color: 'var(--t2)' }}>{pipe.chunks.length} chunk vectors computed.</div>
-        </Panel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+          <MonoLabel>Embed · lexicon → {AXES.length}-D axis vector, L2-normalised · {stage.note}</MonoLabel>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center' }}>
+              <MonoLabel style={{ fontSize: 9 }}>chunk × axis</MonoLabel>
+              <Heatmap matrix={matrix} mode="heat" min={0} max={Math.max(0.01, ...flat)} cell={22} rowLabels={shown.map((c) => c.id)} colLabels={AXES.map((a) => truncate(a, 7))} accent={ACCENT} />
+              {chunks.length > CAP && <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)' }}>showing {CAP} of {chunks.length} chunks</div>}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center' }}>
+              <MonoLabel style={{ fontSize: 9 }}>2-D landing (PCA)</MonoLabel>
+              <ScatterPlot points={points} classColors={['#6b7494']} domain={dx} range={dy} width={460} height={380} xLabel="PC1" yLabel="PC2" />
+            </div>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 660, textAlign: 'center', lineHeight: 1.6 }}>
+            Brighter cells are stronger axis hits (e.g. Titan/Venus bright on atmosphere, Saturn on rings) — the same {chunks.length} vectors land in the 2-D PCA projection on the right; positions are computed from the real embeddings, so gas giants/moons cluster apart from inner planets.
+          </div>
+        </div>
       );
     }
-    case 'index':
+    case 'index': {
       return (
-        <Panel title="Index · flat vector store" note={stage.note}>
-          <div style={row}>{pipe.chunks.length} chunk vectors stored for nearest-neighbour lookup at query time.</div>
-          <div style={{ ...row, color: 'var(--t2)' }}>Naive RAG uses a flat (brute-force) index — every query scores every chunk.</div>
-        </Panel>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+          <MonoLabel>Index · {pipe.chunks.length} chunk vectors · {stage.note}</MonoLabel>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <AlgoPill accent={ACCENT} active={indexMode === 'flat'} onClick={() => onIndexMode('flat')}>Flat</AlgoPill>
+            <AlgoPill accent={ACCENT} active={indexMode === 'ivf'} onClick={() => onIndexMode('ivf')}>IVF</AlgoPill>
+            <AlgoPill accent={ACCENT} active={indexMode === 'hnsw'} onClick={() => onIndexMode('hnsw')}>HNSW</AlgoPill>
+          </div>
+          <IndexView chunks={pipe.chunks} mode={indexMode} accent={ACCENT} />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 460, textAlign: 'center', lineHeight: 1.6 }}>
+            {indexMode === 'flat' && 'Flat (brute-force): every query compares against all N vectors exactly — what Naive RAG actually runs. '}
+            {indexMode === 'ivf' && 'IVF: a coarse quantizer splits the space into 9 cells (nlist=9); a query only probes the nearest cell(s) instead of everything. '}
+            {indexMode === 'hnsw' && 'HNSW: every vector links to its 2 nearest neighbours by cosine similarity, forming a navigable graph a query walks greedily. '}
+            The index is what makes retrieval sub-linear; here it is exact (flat) — IVF/HNSW are the approximate structures real vector DBs use.
+          </div>
+        </div>
       );
+    }
     case 'retrieve': {
       const top = pipe.ranked.slice(0, params.k);
       return (
@@ -368,6 +490,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [params, setParams] = useState<RagParams>(DEFAULT_PARAMS);
   const [stageIdx, setStageIdx] = useState(0);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const [indexMode, setIndexMode] = useState<IndexMode>('flat');
 
   const variant = VARIANTS[variantId];
   const query = QUERIES[queryIdx];
@@ -389,13 +512,16 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setLastLog(buildLog(stage, pipe, query.label, params));
   };
   const sim = useSimLoop(step, { initialSpeed: 900 });
-  const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); };
+  const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); };
 
-  // RAIL + ACTIVE-STAGE DETAIL
+  // RAIL + ACTIVE-STAGE DETAIL — embed/index need more room for the
+  // heatmap+scatter / ANN diagram than the chunk/retrieve/augment/generate
+  // text-and-card panels, which stay at the original 620px.
+  const wideStage = stage.kind === 'embed' || stage.kind === 'index';
   const grid = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', width: 620 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', width: wideStage ? 740 : 620 }}>
       <Rail stages={stages} active={stageIdx} accent={ACCENT} />
-      <StageDetail stage={stage} pipe={pipe} params={params} query={query.label} />
+      <StageDetail stage={stage} pipe={pipe} params={params} query={query.label} indexMode={indexMode} onIndexMode={setIndexMode} />
     </div>
   );
 
