@@ -74,11 +74,13 @@ interface Pipe {
   graphMode?: 'local' | 'global';
   localResult?: ReturnType<typeof localSearch>;
   globalResult?: ReturnType<typeof globalSearch>;
-  // RAPTOR: `tree` is the built 3-level node list (buildTree); `treeHits` is
-  // retrieveTree's top-k {id,score} over EVERY node (leaf chunk or summary/
-  // root) — `ranked`/`candidates`/`gen` above are already built by mapping each
-  // hit to a chunk-like Ranked entry (see the pipe useMemo's `hasTree` branch),
-  // so Augment/Generate need no RAPTOR-specific code at all.
+  // RAPTOR: `tree` is the built 3-level node list (buildTree); `ranked` below
+  // is retrieveTree's FULL, unsliced ranking over EVERY node (leaf chunk or
+  // summary/root), each mapped to a chunk-like Ranked entry (see the pipe
+  // useMemo's `hasTree` branch) — so the Retrieve stage's "full ranking" panel
+  // shows the complete tree order. `treeHits` is just the top-k slice of that
+  // same order (what TreeView lights); `candidates`/`gen` also only consume
+  // the top-k slice, so Augment/Generate need no RAPTOR-specific code at all.
   tree?: TreeNode[];
   treeHits?: { id: string; score: number }[];
 }
@@ -1506,14 +1508,19 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       // RAPTOR: score EVERY tree node (leaf chunk or summary/root) against the
       // query — retrieveTree does no traversal, just a flat rank over the whole
       // tree, so a broad question can surface a high-level summary node instead
-      // of many individual leaf chunks.
+      // of many individual leaf chunks. Ask retrieveTree for ALL nodes (not just
+      // top-k) so `ranked` holds the complete ordering — the Retrieve stage's
+      // "full ranking" panel reads `ranked` directly and must show every node,
+      // not a k-capped list where "top" is vacuously everything. `treeHits`
+      // (what TreeView lights, and what buildLog's 'tree' case reports) stays
+      // the top-k slice of that same order, identical to the old behaviour.
       retrievalQuery = query.label;
       tree = buildTree(chunks);
-      const hits = retrieveTree(query.label, tree, params.k);
-      treeHits = hits;
+      const allHits = retrieveTree(query.label, tree, tree.length);
+      treeHits = allHits.slice(0, params.k);
       const chunkById = new Map(chunks.map((c) => [c.id, c] as const));
       const nodeById = new Map(tree.map((n) => [n.id, n] as const));
-      ranked = hits.map((h, i) => {
+      ranked = allHits.map((h, i) => {
         const leaf = chunkById.get(h.id);
         const node = nodeById.get(h.id)!;
         const chunk: Chunk = leaf ?? { id: node.id, docId: -1, title: node.label, tags: ['summary'], text: node.text, vec: embedText(node.text) };
