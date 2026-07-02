@@ -44,8 +44,8 @@ export const DOCS: RagDoc[] = [
 
 // A tiny "web" corpus used ONLY by Corrective RAG when the main index fails.
 export const WEB_DOCS: RagDoc[] = [
-  { id: 100, title: 'Proxima Centauri (web)', category: 'star', tags: ['web', 'star'],
-    text: 'Proxima Centauri is the nearest star to the Sun, about 4.2 light-years away. It is a small red dwarf and is not part of the Solar System.' },
+  { id: 100, title: 'Black holes (web)', category: 'star', tags: ['web', 'astronomy'],
+    text: 'A black hole is a region of spacetime where gravity is so strong that nothing, not even light, can escape. Black holes form when very massive stars collapse at the end of their lives. They are studied with telescopes, not visited by any spacecraft.' },
   { id: 101, title: 'Pluto (web)', category: 'planet', tags: ['web', 'dwarf'],
     text: 'Pluto is a dwarf planet in the Kuiper Belt beyond Neptune. It was visited by the New Horizons spacecraft in 2015.' },
 ];
@@ -84,11 +84,15 @@ function accumulate(v: number[], tok: string) {
   const hit = LEXICON[tok]; if (!hit) return;
   AXES.forEach((a, i) => { const w = hit[a]; if (w != null) v[i] += w; });
 }
+// Function words that carry no retrieval signal — stripped before BM25 and the
+// lexical grounding check so "how/is/what" can't create spurious matches.
+export const STOP = new Set(['the','a','an','is','are','was','were','be','been','of','to','in','on','and','or','with','that','this','these','those','from','for','by','at','as','it','its','how','what','which','who','why','when','where','does','do','did','can','could','would','should','will','may','might','must','shall','you','we','they','i','my','your','their','there','here','about','into','than','then','so','such','not','no','if','but','out','up','down','over','under','one','some','any','all','more','most','have','has','had']);
+export function contentTokens(s: string): string[] { return tokenize(s).filter((w) => !STOP.has(w)); }
 export function embedText(text: string): number[] {
-  const v = new Array(DIM).fill(0.02); for (const t of tokenize(text)) accumulate(v, t); return l2norm(v);
+  const v = new Array(DIM).fill(0); for (const t of tokenize(text)) accumulate(v, t); return l2norm(v);
 }
 export function embedToken(tok: string): number[] {
-  const v = new Array(DIM).fill(0.02); accumulate(v, tok); return l2norm(v);
+  const v = new Array(DIM).fill(0); accumulate(v, tok); return l2norm(v);
 }
 
 export const DOC_VECS: number[][] = DOCS.map((d) => embedText(d.text));
@@ -128,6 +132,6 @@ export interface QueryPreset { id: string; label: string; kind: 'single' | 'mult
 export const QUERIES: QueryPreset[] = [
   { id: 'venus-hot', label: 'How hot is Venus?', kind: 'single', note: 'Clean single-hop dense retrieval — Venus is a direct match.' },
   { id: 'saturn-moon-atmo', label: 'Which moon of Saturn has a thick atmosphere?', kind: 'multi', note: 'Multi-hop: dense retrieval is distracted by Venus; the knowledge graph resolves the Saturn→moon→atmosphere chain to Titan.' },
-  { id: 'life', label: 'Which worlds might support life?', kind: 'ambiguous', note: 'Ambiguous: Europa and Earth both qualify — shows relevance grading and MMR diversity.' },
-  { id: 'proxima', label: 'How far is Proxima Centauri?', kind: 'ood', note: 'Out of corpus: retrieval is weak, so CRAG grades it Incorrect and falls back to the web corpus; Self-RAG flags the answer as unsupported.' },
+  { id: 'life', label: 'Which icy moons could harbor life?', kind: 'ambiguous', note: 'Ambiguous & multi-topic (ice + moon + life): Europa (icy moon, subsurface ocean) tops it with Earth close behind — neither is the passing "life on Earth" Sun fragment. Good for relevance grading and MMR diversity.' },
+  { id: 'blackhole', label: 'What is a black hole?', kind: 'ood', note: 'Out of corpus: the query shares no lexicon signal with the Solar-System index, so it embeds to a zero vector and no chunk clears the lexical grounding anchor → refusal. CRAG grades it Incorrect and falls back to the web corpus; Self-RAG flags the answer as unsupported.' },
 ];

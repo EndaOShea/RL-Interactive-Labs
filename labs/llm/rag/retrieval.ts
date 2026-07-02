@@ -1,5 +1,5 @@
 // labs/llm/rag/retrieval.ts — pure retrieval math over the corpus chunks.
-import { DOCS, RagDoc, embedText, embedToken, cosine, tokenize } from './corpus';
+import { DOCS, RagDoc, embedText, embedToken, cosine, tokenize, contentTokens } from './corpus';
 
 export interface Chunk { id: string; docId: number; title: string; tags: string[]; text: string; vec: number[]; }
 export type ChunkStrategy = 'fixed' | 'recursive' | 'semantic' | 'sentence';
@@ -8,6 +8,7 @@ export const CHUNK_DEFAULTS = { size: 160, overlap: 24 };
 const sentences = (t: string) => t.match(/[^.!?]+[.!?]+/g)?.map((s) => s.trim()) ?? [t.trim()];
 
 export function chunkDoc(doc: RagDoc, strategy: ChunkStrategy, size = 160, overlap = 24): Chunk[] {
+  size = Math.max(20, size); overlap = Math.max(0, Math.min(overlap, size - 1)); // guard degenerate slider combos
   const mk = (text: string, i: number): Chunk => ({ id: `d${doc.id}c${i}`, docId: doc.id, title: doc.title, tags: doc.tags, text: text.trim(), vec: embedText(text) });
   let parts: string[] = [];
   if (strategy === 'sentence') parts = sentences(doc.text);
@@ -46,7 +47,7 @@ export function bm25Scores(query: string, chunks: Chunk[], k1 = 1.5, b = 0.75): 
   const avgdl = toks.reduce((s, t) => s + t.length, 0) / N;
   const df: Record<string, number> = {};
   toks.forEach((t) => new Set(t).forEach((w) => (df[w] = (df[w] || 0) + 1)));
-  const q = tokenize(query);
+  const q = contentTokens(query);
   return toks.map((t) => {
     const tf: Record<string, number> = {}; t.forEach((w) => (tf[w] = (tf[w] || 0) + 1));
     let s = 0;

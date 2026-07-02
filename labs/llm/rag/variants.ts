@@ -1,7 +1,7 @@
 // labs/llm/rag/variants.ts — a Variant is an ordered Stage list (the rail) + the
 // compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind.
 import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS } from './retrieval';
-import { QUERIES } from './corpus';
+import { QUERIES, contentTokens } from './corpus';
 
 export type StageKind =
   | 'chunk' | 'embed' | 'index' | 'retrieve' | 'rerank' | 'augment' | 'generate'
@@ -25,19 +25,23 @@ export interface Variant {
 
 // --- shared retrieval used by several variants ---
 export function retrieveRanked(query: string, chunks: Chunk[], p: RagParams): Ranked[] {
-  let order: number[];
-  if (p.retrieval === 'sparse') order = topK(bm25Scores(query, chunks), chunks.length);
-  else if (p.retrieval === 'hybrid') { const m = hybridRanking(query, chunks); order = [...m.entries()].sort((a, b) => b[1] - a[1]).map(([i]) => i); }
-  else order = topK(denseScores(query, chunks), chunks.length);
-  const scoreOf = p.retrieval === 'sparse' ? bm25Scores(query, chunks) : denseScores(query, chunks);
-  return order.map((idx, rank) => ({ chunk: chunks[idx], score: scoreOf[idx], rank }));
+  if (p.retrieval === 'hybrid') {
+    const m = hybridRanking(query, chunks);
+    const order = [...m.entries()].sort((a, b) => b[1] - a[1]).map(([i]) => i);
+    return order.map((idx, rank) => ({ chunk: chunks[idx], score: m.get(idx) ?? 0, rank })); // score = RRF fusion score (matches the ordering)
+  }
+  const scores = p.retrieval === 'sparse' ? bm25Scores(query, chunks) : denseScores(query, chunks);
+  return topK(scores, chunks.length).map((idx, rank) => ({ chunk: chunks[idx], score: scores[idx], rank }));
 }
 
 export interface GenResult { answer: string; citations: string[]; grounded: boolean; }
 // Deterministic, extractive "generation": stitch the top chunks' first sentence
 // and cite them. If nothing clears the grounding threshold → refuse (the OOD story).
 export function generate(query: string, ranked: Ranked[], budget: number, threshold = 0.12): GenResult {
-  const used = ranked.slice(0, budget).filter((r) => r.score >= threshold);
+  const qTerms = new Set(contentTokens(query));
+  // Grounded requires BOTH a score above the floor AND a literal content-word
+  // overlap with the query, so an off-topic query cannot be falsely "answered".
+  const used = ranked.slice(0, budget).filter((r) => r.score >= threshold && contentTokens(r.chunk.text).some((w) => qTerms.has(w)));
   if (!used.length) return { answer: `I don't have grounded information to answer "${query}" from the indexed Solar-System corpus.`, citations: [], grounded: false };
   const first = (t: string) => (t.match(/[^.!?]+[.!?]/)?.[0] ?? t).trim();
   const answer = used.map((r) => `${first(r.chunk.text)} [${r.chunk.id}]`).join(' ');
