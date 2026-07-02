@@ -20,13 +20,17 @@ import { ragPython } from './python';
 // very file (Rag.tsx) and self-resolves instead of hitting the directory.
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
-  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText,
+  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
 const ACCENT = '#a78bfa';
 
-interface Pipe { chunks: Chunk[]; ranked: Ranked[]; gen: GenResult; }
+// `candidates` = the top-k retrieved chunks, re-sorted by the (slower) cross-encoder
+// `rerankScore` when params.rerank is on — the pool that Augment actually packs and
+// Generate actually cites. Kept separate from `ranked` so the Retrieve stage can
+// still show the untouched first-stage order even after reranking runs.
+interface Pipe { chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
 
@@ -216,6 +220,46 @@ const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> 
   );
 };
 
+// Before/after "bump chart": the fast first-stage retrieval order on the left,
+// the slower cross-encoder's reordering on the right, joined by one connector
+// per chunk — green when a chunk moved up, red when it dropped, grey when it
+// held its rank. `before`/`after` are the same chunk set, just reordered.
+const RerankView: React.FC<{ before: Ranked[]; after: Ranked[]; accent: string }> = ({ before, after, accent }) => {
+  const rowH = 26, padT = 24, padX = 12, colW = 220, gapW = 84;
+  const W = padX * 2 + colW * 2 + gapW;
+  const n = Math.max(before.length, after.length);
+  const H = padT + n * rowH + 12;
+  const afterIdx = new Map(after.map((r, i) => [r.chunk.id, i]));
+  const xLeft = padX, xLineL = padX + colW, xLineR = padX + colW + gapW, xRight = padX + colW + gapW;
+  const yFor = (i: number) => padT + i * rowH + rowH / 2;
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%' }}>
+      <text x={xLeft} y={14} fontFamily="var(--mono)" fontSize={9.5} letterSpacing="0.03em" fill="var(--t2)">RETRIEVAL ORDER</text>
+      <text x={xRight} y={14} fontFamily="var(--mono)" fontSize={9.5} letterSpacing="0.03em" fill={accent}>RERANKED ORDER</text>
+      {before.map((r, i) => {
+        const j = afterIdx.get(r.chunk.id) ?? i;
+        const color = j < i ? '#34d399' : j > i ? '#f87171' : 'rgba(148,158,196,.45)';
+        return <line key={r.chunk.id} x1={xLineL} y1={yFor(i)} x2={xLineR} y2={yFor(j)} stroke={color} strokeWidth={1.5} opacity={0.7} />;
+      })}
+      {before.map((r, i) => (
+        <text key={`b-${r.chunk.id}`} x={xLeft} y={yFor(i) + 4} fontFamily="var(--mono)" fontSize={11}>
+          <tspan fill="var(--t2)">#{i + 1} </tspan>
+          <tspan fill="var(--t1)">{r.chunk.id}</tspan>
+          <tspan fill="var(--t2)"> {r.score.toFixed(3)}</tspan>
+        </text>
+      ))}
+      {after.map((r, i) => (
+        <text key={`a-${r.chunk.id}`} x={xRight} y={yFor(i) + 4} fontFamily="var(--mono)" fontSize={11}>
+          <tspan fill={accent}>#{i + 1} </tspan>
+          <tspan fill="var(--t0)">{r.chunk.id}</tspan>
+          <tspan fill="var(--t2)"> {r.score.toFixed(3)}</tspan>
+        </text>
+      ))}
+    </svg>
+  );
+};
+
 /* ---------- active-stage detail: one titled text panel per stage kind ---------- */
 const StageDetail: React.FC<{
   stage: Stage; pipe: Pipe; params: RagParams; query: string;
@@ -333,35 +377,109 @@ const StageDetail: React.FC<{
         </Panel>
       );
     }
-    case 'augment': {
-      const top = pipe.ranked.slice(0, params.k);
-      const chars = top.reduce((s, r) => s + r.chunk.text.length, 0);
+    case 'rerank': {
+      // Naive's own rail never carries a 'rerank' stage (real Naive RAG never
+      // reranks); this branch only ever renders for variants that DO put a
+      // Rerank node on the rail. Guard on the param anyway so a future variant
+      // that structurally owns the stage but runs with the toggle off (e.g.
+      // Advanced RAG forcing its own semantics) still degrades gracefully.
+      if (!params.rerank) {
+        return (
+          <Panel title="Rerank · off" note={stage.note}>
+            <div style={{ ...row, color: 'var(--t2)' }}>
+              Reranking is off for this run — Augment packs chunks straight from the retrieval order. Switch Rerank to On in the params panel to re-score the top-{params.k} candidates with a slower cross-encoder.
+            </div>
+          </Panel>
+        );
+      }
+      const before = pipe.ranked.slice(0, params.k);
+      const after = pipe.candidates;
       return (
-        <Panel title={`Augment · pack top-${params.k} chunks into the prompt (${chars} chars)`} note={stage.note}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {top.map((r) => (
-              <div key={r.chunk.id} style={row}><b style={{ color: ACCENT }}>[{r.chunk.id}]</b> {truncate(r.chunk.text, 64)}</div>
-            ))}
+        <Panel title={`Rerank · cross-encoder re-score of the top-${before.length} retrieval candidates`} note={stage.note}>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <RerankView before={before} after={after} accent={ACCENT} />
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            A slower, higher-quality cross-encoder (dense similarity + lexical overlap) re-scores just these fast first-stage candidates — <span style={{ color: '#34d399' }}>green</span> connectors moved up, <span style={{ color: '#f87171' }}>red</span> moved down.
           </div>
         </Panel>
       );
     }
-    case 'generate':
+    case 'augment': {
+      const pool = pipe.candidates;
+      const packed = pool.slice(0, params.budget);
+      const dropped = pool.slice(params.budget);
+      const chars = packed.reduce((s, r) => s + r.chunk.text.length, 0);
+      const source = params.rerank ? 'reranked' : 'retrieved';
+      const promptBody = packed.map((r) => `[${r.chunk.id}] ${truncate(r.chunk.text, 90)}`).join('\n');
       return (
-        <Panel title={`Generate · extractive answer + citations for "${query}"`} note={stage.note}>
-          <div style={{ ...row, color: 'var(--t0)' }}>{pipe.gen.answer}</div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 2 }}>
-            <span style={{
-              fontFamily: 'var(--mono)', fontSize: 10.5, padding: '2px 8px', borderRadius: 5,
-              color: pipe.gen.grounded ? '#34d399' : '#f87171',
-              border: `1px solid ${pipe.gen.grounded ? '#34d399' : '#f87171'}`,
-            }}>
-              {pipe.gen.grounded ? 'GROUNDED' : 'REFUSED'}
-            </span>
-            {pipe.gen.citations.length > 0 && <span style={{ ...row, color: 'var(--t2)' }}>cites {pipe.gen.citations.join(', ')}</span>}
+        <Panel title={`Augment · budget ${params.budget} of ${pool.length} ${source} candidates (${chars} chars)`} note={stage.note}>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>context budget</MonoLabel>
+            <div style={{ display: 'flex', gap: 3 }}>
+              {pool.map((r, i) => (
+                <div key={r.chunk.id} title={`${r.chunk.id} — ${i < params.budget ? 'packed' : 'dropped'}`} style={{
+                  flex: 1, height: 7, borderRadius: 3,
+                  background: i < params.budget ? ACCENT : 'rgba(148,158,196,.25)',
+                }} />
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {packed.map((r) => (
+              <div key={r.chunk.id} style={{ border: `1px solid ${ACCENT}`, borderRadius: 7, padding: '6px 10px', background: 'rgba(167,139,250,.06)' }}>
+                <div style={row}><b style={{ color: ACCENT }}>[{r.chunk.id}]</b> {truncate(r.chunk.text, 92)}</div>
+              </div>
+            ))}
+            {dropped.map((r) => (
+              <div key={r.chunk.id} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '6px 10px', opacity: 0.4 }}>
+                <div style={row}>[{r.chunk.id}] {truncate(r.chunk.text, 92)} <span style={{ color: '#f87171' }}>· dropped (over budget)</span></div>
+              </div>
+            ))}
+          </div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', whiteSpace: 'pre-wrap', lineHeight: 1.65,
+            background: 'rgba(8,11,20,.4)', border: '1px solid var(--border)', borderRadius: 7, padding: '9px 11px',
+          }}>
+{`System: Answer only from context.
+Context:
+${promptBody}
+Question: ${query}`}
           </div>
         </Panel>
       );
+    }
+    case 'generate': {
+      const { answer, citations, grounded } = pipe.gen;
+      return (
+        <Panel title={`Generate · ${grounded ? 'grounded answer' : 'refusal'} for "${query}"`} note={stage.note}>
+          <span style={{
+            alignSelf: 'flex-start', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+            padding: '3px 10px', borderRadius: 5, letterSpacing: '.04em',
+            color: grounded ? '#34d399' : '#f87171',
+            border: `1px solid ${grounded ? '#34d399' : '#f87171'}`,
+            background: grounded ? 'rgba(52,211,153,.08)' : 'rgba(248,113,113,.08)',
+          }}>
+            GROUNDED {grounded ? 'YES' : 'NO'}
+          </span>
+          <div style={{ ...row, color: 'var(--t0)', fontSize: 12.5, lineHeight: 1.7 }}>{answer}</div>
+          {grounded ? (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {citations.map((c) => (
+                <span key={c} style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, padding: '2px 8px', borderRadius: 999,
+                  color: ACCENT, border: `1px solid ${ACCENT}`, background: 'rgba(167,139,250,.08)',
+                }}>[{c}]</span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: '#f87171', lineHeight: 1.5 }}>
+              No candidate chunk cleared the grounding threshold (similarity score + lexical overlap with the query) — the pipeline refuses rather than hallucinate an ungrounded answer.
+            </div>
+          )}
+        </Panel>
+      );
+    }
     default:
       return (
         <Panel title={stage.label} note={stage.note}>
@@ -402,8 +520,9 @@ const RagParamsPanel: React.FC<{
   params: RagParams; setParams: (p: RagParams) => void;
   queryIdx: number; setQueryIdx: (i: number) => void;
   speed: number; setSpeed: (v: number) => void;
+  onRerankChange: (v: boolean) => void;
   accent: string;
-}> = ({ params, setParams, queryIdx, setQueryIdx, speed, setSpeed, accent }) => (
+}> = ({ params, setParams, queryIdx, setQueryIdx, speed, setSpeed, onRerankChange, accent }) => (
   <ParamsWrap>
     <ParamsHead title="Retrieval-Augmented Generation" hint="Step a RAG pipeline over a Solar-System corpus; switch architectures on the left." />
     <div>
@@ -460,70 +579,49 @@ const RagParamsPanel: React.FC<{
     <div>
       <MonoLabel style={{ marginBottom: 9 }}>Rerank</MonoLabel>
       <div style={{ display: 'flex', gap: 7 }}>
-        <AlgoPill accent={accent} active={!params.rerank} onClick={() => setParams({ ...params, rerank: false })}>Off</AlgoPill>
-        <AlgoPill accent={accent} active={params.rerank} onClick={() => setParams({ ...params, rerank: true })}>On</AlgoPill>
+        <AlgoPill accent={accent} active={!params.rerank} onClick={() => onRerankChange(false)}>Off</AlgoPill>
+        <AlgoPill accent={accent} active={params.rerank} onClick={() => onRerankChange(true)}>On</AlgoPill>
       </div>
     </div>
   </ParamsWrap>
 );
 
 /* ---------- per-stage SimulationUpdate for the Math tab + ticker ---------- */
-function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams): SimulationUpdate {
-  const nDocs = new Set(pipe.chunks.map((c) => c.docId)).size;
+// `variantName` isn't derivable from (stage, pipe, query, params) alone — it's
+// passed explicitly by the caller (RagLab knows the active variant) rather than
+// hardcoded, so the Math tab reads correctly once Milestone C adds more variants.
+function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, variantName: string): SimulationUpdate {
+  const log = (name: string, formula: string, variables: Record<string, number | string>, result: string): SimulationUpdate => ({
+    algorithm: `${variantName} · ${stage.label}`, stepDescription: stage.note, formula, variables, result,
+  });
   switch (stage.kind) {
     case 'chunk':
-      return {
-        algorithm: 'Naive RAG · Chunk', stepDescription: stage.note,
-        formula: 'chunks = split(docs, strategy, size, overlap)',
-        variables: { strategy: params.strategy, size: params.size, overlap: params.overlap, docs: nDocs },
-        result: `${pipe.chunks.length} chunks`,
-      };
+      return log('splitting', `chunk(strategy=${params.strategy}, size=${params.size})`, { chunks: pipe.chunks.length }, `${pipe.chunks.length} chunks`);
     case 'embed':
-      return {
-        algorithm: 'Naive RAG · Embed', stepDescription: stage.note,
-        formula: 'v = L2normalize(Σ lexicon[token]) ∈ ℝ⁸',
-        variables: { chunks: pipe.chunks.length, dims: pipe.chunks[0]?.vec.length ?? 8 },
-        result: `${pipe.chunks.length} vectors embedded`,
-      };
+      return log('embedding', 'v = normalize(Σ lexicon[token])', { dim: 8, chunks: pipe.chunks.length }, 'chunks → unit vectors');
     case 'index':
-      return {
-        algorithm: 'Naive RAG · Index', stepDescription: stage.note,
-        formula: 'index = { v₁ … vₙ } (flat store)',
-        variables: { vectors: pipe.chunks.length },
-        result: `${pipe.chunks.length} vectors indexed`,
-      };
-    case 'retrieve': {
-      const top = pipe.ranked.slice(0, params.k);
-      const formula = params.retrieval === 'hybrid' ? 'score = RRF(dense_rank, bm25_rank)'
-        : params.retrieval === 'sparse' ? 'score = BM25(q, chunk)' : 'score = cos(embed(q), vᵢ)';
-      return {
-        algorithm: 'Naive RAG · Retrieve', stepDescription: stage.note, formula,
-        variables: { query, k: params.k, mode: params.retrieval, top1: top[0]?.chunk.id ?? '—' },
-        result: `top-${params.k}: ${top.map((r) => r.chunk.id).join(', ')}`,
-      };
-    }
-    case 'augment': {
-      const top = pipe.ranked.slice(0, params.k);
-      const chars = top.reduce((s, r) => s + r.chunk.text.length, 0);
-      return {
-        algorithm: 'Naive RAG · Augment', stepDescription: stage.note,
-        formula: 'prompt = template(query, [chunk₁ … chunkₖ])',
-        variables: { chunks: top.length, chars },
-        result: `${chars} chars packed into context`,
-      };
-    }
+      return log('indexing', 'ANN over chunk vectors', { entries: pipe.chunks.length }, 'index built');
+    case 'retrieve':
+      return log(
+        'retrieval', params.retrieval === 'sparse' ? 'score = BM25(q, c)' : 'score = cos(q, c)',
+        { k: params.k, top: pipe.ranked[0]?.chunk.id ?? '—', best: +(pipe.ranked[0]?.score ?? 0).toFixed(3) },
+        `top-${params.k}: ${pipe.ranked.slice(0, params.k).map((r) => r.chunk.id).join(', ')}`,
+      );
+    case 'rerank':
+      return log('reranking', 'score = 0.6·cos + 0.4·overlap', { k: params.k }, 'candidates reordered');
+    case 'augment':
+      // pipe.candidates (not the full pipe.ranked corpus) is what Augment actually
+      // packs, so cap against its length — matches the budget bar on screen even
+      // when budget is dialed above k (nothing left beyond the candidate pool).
+      return log('augmentation', 'prompt = template(top-b chunks)', { budget: params.budget }, `${Math.min(params.budget, pipe.candidates.length)} chunks packed`);
     case 'generate':
-      return {
-        algorithm: 'Naive RAG · Generate', stepDescription: stage.note,
-        formula: 'answer = LLM(prompt);  grounded ⇔ score ≥ τ ∧ lexical overlap',
-        variables: { citations: pipe.gen.citations.join(', ') || '—', grounded: pipe.gen.grounded ? 'yes' : 'no' },
-        result: pipe.gen.grounded ? `grounded, cites ${pipe.gen.citations.join(', ')}` : 'refused (ungrounded)',
-      };
+      return log(
+        'generation', 'answer ⊕ citations', { grounded: pipe.gen.grounded ? 1 : 0, cites: pipe.gen.citations.length },
+        pipe.gen.grounded ? `grounded · ${pipe.gen.citations.join(', ')}` : 'refused (ungrounded)',
+      );
+    // Milestone C adds: rewrite, hyde, multiquery, fuse, grade, critique, route, reflect, graphbuild, graphsearch, tree
     default:
-      return {
-        algorithm: 'RAG', stepDescription: stage.note, formula: stage.label,
-        variables: { stage: stage.kind }, result: stage.note,
-      };
+      return log(stage.kind, stage.note, {}, stage.label);
   }
 }
 
@@ -537,25 +635,62 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
 
   const variant = VARIANTS[variantId];
   const query = QUERIES[queryIdx];
-  const stages: Stage[] = useMemo(() => variant.stages(params), [variantId, params]);
 
-  // pipeline outputs (memoized on query+params) — Naive path for now
+  // Naive's own rail never includes a 'rerank' stage — real Naive RAG never
+  // reranks (see variants.ts's blurb). When a variant doesn't already own a
+  // rerank stage (checked via `.some`), splice one in right after Retrieve
+  // whenever the Rerank toggle is on, so the stage is reachable, steppable, and
+  // its reordering actually feeds Augment/Generate below. A variant that DOES
+  // structurally own a rerank stage (Milestone C's Advanced RAG) is left
+  // untouched — the rail's own stage list always wins over the toggle.
+  const stages: Stage[] = useMemo(() => {
+    const base = variant.stages(params);
+    if (!params.rerank || base.some((s) => s.kind === 'rerank')) return base;
+    const idx = base.findIndex((s) => s.kind === 'retrieve');
+    if (idx === -1) return base;
+    const rerankStage: Stage = {
+      kind: 'rerank', label: 'Rerank',
+      note: 'Re-score the retrieved candidates with a slower, higher-quality cross-encoder and reorder them.',
+    };
+    return [...base.slice(0, idx + 1), rerankStage, ...base.slice(idx + 1)];
+  }, [variantId, params]);
+
+  // pipeline outputs (memoized on query+params) — Naive path for now.
+  // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
+  // cross-encoder `rerankScore` when params.rerank is on — Augment and Generate
+  // both consume this (not the raw `ranked` list) so the whole downstream
+  // pipeline reflects reranking the same way the Rerank stage visualises it.
   const pipe: Pipe = useMemo(() => {
     const chunks = chunkAll(params.strategy, params.size, params.overlap);
     const ranked = retrieveRanked(query.label, chunks, params);
-    const gen = generate(query.label, ranked, params.budget);
-    return { chunks, ranked, gen };
+    const firstStage = ranked.slice(0, params.k);
+    const candidates: Ranked[] = params.rerank
+      ? firstStage
+          .map((r) => ({ chunk: r.chunk, score: rerankScore(query.label, r.chunk), rank: 0 }))
+          .sort((a, b) => b.score - a.score)
+          .map((r, i) => ({ ...r, rank: i }))
+      : firstStage;
+    const gen = generate(query.label, candidates, params.budget);
+    return { chunks, ranked, candidates, gen };
   }, [queryIdx, params]);
 
   const stage = stages[stageIdx];
 
   const step = () => {
-    setStageIdx((i) => (i + 1) % stages.length);
-    // build a SimulationUpdate per stage (formula/variables/result vary by kind)
-    setLastLog(buildLog(stage, pipe, query.label, params));
+    // Resolve the next stage ONCE and use it for BOTH updates below — rail,
+    // active-stage detail, header STAGE X/Y and the Math ticker must all
+    // describe the SAME stage. (Previously buildLog ran on the pre-increment
+    // stage, so the ticker lagged the rail by one stage.)
+    const next = (stageIdx + 1) % stages.length;
+    setStageIdx(next);
+    setLastLog(buildLog(stages[next], pipe, query.label, params, variant.name));
   };
   const sim = useSimLoop(step, { initialSpeed: 900 });
   const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); };
+  // Toggling Rerank can change stages.length (the splice above) — reset back to
+  // stage 0 so a mid-run toggle can't leave stageIdx pointing at a different
+  // stage than the one the learner was looking at.
+  const onRerankChange = (v: boolean) => { setParams({ ...params, rerank: v }); reset(); };
 
   // RAIL + ACTIVE-STAGE DETAIL — embed/index need more room for the
   // heatmap+scatter / ANN diagram than the chunk/retrieve/augment/generate
@@ -604,13 +739,14 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           setQueryIdx={(i) => { setQueryIdx(i); reset(); }}
           speed={sim.speed}
           setSpeed={sim.setSpeed}
+          onRerankChange={onRerankChange}
           accent={ACCENT}
         />
       )}
       tutor={tutor}
       currentParams={{
         topic: 'Retrieval-Augmented Generation', variant: variant.name, stage: stage.kind, query: query.label,
-        topChunks: pipe.ranked.slice(0, params.k).map((r) => r.chunk.id), grounded: pipe.gen.grounded,
+        topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded,
       }}
       apiPanel={apiPanel}
     />
