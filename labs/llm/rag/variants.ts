@@ -1,7 +1,7 @@
 // labs/llm/rag/variants.ts — a Variant is an ordered Stage list (the rail) + the
 // compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind.
 import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS } from './retrieval';
-import { QUERIES, contentTokens } from './corpus';
+import { QUERIES, contentTokens, embedText, cosine } from './corpus';
 
 export type StageKind =
   | 'chunk' | 'embed' | 'index' | 'retrieve' | 'rerank' | 'augment' | 'generate'
@@ -38,10 +38,18 @@ export interface GenResult { answer: string; citations: string[]; grounded: bool
 // Deterministic, extractive "generation": stitch the top chunks' first sentence
 // and cite them. If nothing clears the grounding threshold → refuse (the OOD story).
 export function generate(query: string, ranked: Ranked[], budget: number, threshold = 0.12): GenResult {
+  const qv = embedText(query);
+  const qHasSignal = qv.some((x) => x !== 0);   // false for out-of-corpus queries (no lexicon hits)
   const qTerms = new Set(contentTokens(query));
-  // Grounded requires BOTH a score above the floor AND a literal content-word
-  // overlap with the query, so an off-topic query cannot be falsely "answered".
-  const used = ranked.slice(0, budget).filter((r) => r.score >= threshold && contentTokens(r.chunk.text).some((w) => qTerms.has(w)));
+  // Grounding is SCALE-FREE: it must not trust `r.score`, which is a cosine (dense),
+  // a BM25 score (sparse/web), or a tiny RRF value (hybrid/fusion) depending on path.
+  // A chunk grounds the answer only if it literally shares a query content-word AND —
+  // when the query has topical signal — is embedding-close to the query. Out-of-corpus
+  // queries (zero query vector) fall back to the lexical anchor alone, so a CRAG
+  // web-fallback doc can still ground even without lexicon overlap.
+  const used = ranked.slice(0, budget).filter((r) =>
+    contentTokens(r.chunk.text).some((w) => qTerms.has(w)) &&
+    (!qHasSignal || cosine(qv, r.chunk.vec) >= threshold));
   if (!used.length) return { answer: `I don't have grounded information to answer "${query}" from the indexed Solar-System corpus.`, citations: [], grounded: false };
   const first = (t: string) => (t.match(/[^.!?]+[.!?]/)?.[0] ?? t).trim();
   const answer = used.map((r) => `${first(r.chunk.text)} [${r.chunk.id}]`).join(' ');
