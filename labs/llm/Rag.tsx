@@ -252,7 +252,7 @@ const StageDetail: React.FC<{
             </div>
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 660, textAlign: 'center', lineHeight: 1.6 }}>
-            Brighter cells are stronger axis hits (e.g. Titan/Venus bright on atmosphere, Saturn on rings) — the same {chunks.length} vectors land in the 2-D PCA projection on the right; positions are computed from the real embeddings, so gas giants/moons cluster apart from inner planets.
+            Brighter cells are stronger axis hits (e.g. Titan/Venus bright on atmosphere, Saturn on rings) — the same {chunks.length} vectors land in the 2-D PCA projection on the right; positions are computed from the real embeddings, so chunks that share a topic tend to land closer together than chunks that don't.
           </div>
         </div>
       );
@@ -518,10 +518,18 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // heatmap+scatter / ANN diagram than the chunk/retrieve/augment/generate
   // text-and-card panels, which stay at the original 620px.
   const wideStage = stage.kind === 'embed' || stage.kind === 'index';
+  // LabStage's centre stage is `overflow:hidden` and vertically centers this
+  // grid with no scrollbar of its own, so a tall stage-detail panel (embed's
+  // heatmap+scatter, index's ANN diagram, and future GraphRAG/RAPTOR/ColBERT
+  // visuals) can clip on short viewports (e.g. 1366×768). Cap+scroll just the
+  // detail region (not the Rail, which must stay visible above it) so every
+  // stage — current and future — stays reachable regardless of height.
   const grid = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', width: wideStage ? 740 : 620 }}>
       <Rail stages={stages} active={stageIdx} accent={ACCENT} />
-      <StageDetail stage={stage} pipe={pipe} params={params} query={query.label} indexMode={indexMode} onIndexMode={setIndexMode} />
+      <div className="custom-scrollbar" style={{ width: '100%', maxHeight: 'calc(100dvh - 300px)', overflowY: 'auto' }}>
+        <StageDetail stage={stage} pipe={pipe} params={params} query={query.label} indexMode={indexMode} onIndexMode={setIndexMode} />
+      </div>
     </div>
   );
 
