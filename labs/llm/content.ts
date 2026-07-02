@@ -113,3 +113,9 @@ export const ATTENTION_CONTENT: LabContent = {
     { category: 'CONCEPT', title: 'Causality is structural', description: 'Whether attention is masked decides if a model can generate (decoder) or only encode (encoder).', recommendation: 'Match the mask to the task: causal for generation, bidirectional for classification/embedding.' },
   ],
 };
+
+// Minimal stub — replaced with full content in Task 19.
+export const RAG_CONTENT: LabContent = {
+  sections: [{ heading: 'Retrieval-Augmented Generation', body: 'RAG grounds a language model in retrieved documents instead of relying only on parametric memory. Step the pipeline to watch a query become chunks, vectors, retrieved context, and a cited answer.' }],
+  lifecycle: [{ category: 'CONCEPT', title: 'Grounding vs hallucination', description: 'Answers are only as good as what retrieval surfaces.', recommendation: 'Cite sources and refuse when nothing relevant is retrieved.' }],
+};

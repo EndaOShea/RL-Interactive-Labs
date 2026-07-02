@@ -1,5 +1,12 @@
 // Runnable NumPy exports for the LLM labs — mirror the in-browser toy models.
 
+import { RagParams } from './rag';
+
+// Minimal stub — replaced with a full runnable export in Task 20.
+export function ragPython(variantId: string, params: RagParams): string {
+  return `# RAG export (${variantId}) — generated in a later task\n`;
+}
+
 export const tokenizerPython = (mode: 'greedy' | 'bpe' = 'greedy', merges = 20) => mode === 'bpe' ? `from collections import Counter
 
 # Byte-Pair Encoding — LEARN the merges from a corpus, then apply them.
