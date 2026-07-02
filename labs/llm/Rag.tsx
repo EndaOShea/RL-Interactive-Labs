@@ -20,17 +20,24 @@ import { ragPython } from './python';
 // very file (Rag.tsx) and self-resolves instead of hitting the directory.
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
-  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore,
+  chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
 const ACCENT = '#a78bfa';
 
 // `candidates` = the top-k retrieved chunks, re-sorted by the (slower) cross-encoder
-// `rerankScore` when params.rerank is on — the pool that Augment actually packs and
+// `rerankScore` when reranking is ACTIVE — the pool that Augment actually packs and
 // Generate actually cites. Kept separate from `ranked` so the Retrieve stage can
-// still show the untouched first-stage order even after reranking runs.
-interface Pipe { chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; }
+// still show the untouched first-stage order even after reranking runs. Reranking
+// is "active" when either the Rerank toggle is on OR the selected variant's rail
+// structurally owns a rerank stage (Advanced RAG always reranks, toggle or not) —
+// see the single `rerankActive` predicate in RagLab, used everywhere rerank is
+// gated. `retrievalQuery` is the string actually embedded/scored for Retrieve: the
+// raw query, unless the rail owns a `rewrite` stage, in which case it is
+// `rewriteQuery(query).rewritten` — Augment/Generate still answer the ORIGINAL
+// query, only first-stage retrieval sees the rewritten one.
+interface Pipe { chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string; }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
 
@@ -265,8 +272,43 @@ const StageDetail: React.FC<{
   stage: Stage; pipe: Pipe; params: RagParams; query: string;
   indexMode: IndexMode; onIndexMode: (m: IndexMode) => void;
   onRetrieval: (m: RagParams['retrieval']) => void;
-}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval }) => {
+  rerankActive: boolean;
+}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive }) => {
   switch (stage.kind) {
+    case 'rewrite': {
+      const { added } = rewriteQuery(query);
+      return (
+        <Panel title={`Rewrite · ${added.length} inferred keyword${added.length === 1 ? '' : 's'}`} note={stage.note}>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>original query</MonoLabel>
+            <div style={{ ...row, color: 'var(--t1)' }}>&quot;{query}&quot;</div>
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>inferred topic axes</MonoLabel>
+            {added.length ? (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {added.map((w) => <Tag key={w}>{w}</Tag>)}
+              </div>
+            ) : (
+              <div style={{ ...row, color: 'var(--t2)' }}>No new axis keywords inferred — the lexicon found nothing new to add.</div>
+            )}
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>rewritten query</MonoLabel>
+            <div style={{ ...row, color: 'var(--t0)', fontSize: 12.5 }}>
+              &quot;{query}
+              {added.map((w) => (
+                <React.Fragment key={w}>
+                  {' '}
+                  <span style={{ color: ACCENT, background: 'rgba(167,139,250,.16)', borderRadius: 4, padding: '0 4px' }}>{w}</span>
+                </React.Fragment>
+              ))}
+              &quot;
+            </div>
+          </div>
+        </Panel>
+      );
+    }
     case 'chunk': {
       return (
         <Panel title={`Chunk · ${params.strategy} · size ${params.size} / overlap ${params.overlap}`} note={stage.note}>
@@ -324,7 +366,10 @@ const StageDetail: React.FC<{
     case 'retrieve': {
       const top = pipe.ranked.slice(0, params.k);
       const topIds = new Set(top.map((r) => r.chunk.id));
-      const qPt = project2(embedText(query));
+      // Embed/plot `pipe.retrievalQuery` (not the raw `query` prop) — when a
+      // rewrite stage ran, `pipe.ranked` was scored against the rewritten text,
+      // so the marker must match or the lines/ranking below would look wrong.
+      const qPt = project2(embedText(pipe.retrievalQuery));
       const chunkPts = pipe.chunks.map((c) => project2(c.vec));
       // fit the domain over chunks AND the query point so the ringed query
       // marker can never land outside the plotted box (SVGs clip by default).
@@ -342,7 +387,7 @@ const StageDetail: React.FC<{
         return { x1: qPt[0], y1: qPt[1], x2: p[0], y2: p[1], color: ACCENT, width: 2 };
       });
       return (
-        <Panel title={`Retrieve · top-${params.k} of ${pipe.chunks.length} chunks by ${params.retrieval} score for "${query}"`} note={stage.note}>
+        <Panel title={`Retrieve · top-${params.k} of ${pipe.chunks.length} chunks by ${params.retrieval} score for "${pipe.retrievalQuery}"`} note={stage.note}>
           <div style={{ display: 'flex', gap: 7 }}>
             <AlgoPill accent={ACCENT} active={params.retrieval === 'dense'} onClick={() => onRetrieval('dense')}>Dense</AlgoPill>
             <AlgoPill accent={ACCENT} active={params.retrieval === 'sparse'} onClick={() => onRetrieval('sparse')}>Sparse (BM25)</AlgoPill>
@@ -380,10 +425,12 @@ const StageDetail: React.FC<{
     case 'rerank': {
       // Naive's own rail never carries a 'rerank' stage (real Naive RAG never
       // reranks); this branch only ever renders for variants that DO put a
-      // Rerank node on the rail. Guard on the param anyway so a future variant
-      // that structurally owns the stage but runs with the toggle off (e.g.
-      // Advanced RAG forcing its own semantics) still degrades gracefully.
-      if (!params.rerank) {
+      // Rerank node on the rail. Gate on `rerankActive` (toggle OR the rail
+      // structurally owns rerank), NOT the raw toggle — Advanced RAG's rail
+      // always owns a rerank stage, so it reranks even with the toggle off, and
+      // this branch must agree with what `pipe.candidates` actually computed or
+      // it would render "Rerank · off" on a stage that just reordered chunks.
+      if (!rerankActive) {
         return (
           <Panel title="Rerank · off" note={stage.note}>
             <div style={{ ...row, color: 'var(--t2)' }}>
@@ -410,7 +457,7 @@ const StageDetail: React.FC<{
       const packed = pool.slice(0, params.budget);
       const dropped = pool.slice(params.budget);
       const chars = packed.reduce((s, r) => s + r.chunk.text.length, 0);
-      const source = params.rerank ? 'reranked' : 'retrieved';
+      const source = rerankActive ? 'reranked' : 'retrieved';
       const promptBody = packed.map((r) => `[${r.chunk.id}] ${truncate(r.chunk.text, 90)}`).join('\n');
       return (
         <Panel title={`Augment · budget ${params.budget} of ${pool.length} ${source} candidates (${chars} chars)`} note={stage.note}>
@@ -590,11 +637,18 @@ const RagParamsPanel: React.FC<{
 // `variantName` isn't derivable from (stage, pipe, query, params) alone — it's
 // passed explicitly by the caller (RagLab knows the active variant) rather than
 // hardcoded, so the Math tab reads correctly once Milestone C adds more variants.
-function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, variantName: string): SimulationUpdate {
+// `rerankActive` is RagLab's single rerank-gating predicate (toggle OR the rail
+// structurally owns a rerank stage) — threaded through so the 'rerank' case below
+// never claims "reordered" out of step with what `pipe.candidates` actually did.
+function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, variantName: string, rerankActive: boolean): SimulationUpdate {
   const log = (name: string, formula: string, variables: Record<string, number | string>, result: string): SimulationUpdate => ({
     algorithm: `${variantName} · ${stage.label}`, stepDescription: stage.note, formula, variables, result,
   });
   switch (stage.kind) {
+    case 'rewrite': {
+      const { added } = rewriteQuery(query);
+      return log("query rewrite", "q' = q ⊕ inferred(keywords)", { added: added.length }, added.join(', '));
+    }
     case 'chunk':
       return log('splitting', `chunk(strategy=${params.strategy}, size=${params.size})`, { chunks: pipe.chunks.length }, `${pipe.chunks.length} chunks`);
     case 'embed':
@@ -608,7 +662,13 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         `top-${params.k}: ${pipe.ranked.slice(0, params.k).map((r) => r.chunk.id).join(', ')}`,
       );
     case 'rerank':
-      return log('reranking', 'score = 0.6·cos + 0.4·overlap', { k: params.k }, 'candidates reordered');
+      // Guarded on `rerankActive` (not a bare `params.rerank`) — this case can
+      // only run for a stage that's actually on the rail, and by construction
+      // that implies rerankActive is true, but the check keeps this case honest
+      // if that invariant ever changes rather than silently mislabeling a run.
+      return rerankActive
+        ? log('reranking', 'score = 0.6·cos + 0.4·overlap', { k: params.k }, 'candidates reordered')
+        : log('reranking', 'rerank stage present but inactive', { k: params.k }, 'skipped');
     case 'augment':
       // pipe.candidates (not the full pipe.ranked corpus) is what Augment actually
       // packs, so cap against its length — matches the budget bar on screen even
@@ -619,7 +679,7 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         'generation', 'answer ⊕ citations', { grounded: pipe.gen.grounded ? 1 : 0, cites: pipe.gen.citations.length },
         pipe.gen.grounded ? `grounded · ${pipe.gen.citations.join(', ')}` : 'refused (ungrounded)',
       );
-    // Milestone C adds: rewrite, hyde, multiquery, fuse, grade, critique, route, reflect, graphbuild, graphsearch, tree
+    // Milestone C adds: hyde, multiquery, fuse, grade, critique, route, reflect, graphbuild, graphsearch, tree
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -641,8 +701,9 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // rerank stage (checked via `.some`), splice one in right after Retrieve
   // whenever the Rerank toggle is on, so the stage is reachable, steppable, and
   // its reordering actually feeds Augment/Generate below. A variant that DOES
-  // structurally own a rerank stage (Milestone C's Advanced RAG) is left
-  // untouched — the rail's own stage list always wins over the toggle.
+  // structurally own a rerank stage (Advanced RAG) is left untouched — the
+  // rail's own stage list always wins over the toggle, so its rerank node can
+  // never be duplicated.
   const stages: Stage[] = useMemo(() => {
     const base = variant.stages(params);
     if (!params.rerank || base.some((s) => s.kind === 'rerank')) return base;
@@ -655,24 +716,36 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     return [...base.slice(0, idx + 1), rerankStage, ...base.slice(idx + 1)];
   }, [variantId, params]);
 
-  // pipeline outputs (memoized on query+params) — Naive path for now.
+  // Single source of truth for "is reranking actually happening this run" — true
+  // when the Rerank toggle is on OR the selected variant's rail structurally owns
+  // a rerank stage (Advanced RAG always reranks, independent of the toggle). Used
+  // everywhere rerank is gated: the `pipe.candidates` computation below, the
+  // Rerank StageDetail branch, its Augment "source" label, and buildLog.
+  const rerankActive = params.rerank || stages.some((s) => s.kind === 'rerank');
+  // True when the rail owns a pre-retrieval 'rewrite' stage (Advanced RAG) — the
+  // pipe below then retrieves on `rewriteQuery(query).rewritten` instead of the
+  // raw query; Augment/Generate still answer the original query either way.
+  const hasRewrite = stages.some((s) => s.kind === 'rewrite');
+
+  // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
-  // cross-encoder `rerankScore` when params.rerank is on — Augment and Generate
-  // both consume this (not the raw `ranked` list) so the whole downstream
-  // pipeline reflects reranking the same way the Rerank stage visualises it.
+  // cross-encoder `rerankScore` when `rerankActive` — Augment and Generate both
+  // consume this (not the raw `ranked` list) so the whole downstream pipeline
+  // reflects reranking the same way the Rerank stage visualises it.
   const pipe: Pipe = useMemo(() => {
     const chunks = chunkAll(params.strategy, params.size, params.overlap);
-    const ranked = retrieveRanked(query.label, chunks, params);
+    const retrievalQuery = hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
+    const ranked = retrieveRanked(retrievalQuery, chunks, params);
     const firstStage = ranked.slice(0, params.k);
-    const candidates: Ranked[] = params.rerank
+    const candidates: Ranked[] = rerankActive
       ? firstStage
           .map((r) => ({ chunk: r.chunk, score: rerankScore(query.label, r.chunk), rank: 0 }))
           .sort((a, b) => b.score - a.score)
           .map((r, i) => ({ ...r, rank: i }))
       : firstStage;
     const gen = generate(query.label, candidates, params.budget);
-    return { chunks, ranked, candidates, gen };
-  }, [queryIdx, params]);
+    return { chunks, ranked, candidates, gen, retrievalQuery };
+  }, [queryIdx, params, stages, rerankActive, hasRewrite]);
 
   const stage = stages[stageIdx];
 
@@ -683,7 +756,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     // stage, so the ticker lagged the rail by one stage.)
     const next = (stageIdx + 1) % stages.length;
     setStageIdx(next);
-    setLastLog(buildLog(stages[next], pipe, query.label, params, variant.name));
+    setLastLog(buildLog(stages[next], pipe, query.label, params, variant.name, rerankActive));
   };
   const sim = useSimLoop(step, { initialSpeed: 900 });
   const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); };
@@ -710,6 +783,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           stage={stage} pipe={pipe} params={params} query={query.label}
           indexMode={indexMode} onIndexMode={setIndexMode}
           onRetrieval={(m) => setParams({ ...params, retrieval: m })}
+          rerankActive={rerankActive}
         />
       </div>
     </div>

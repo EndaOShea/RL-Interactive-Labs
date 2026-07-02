@@ -69,6 +69,21 @@ const NAIVE: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE };
-export const VARIANT_ORDER: string[] = ['naive'];
+const ADVANCED: Variant = {
+  id: 'advanced', name: 'Advanced RAG', group: 'Foundational', year: '2023',
+  blurb: 'Adds a pre-retrieval query rewrite and a post-retrieval reranker + context compression around the naive core — the "pre/post" pattern from the RAG survey.',
+  stages: () => [
+    { kind: 'rewrite', label: 'Rewrite', note: 'Expand the query with inferred topic keywords before retrieval.' },
+    { kind: 'chunk', label: 'Chunk', note: 'Split documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Vectorize chunks.' },
+    { kind: 'index', label: 'Index', note: 'Build the vector index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve on the rewritten query.' },
+    { kind: 'rerank', label: 'Rerank', note: 'Cross-encoder reranking of candidates.' },
+    { kind: 'augment', label: 'Augment', note: 'Compress + pack top chunks.' },
+    { kind: 'generate', label: 'Generate', note: 'Answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced'];
 export { QUERIES };

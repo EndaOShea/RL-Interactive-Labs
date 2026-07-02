@@ -1,5 +1,16 @@
 // labs/llm/rag/retrieval.ts — pure retrieval math over the corpus chunks.
-import { DOCS, RagDoc, embedText, embedToken, cosine, tokenize, contentTokens } from './corpus';
+import { DOCS, RagDoc, embedText, embedToken, cosine, tokenize, contentTokens, LEXICON, AXES, Axis } from './corpus';
+
+// --- pre-retrieval query rewriting (Advanced RAG) ---
+// Deterministic pre-retrieval query expansion: infer which topic axes the query
+// touches, then append the canonical keyword for each so retrieval has more signal.
+const AXIS_WORD: Record<Axis, string> = { distance: 'distance', size: 'size', atmosphere: 'atmosphere', moons: 'moon', rings: 'rings', ice: 'ice', life: 'life', explored: 'mission' };
+export function rewriteQuery(query: string): { rewritten: string; added: string[] } {
+  const hits = new Set<Axis>();
+  for (const t of tokenize(query)) { const h = LEXICON[t]; if (h) AXES.forEach((a) => { if (h[a] != null) hits.add(a); }); }
+  const added = [...hits].map((a) => AXIS_WORD[a]).filter((w) => !query.toLowerCase().includes(w));
+  return { rewritten: added.length ? `${query} ${added.join(' ')}` : query, added };
+}
 
 export interface Chunk { id: string; docId: number; title: string; tags: string[]; text: string; vec: number[]; }
 export type ChunkStrategy = 'fixed' | 'recursive' | 'semantic' | 'sentence';
