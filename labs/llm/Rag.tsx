@@ -21,7 +21,7 @@ import { ragPython } from './python';
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
-  multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback,
+  multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade } from './rag/index';
 
@@ -670,20 +670,23 @@ const StageDetail: React.FC<{
     }
     case 'grade': {
       const grade: Grade = pipe.grade ?? 'correct';
-      const top = pipe.ranked[0]?.score ?? 0;
-      const hi = 0.5, lo = 0.2;
+      // SAME recomputed cosine gradeRetrieval() grades off — mode-independent,
+      // NOT pipe.ranked[0].score (a BM25/RRF value under sparse/hybrid that would
+      // desync the meter from the actual grade).
+      const gradeConfidence = pipe.ranked[0] ? cosine(embedText(query), pipe.ranked[0].chunk.vec) : 0;
+      const hi = GRADE_HI, lo = GRADE_LO;
       const gradeColor = grade === 'correct' ? '#34d399' : grade === 'ambiguous' ? '#fbbf24' : '#f87171';
       const branch = grade === 'correct' ? 'correct → use index' : grade === 'ambiguous' ? 'ambiguous → index + web' : 'incorrect → web search';
-      const meterMax = Math.max(1, top * 1.15, hi * 1.4);
+      const meterMax = Math.max(1, gradeConfidence * 1.15, hi * 1.4);
       const pct = (v: number) => Math.min(100, Math.max(0, (v / meterMax) * 100));
       const web = pipe.webChunks ?? [];
       return (
         <Panel title={`Grade · retrieval confidence for "${query}"`} note={stage.note}>
           <div>
-            <MonoLabel style={{ marginBottom: 8 }}>top-1 retrieval score vs thresholds (lo {lo} / hi {hi})</MonoLabel>
+            <MonoLabel style={{ marginBottom: 8 }}>query↔chunk cosine vs thresholds (lo {lo} / hi {hi})</MonoLabel>
             <div style={{ position: 'relative', height: 26, background: 'rgba(8,11,20,.5)', border: '1px solid var(--border)', borderRadius: 6 }}>
-              <div style={{ position: 'absolute', left: `${pct(top)}%`, top: 0, bottom: 0, width: 0, borderLeft: `3px solid ${gradeColor}`, transition: 'left .2s ease' }} />
-              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct(top)}%`, background: gradeColor, opacity: 0.28, borderRadius: '6px 0 0 6px' }} />
+              <div style={{ position: 'absolute', left: `${pct(gradeConfidence)}%`, top: 0, bottom: 0, width: 0, borderLeft: `3px solid ${gradeColor}`, transition: 'left .2s ease' }} />
+              <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct(gradeConfidence)}%`, background: gradeColor, opacity: 0.28, borderRadius: '6px 0 0 6px' }} />
               <div style={{ position: 'absolute', left: `${pct(lo)}%`, top: 0, bottom: 0, width: 1, background: 'var(--t2)', opacity: 0.6 }} />
               <div style={{ position: 'absolute', left: `${pct(hi)}%`, top: 0, bottom: 0, width: 1, background: 'var(--t2)', opacity: 0.6 }} />
             </div>
@@ -696,7 +699,7 @@ const StageDetail: React.FC<{
               fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, letterSpacing: '.04em', padding: '3px 10px', borderRadius: 5,
               color: gradeColor, border: `1px solid ${gradeColor}`, background: `color-mix(in srgb, ${gradeColor} 10%, transparent)`,
             }}>{grade.toUpperCase()}</span>
-            <span style={{ ...row, color: 'var(--t1)' }}>top-1 score {top.toFixed(3)} · {branch}</span>
+            <span style={{ ...row, color: 'var(--t1)' }}>query↔chunk cosine {gradeConfidence.toFixed(3)} · {branch}</span>
           </div>
           {web.length > 0 && (
             <div>
@@ -1156,7 +1159,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     // discards the index result outright and relies on the web alone (the OOD
     // story: no dense signal at all, so the index is graded incorrect and the
     // web doc is what actually grounds the answer).
-    const grade = hasGrade ? gradeRetrieval(ranked) : undefined;
+    const grade = hasGrade ? gradeRetrieval(query.label, ranked) : undefined;
     const webChunks = grade && grade !== 'correct' ? webFallback(query.label) : undefined;
     let firstStage: Ranked[];
     if (critique) firstStage = retrievedTopK.filter((_, i) => critique[i].relevant);

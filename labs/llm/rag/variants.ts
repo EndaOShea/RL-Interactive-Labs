@@ -157,8 +157,11 @@ export type Grade = 'correct' | 'ambiguous' | 'incorrect';
 // Retrieval evaluator — grade the top-1 retrieval confidence: a high top score
 // means the index hit is trustworthy; a very low one means it is not even
 // on-topic; anything in between is ambiguous.
-export function gradeRetrieval(ranked: Ranked[], hi = 0.5, lo = 0.2): Grade {
-  const top = ranked[0]?.score ?? 0;
+export const GRADE_HI = 0.5, GRADE_LO = 0.2;
+// SCALE-FREE: grade off a recomputed cosine of the query vs the top chunk, NOT
+// `ranked[0].score` (a BM25/RRF value under sparse/hybrid → would misgrade every query).
+export function gradeRetrieval(query: string, ranked: Ranked[], hi = GRADE_HI, lo = GRADE_LO): Grade {
+  const top = ranked[0] ? cosine(embedText(query), ranked[0].chunk.vec) : 0;
   return top >= hi ? 'correct' : top <= lo ? 'incorrect' : 'ambiguous';
 }
 // On incorrect/ambiguous, pull from the web corpus and merge (knowledge
