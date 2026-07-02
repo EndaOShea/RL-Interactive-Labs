@@ -21,6 +21,7 @@ import { ragPython } from './python';
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
+  multiQuery, denseScores, topK, rrf,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
@@ -38,8 +39,18 @@ const ACCENT = '#a78bfa';
 // or a `hyde` stage (→ `hydeDoc(query)`, the fabricated hypothetical-answer text — HyDE
 // takes precedence, since no variant's rail carries both stages at once) —
 // Augment/Generate still answer the ORIGINAL query, only first-stage retrieval sees
-// the substituted one.
-interface Pipe { chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string; }
+// the substituted one. RAG-Fusion (rail owns a `fuse` stage) is structurally
+// different — it doesn't retrieve on ONE substituted string at all: it retrieves once
+// per `multiQuery(query)` variant and OVERWRITES `ranked` outright with the
+// Reciprocal-Rank-Fused order (`queries`/`perQueryRankings`/`fusedMap` carry the
+// per-variant detail the Fuse viz needs). `retrievalQuery` stays the original query
+// for Fusion, and — same as rewrite/HyDE — Augment/Generate still consume
+// `ranked`/`candidates` exactly like every other variant, so the scale-free
+// `generate()` grounding (see variants.ts) needs no Fusion-specific case at all.
+interface Pipe {
+  chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string;
+  queries?: string[]; perQueryRankings?: number[][]; fusedMap?: Map<number, number>;
+}
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
 
@@ -269,6 +280,81 @@ const RerankView: React.FC<{ before: Ranked[]; after: Ranked[]; accent: string }
   );
 };
 
+// A "consensus riser": a chunk index that appears in at least 2 of the per-query
+// rankings and whose FUSED rank is strictly better than EVERY individual rank it
+// held — i.e. it actually rose: no single phrasing alone ranked it that high, but
+// several phrasings agreeing (even at middling ranks) pushed it there once RRF
+// summed across them. (Requiring strictly-better-than-every-individual-rank, not
+// just "never rank 0", matters: when every sub-query ranking happens to be
+// identical, a chunk sitting at rank 1 everywhere also sits at fused rank 1 —
+// consistently second-best, but it never actually ROSE, so it must NOT qualify.)
+// Returns null (no forced fallback) when this run has no such chunk — e.g. every
+// phrasing already agreed on the same winner — so the viz never claims a "rise"
+// that didn't actually happen.
+function findFusionHero(perQueryRankings: number[][], fusedOrder: number[]): number | null {
+  return fusedOrder.find((idx, fusedRank) => {
+    const ranks = perQueryRankings.map((r) => r.indexOf(idx)).filter((r) => r !== -1);
+    return ranks.length >= 2 && ranks.every((r) => r > fusedRank);
+  }) ?? null;
+}
+
+const FUSE_HERO = '#fbbf24';
+
+// One column per query variant (its dense top-N chunk ids, best first) plus a
+// final FUSED column ordered by RRF score. `hero`/`fusedOrder` are computed once
+// by the caller (StageDetail's 'fuse' case) and passed in so the SVG and the
+// caption below it always agree on the same chunk.
+const FuseView: React.FC<{
+  queries: string[]; perQueryRankings: number[][]; fused: Ranked[]; fusedOrder: number[];
+  hero: number | null; chunks: Chunk[]; k: number; accent: string;
+}> = ({ queries, perQueryRankings, fused, fusedOrder, hero, chunks, k, accent }) => {
+  const qColW = 108, fColW = 156, gap = 16, rowH = 20, padT = 30, padX = 10;
+  const nQ = perQueryRankings.length;
+  const W = padX * 2 + nQ * (qColW + gap) + fColW;
+  const maxRows = Math.max(fused.length, ...perQueryRankings.map((r) => r.length));
+  const H = padT + maxRows * rowH + 10;
+  const colX = (c: number) => padX + c * (qColW + gap);
+  const fX = colX(nQ);
+  const rowY = (r: number) => padT + r * rowH + rowH / 2;
+
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%' }}>
+      {queries.map((_, c) => (
+        <text key={`h${c}`} x={colX(c)} y={16} fontFamily="var(--mono)" fontSize={10} letterSpacing="0.03em" fill="var(--t2)">Q{c + 1}</text>
+      ))}
+      <text x={fX} y={16} fontFamily="var(--mono)" fontSize={10.5} fontWeight={700} letterSpacing="0.03em" fill={accent}>FUSED</text>
+      {hero != null && perQueryRankings.map((ranking, c) => {
+        const r = ranking.indexOf(hero);
+        const rf = fusedOrder.indexOf(hero);
+        if (r === -1 || rf === -1) return null;
+        return <line key={`hero-${c}`} x1={colX(c) + qColW} y1={rowY(r)} x2={fX} y2={rowY(rf)} stroke={FUSE_HERO} strokeWidth={1.75} opacity={0.85} />;
+      })}
+      {perQueryRankings.map((ranking, c) => (
+        <g key={`col${c}`}>
+          {ranking.map((idx, r) => (
+            <text key={idx} x={colX(c)} y={rowY(r) + 4} fontFamily="var(--mono)" fontSize={10.5}
+              fill={idx === hero ? FUSE_HERO : 'var(--t2)'} fontWeight={idx === hero ? 700 : 400}>
+              #{r + 1} {chunks[idx].id}
+            </text>
+          ))}
+        </g>
+      ))}
+      <g>
+        {fused.map((rk, r) => {
+          const idx = fusedOrder[r];
+          const isHero = idx === hero, isTop = r < k;
+          return (
+            <text key={rk.chunk.id} x={fX} y={rowY(r) + 4} fontFamily="var(--mono)" fontSize={10.5}
+              fill={isHero ? FUSE_HERO : isTop ? 'var(--t0)' : 'var(--t2)'} fontWeight={isHero || isTop ? 700 : 400}>
+              #{r + 1} {rk.chunk.id} · {rk.score.toFixed(4)}
+            </text>
+          );
+        })}
+      </g>
+    </svg>
+  );
+};
+
 /* ---------- active-stage detail: one titled text panel per stage kind ---------- */
 const StageDetail: React.FC<{
   stage: Stage; pipe: Pipe; params: RagParams; query: string;
@@ -371,6 +457,31 @@ const StageDetail: React.FC<{
         </Panel>
       );
     }
+    case 'multiquery': {
+      const queries = multiQuery(query);
+      return (
+        <Panel title={`Multi-Query · ${queries.length} generated paraphrases`} note={stage.note}>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>original query</MonoLabel>
+            <div style={{ ...row, color: 'var(--t1)' }}>&quot;{query}&quot;</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {queries.map((q, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                border: `1px solid ${ACCENT}`, borderRadius: 7, background: 'rgba(167,139,250,.06)',
+              }}>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: ACCENT, fontWeight: 700, flexShrink: 0 }}>Q{i + 1}</span>
+                <span style={{ ...row, color: 'var(--t0)', fontSize: 12 }}>&quot;{q}&quot;</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            Each variant is retrieved independently in the stages ahead — Fuse combines their rankings with Reciprocal Rank Fusion instead of trusting any single phrasing.
+          </div>
+        </Panel>
+      );
+    }
     case 'chunk': {
       return (
         <Panel title={`Chunk · ${params.strategy} · size ${params.size} / overlap ${params.overlap}`} note={stage.note}>
@@ -428,6 +539,12 @@ const StageDetail: React.FC<{
     case 'retrieve': {
       const top = pipe.ranked.slice(0, params.k);
       const topIds = new Set(top.map((r) => r.chunk.id));
+      // RAG-Fusion overwrote `pipe.ranked` with the RRF-fused order (see Pipe's
+      // comment) — `r.score` below is then a fused score, not a `params.retrieval`
+      // score, and the Dense/Sparse/Hybrid toggle has no effect on it, so both are
+      // relabeled/hidden here rather than showing a misleading "by dense score".
+      const isFused = pipe.queries != null;
+      const scoreLabel = isFused ? 'fused (RRF)' : params.retrieval;
       // Embed/plot `pipe.retrievalQuery` (not the raw `query` prop) — when a
       // rewrite stage ran, `pipe.ranked` was scored against the rewritten text,
       // so the marker must match or the lines/ranking below would look wrong.
@@ -449,12 +566,14 @@ const StageDetail: React.FC<{
         return { x1: qPt[0], y1: qPt[1], x2: p[0], y2: p[1], color: ACCENT, width: 2 };
       });
       return (
-        <Panel title={`Retrieve · top-${params.k} of ${pipe.chunks.length} chunks by ${params.retrieval} score for "${pipe.retrievalQuery}"`} note={stage.note}>
-          <div style={{ display: 'flex', gap: 7 }}>
-            <AlgoPill accent={ACCENT} active={params.retrieval === 'dense'} onClick={() => onRetrieval('dense')}>Dense</AlgoPill>
-            <AlgoPill accent={ACCENT} active={params.retrieval === 'sparse'} onClick={() => onRetrieval('sparse')}>Sparse (BM25)</AlgoPill>
-            <AlgoPill accent={ACCENT} active={params.retrieval === 'hybrid'} onClick={() => onRetrieval('hybrid')}>Hybrid (RRF)</AlgoPill>
-          </div>
+        <Panel title={`Retrieve · top-${params.k} of ${pipe.chunks.length} chunks by ${scoreLabel} score for "${pipe.retrievalQuery}"`} note={stage.note}>
+          {!isFused && (
+            <div style={{ display: 'flex', gap: 7 }}>
+              <AlgoPill accent={ACCENT} active={params.retrieval === 'dense'} onClick={() => onRetrieval('dense')}>Dense</AlgoPill>
+              <AlgoPill accent={ACCENT} active={params.retrieval === 'sparse'} onClick={() => onRetrieval('sparse')}>Sparse (BM25)</AlgoPill>
+              <AlgoPill accent={ACCENT} active={params.retrieval === 'hybrid'} onClick={() => onRetrieval('hybrid')}>Hybrid (RRF)</AlgoPill>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <ScatterPlot
               points={points} classColors={['#6b7494']} domain={dx} range={dy}
@@ -462,7 +581,7 @@ const StageDetail: React.FC<{
             />
           </div>
           <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 230, overflowY: 'auto' }}>
-            <MonoLabel style={{ marginBottom: 4 }}>full ranking · {params.retrieval} score</MonoLabel>
+            <MonoLabel style={{ marginBottom: 4 }}>full ranking · {scoreLabel} score</MonoLabel>
             {pipe.ranked.map((r, rank) => {
               const isTop = rank < params.k;
               return (
@@ -482,6 +601,36 @@ const StageDetail: React.FC<{
             })}
           </div>
         </Panel>
+      );
+    }
+    case 'fuse': {
+      const queries = pipe.queries ?? [];
+      const perQueryRankings = pipe.perQueryRankings ?? [];
+      const N = perQueryRankings[0]?.length ?? 0;
+      const fused = pipe.ranked.slice(0, Math.max(params.k, N));
+      // Re-derive chunk INDICES (not ids) for the fused rows — perQueryRankings
+      // stores indices into pipe.chunks, so the hero lookup needs the same space.
+      const idxOf = new Map(pipe.chunks.map((c, i) => [c.id, i] as const));
+      const fusedOrder = fused.map((r) => idxOf.get(r.chunk.id)!);
+      const hero = findFusionHero(perQueryRankings, fusedOrder);
+      const heroChunkId = hero != null ? pipe.chunks[hero].id : null;
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+          <MonoLabel>Fuse · Reciprocal Rank Fusion of {queries.length} rankings → top-{params.k} · {stage.note}</MonoLabel>
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <FuseView
+              queries={queries} perQueryRankings={perQueryRankings} fused={fused} fusedOrder={fusedOrder}
+              hero={hero} chunks={pipe.chunks} k={params.k} accent={ACCENT}
+            />
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 660, textAlign: 'center', lineHeight: 1.6 }}>
+            {heroChunkId ? (
+              <>RRF(d) = Σ 1/(k+rank) summed over the {queries.length} rankings on the left — <span style={{ color: FUSE_HERO }}>amber</span> traces <b style={{ color: FUSE_HERO }}>{heroChunkId}</b>, which never tops any single ranking but clears the fused top-{params.k} anyway: several phrasings rank it respectably, and consensus outscores one phrasing's single strong hit.</>
+            ) : (
+              <>RRF(d) = Σ 1/(k+rank) summed over the {queries.length} rankings on the left — every phrasing already agreed on the top chunk(s) for this query, so fusion mostly confirms rather than reorders this run.</>
+            )}
+          </div>
+        </div>
       );
     }
     case 'rerank': {
@@ -721,12 +870,28 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
       return log('embedding', 'v = normalize(Σ lexicon[token])', { dim: 8, chunks: pipe.chunks.length }, 'chunks → unit vectors');
     case 'index':
       return log('indexing', 'ANN over chunk vectors', { entries: pipe.chunks.length }, 'index built');
-    case 'retrieve':
+    case 'retrieve': {
+      // RAG-Fusion already overwrote pipe.ranked with the fused order by this
+      // point (see Pipe's comment) — label the formula/score for what it really
+      // is instead of claiming a cos/BM25 score the Math tab didn't compute.
+      const isFused = pipe.queries != null;
       return log(
-        'retrieval', params.retrieval === 'sparse' ? 'score = BM25(q, c)' : 'score = cos(q, c)',
+        'retrieval', isFused ? 'RRF(d)=Σ 1/(k+rankᵢ(d))' : params.retrieval === 'sparse' ? 'score = BM25(q, c)' : 'score = cos(q, c)',
         { k: params.k, top: pipe.ranked[0]?.chunk.id ?? '—', best: +(pipe.ranked[0]?.score ?? 0).toFixed(3) },
         `top-${params.k}: ${pipe.ranked.slice(0, params.k).map((r) => r.chunk.id).join(', ')}`,
       );
+    }
+    case 'multiquery': {
+      const queries = multiQuery(query);
+      return log('multi-query generation', 'Qᵢ = paraphrase(q), i=1..N', { variants: queries.length }, `${queries.length} query variants generated`);
+    }
+    case 'fuse': {
+      const top = pipe.ranked.slice(0, params.k);
+      return log(
+        'reciprocal rank fusion', 'RRF(d)=Σ 1/(k+rankᵢ(d))', { queries: pipe.queries?.length ?? 0, k: params.k },
+        `fused top-${params.k}: ${top.map((r) => r.chunk.id).join(', ')}`,
+      );
+    }
     case 'rerank':
       // Guarded on `rerankActive` (not a bare `params.rerank`) — this case can
       // only run for a stage that's actually on the rail, and by construction
@@ -745,7 +910,7 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         'generation', 'answer ⊕ citations', { grounded: pipe.gen.grounded ? 1 : 0, cites: pipe.gen.citations.length },
         pipe.gen.grounded ? `grounded · ${pipe.gen.citations.join(', ')}` : 'refused (ungrounded)',
       );
-    // Milestone C adds: multiquery, fuse, grade, critique, route, reflect, graphbuild, graphsearch, tree
+    // Milestone C adds: grade, critique, route, reflect, graphbuild, graphsearch, tree
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -796,6 +961,13 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // `hydeDoc(query)` (a fabricated hypothetical answer) instead of the raw query.
   // HyDE takes precedence over rewrite below; no variant's rail owns both stages.
   const hasHyde = stages.some((s) => s.kind === 'hyde');
+  // True when the rail owns a 'fuse' (+ 'multiquery') stage (RAG-Fusion) — the pipe
+  // below then retrieves DIFFERENTLY from rewrite/HyDE: instead of substituting one
+  // string for the raw query, it runs `multiQuery(query)`, retrieves a dense ranking
+  // per variant, and fuses them with RRF, overwriting `ranked` outright. No variant's
+  // rail owns `fuse` together with `rewrite`/`hyde`, so these three are mutually
+  // exclusive in practice.
+  const hasFusion = stages.some((s) => s.kind === 'fuse' || s.kind === 'multiquery');
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -804,8 +976,26 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // reflects reranking the same way the Rerank stage visualises it.
   const pipe: Pipe = useMemo(() => {
     const chunks = chunkAll(params.strategy, params.size, params.overlap);
-    const retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
-    const ranked = retrieveRanked(retrievalQuery, chunks, params);
+    let ranked: Ranked[];
+    let retrievalQuery: string;
+    let queries: string[] | undefined;
+    let perQueryRankings: number[][] | undefined;
+    let fusedMap: Map<number, number> | undefined;
+    if (hasFusion) {
+      // RAG-Fusion deliberately ignores the Dense/Sparse/Hybrid retrieval-mode
+      // toggle: that toggle picks one scorer for one query, while Fusion's whole
+      // point is several queries against the same dense scorer, fused by RRF.
+      const N = 8; // per-query cap — legible column height in the Fuse viz
+      queries = multiQuery(query.label);
+      perQueryRankings = queries.map((q) => topK(denseScores(q, chunks), N));
+      fusedMap = rrf(perQueryRankings);
+      const fusedOrder = [...fusedMap.entries()].sort((a, b) => b[1] - a[1]).map(([i]) => i);
+      ranked = fusedOrder.map((idx, rank) => ({ chunk: chunks[idx], score: fusedMap!.get(idx) ?? 0, rank }));
+      retrievalQuery = query.label;
+    } else {
+      retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
+      ranked = retrieveRanked(retrievalQuery, chunks, params);
+    }
     const firstStage = ranked.slice(0, params.k);
     const candidates: Ranked[] = rerankActive
       ? firstStage
@@ -814,8 +1004,8 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           .map((r, i) => ({ ...r, rank: i }))
       : firstStage;
     const gen = generate(query.label, candidates, params.budget);
-    return { chunks, ranked, candidates, gen, retrievalQuery };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde]);
+    return { chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap };
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion]);
 
   const stage = stages[stageIdx];
 
@@ -835,10 +1025,10 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // stage than the one the learner was looking at.
   const onRerankChange = (v: boolean) => { setParams({ ...params, rerank: v }); reset(); };
 
-  // RAIL + ACTIVE-STAGE DETAIL — embed/index need more room for the
-  // heatmap+scatter / ANN diagram than the chunk/retrieve/augment/generate
-  // text-and-card panels, which stay at the original 620px.
-  const wideStage = stage.kind === 'embed' || stage.kind === 'index';
+  // RAIL + ACTIVE-STAGE DETAIL — embed/index/fuse need more room for the
+  // heatmap+scatter / ANN diagram / N-column RRF chart than the chunk/retrieve/
+  // augment/generate text-and-card panels, which stay at the original 620px.
+  const wideStage = stage.kind === 'embed' || stage.kind === 'index' || stage.kind === 'fuse';
   // LabStage's centre stage is `overflow:hidden` and vertically centers this
   // grid with no scrollbar of its own, so a tall stage-detail panel (embed's
   // heatmap+scatter, index's ANN diagram, and future GraphRAG/RAPTOR/ColBERT

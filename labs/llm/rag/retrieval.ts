@@ -20,6 +20,13 @@ export function hydeDoc(query: string): string {
   return `${query.replace(/\?$/, '')}. In the Solar System, this concerns ${added.join(', ') || 'planets and moons'}. A likely answer describes the relevant body and its ${added.join(' and ') || 'properties'}.`;
 }
 
+// RAG-Fusion: deterministic query variations (stand-ins for an LLM's paraphrases).
+// Retrieval runs once per variation; the rankings are fused with RRF below.
+export function multiQuery(query: string): string[] {
+  const base = query.replace(/\?$/, '');
+  return [query, `facts about ${base}`, `explain ${base}`, `${rewriteQuery(query).rewritten}`];
+}
+
 export interface Chunk { id: string; docId: number; title: string; tags: string[]; text: string; vec: number[]; }
 export type ChunkStrategy = 'fixed' | 'recursive' | 'semantic' | 'sentence';
 export const CHUNK_DEFAULTS = { size: 160, overlap: 24 };

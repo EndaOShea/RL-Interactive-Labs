@@ -106,6 +106,21 @@ const HYDE: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde'];
+const FUSION: Variant = {
+  id: 'fusion', name: 'RAG-Fusion', group: 'Pre-retrieval', year: '2023',
+  blurb: 'Generates several paraphrases of the query, retrieves a ranking for each, then fuses all of them with Reciprocal Rank Fusion — a chunk that ranks respectably across every phrasing can outrank one that is a top hit for only a single phrasing.',
+  stages: () => [
+    { kind: 'multiquery', label: 'Multi-Query', note: 'Generate several paraphrases of the query.' },
+    { kind: 'chunk', label: 'Chunk', note: 'Split documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Vectorize chunks.' },
+    { kind: 'index', label: 'Index', note: 'Build the vector index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve a dense ranking per query variant.' },
+    { kind: 'fuse', label: 'Fuse', note: 'Combine the per-query rankings with Reciprocal Rank Fusion.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the fused top chunks into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion'];
 export { QUERIES };
