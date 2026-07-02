@@ -188,6 +188,24 @@ const CRAG: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag'];
+// --- GraphRAG: knowledge graph + local (ego-graph) / global (community) search ---
+// The graph itself (entities/relations/communities) and the local/global search
+// functions live in ./graph — this rail just names the two extra stages;
+// Rag.tsx's pipe branch (gated on `hasGraph`) calls localSearch/globalSearch and
+// feeds their result into the same augment/generate every other variant shares.
+const GRAPH_RAG: Variant = {
+  id: 'graph-rag', name: 'GraphRAG', group: 'Structured', year: '2024',
+  blurb: 'Builds a knowledge graph over the corpus — entities wired by explicit relations (orbits, has-moon, visited-by…) and clustered into communities. Local mode walks the ego-graph around query-matched entities to resolve multi-hop questions a flat vector index conflates; global mode map-reduces over community summaries for broad, corpus-spanning questions.',
+  stages: () => [
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
+    { kind: 'graphbuild', label: 'Graph Build', note: 'Build a knowledge graph over corpus entities and relations, clustered into communities.' },
+    { kind: 'graphsearch', label: 'Graph Search', note: 'Search the graph: locally via the ego-graph around matched entities, or globally via community summaries.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the graph-selected chunks (or community summaries) into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag'];
 export { QUERIES };

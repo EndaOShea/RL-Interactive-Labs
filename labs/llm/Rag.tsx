@@ -10,6 +10,7 @@ import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import Heatmap from '../../components/labkit/viz/Heatmap';
 import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../components/labkit/viz/ScatterPlot';
+import GraphCanvas, { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
 import { RunControls, MonoLabel, AlgoPill } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { downloadCode } from '../../utils/downloadCode';
@@ -22,10 +23,14 @@ import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
   multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
+  ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout,
 } from './rag/index';
-import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade } from './rag/index';
+import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity } from './rag/index';
 
 const ACCENT = '#a78bfa';
+// per-community identity colour (GraphRAG graphbuild/graphsearch), distinct from
+// the file's semantic red/green (wrong/right) and the ACCENT (the active thing).
+const COMMUNITY_COLORS = ['#60a5fa', '#34d399', '#22d3ee', '#fb923c'];
 
 // `candidates` = the top-k retrieved chunks, re-sorted by the (slower) cross-encoder
 // `rerankScore` when reranking is ACTIVE — the pool that Augment actually packs and
@@ -61,6 +66,14 @@ interface Pipe {
   // `candidates` above already merges it in per the grade (see the pipe useMemo).
   grade?: Grade;
   webChunks?: Ranked[];
+  // GraphRAG: `graphMode` picks local (ego-graph over matched entities) vs global
+  // (map-reduce over community summaries) — `ranked`/`candidates`/`gen` above are
+  // ALREADY built from whichever mode is active (see the pipe useMemo's `hasGraph`
+  // branch), so Augment/Generate need no GraphRAG-specific code at all. `localResult`/
+  // `globalResult` carry the extra detail only the graphsearch panel needs.
+  graphMode?: 'local' | 'global';
+  localResult?: ReturnType<typeof localSearch>;
+  globalResult?: ReturnType<typeof globalSearch>;
 }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
@@ -366,13 +379,135 @@ const FuseView: React.FC<{
   );
 };
 
+// The full knowledge graph: every entity, coloured by its community, wired by
+// every non-self relation (a self-referential relation like Titan's
+// has-atmosphere is an intrinsic node fact, not a drawable edge between two
+// points — GraphCanvas has no self-loop rendering, so those surface as node
+// `sub` text instead).
+const GraphBuildView: React.FC = () => {
+  const pos = graphLayout();
+  const facts = new Map<string, string[]>();
+  RELATIONS.forEach((r) => { if (r.from === r.to) facts.set(r.from, [...(facts.get(r.from) ?? []), r.kind.replace('has-', '')]); });
+  const nodes: GNode[] = ENTITIES.map((e) => {
+    const [x, y] = pos[e.id];
+    const f = facts.get(e.id);
+    return { id: e.id, x, y, label: e.label, sub: f ? `${e.kind} · ${f.join(', ')}` : e.kind, color: COMMUNITY_COLORS[e.community] };
+  });
+  const edges: GEdge[] = RELATIONS.filter((r) => r.from !== r.to).map((r) => ({ from: r.from, to: r.to }));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+      <GraphCanvas nodes={nodes} edges={edges} width={620} height={440} radius={16} />
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {COMMUNITIES.map((c) => (
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: COMMUNITY_COLORS[c.id], display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t1)' }}>{c.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Local (ego-graph) search: seed nodes glow green (`start`), their direct
+// neighbours glow blue (`frontier`), everything else stays idle/dim — the
+// literal subgraph `localSearch` walks. Edges between two ego-graph nodes are
+// highlighted `path`; a text "relation chain" underneath spells out each hop
+// (and any self-referential fact, e.g. "Titan — atmosphere") since GraphCanvas
+// edges can only carry a numeric weight, not a relation-kind label.
+const GraphLocalView: React.FC<{
+  seeds: Entity[]; egoIds: Set<string>; ranked: Ranked[]; k: number; accent: string;
+}> = ({ seeds, egoIds, ranked, k, accent }) => {
+  const pos = graphLayout();
+  const seedIds = new Set(seeds.map((s) => s.id));
+  const nodes: GNode[] = ENTITIES.map((e) => {
+    const [x, y] = pos[e.id];
+    return { id: e.id, x, y, label: e.label, sub: e.kind, state: seedIds.has(e.id) ? 'start' : egoIds.has(e.id) ? 'frontier' : 'idle' };
+  });
+  const edges: GEdge[] = RELATIONS.filter((r) => r.from !== r.to).map((r) => ({
+    from: r.from, to: r.to, state: egoIds.has(r.from) && egoIds.has(r.to) ? 'path' : 'idle',
+  }));
+  const chains = seeds.flatMap((s) => neighbors(s.id).map(({ rel, other }) =>
+    rel.from === s.id ? `${s.label} —(${rel.kind})→ ${other.label}` : `${other.label} —(${rel.kind})→ ${s.label}`));
+  const facts = [...egoIds].flatMap((id) => {
+    const e = ENTITIES.find((x) => x.id === id);
+    return RELATIONS.filter((r) => r.from === id && r.to === id).map((r) => `${e?.label ?? id} — ${r.kind.replace('has-', '')}`);
+  });
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+      <GraphCanvas nodes={nodes} edges={edges} width={620} height={400} radius={16} />
+      {seeds.length === 0 ? (
+        <div style={{ ...row, color: '#f87171', maxWidth: 560, textAlign: 'center' }}>
+          No entity in the graph matched this query — local search has no ego-graph to anchor on, so Augment/Generate get nothing and the pipeline refuses below.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 560 }}>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>relation chain from seed{seeds.length > 1 ? 's' : ''}: {seeds.map((s) => s.label).join(', ')}</MonoLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {chains.map((c, i) => <div key={`c${i}`} style={{ ...row, color: 'var(--t1)' }}>{c}</div>)}
+              {facts.map((f, i) => <div key={`f${i}`} style={{ ...row, color: accent }}>{f}</div>)}
+            </div>
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 4 }}>ego-graph chunks ranked by cosine · top-{k} feed Augment</MonoLabel>
+            <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 180, overflowY: 'auto' }}>
+              {ranked.map((r, i) => (
+                <div key={r.chunk.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '3px 6px',
+                  borderLeft: i < k ? `3px solid ${accent}` : '3px solid transparent', borderRadius: 4,
+                  background: i < k ? 'rgba(167,139,250,.08)' : 'transparent',
+                }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: i < k ? accent : 'var(--t2)', minWidth: 90, flexShrink: 0 }}>#{i + 1} {r.score.toFixed(3)}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: i < k ? 'var(--t0)' : 'var(--t2)', opacity: i < k ? 1 : 0.55 }}>{r.chunk.id}: &quot;{truncate(r.chunk.text, 56)}&quot;</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Global (map-reduce) search: no per-chunk retrieval at all — every community
+// summary is scored against the query and ranked; the winner is expanded.
+const GraphGlobalView: React.FC<{
+  ranked: { id: number; label: string; summary: string; score: number }[]; accent: string;
+}> = ({ ranked, accent }) => {
+  const max = Math.max(0.001, ...ranked.map((c) => c.score));
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, width: '100%', maxWidth: 560 }}>
+      <MonoLabel>community ranking · score = cos(embed(query), embed(summary))</MonoLabel>
+      {ranked.map((c, i) => (
+        <div key={c.id} style={{
+          display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 12px', borderRadius: 8,
+          border: `1px solid ${i === 0 ? accent : 'var(--border)'}`,
+          background: i === 0 ? 'rgba(167,139,250,.08)' : 'rgba(8,11,20,.35)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: COMMUNITY_COLORS[c.id], display: 'inline-block', flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: i === 0 ? accent : 'var(--t0)', fontWeight: i === 0 ? 700 : 400 }}>#{i + 1} {c.label}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginLeft: 'auto' }}>{c.score.toFixed(3)}</span>
+          </div>
+          <div style={{ height: 5, borderRadius: 3, background: 'rgba(148,158,196,.15)' }}>
+            <div style={{ height: '100%', borderRadius: 3, width: `${(c.score / max) * 100}%`, background: i === 0 ? accent : 'var(--t2)' }} />
+          </div>
+          {i === 0 && <div style={{ ...row, color: 'var(--t1)', marginTop: 2 }}>{c.summary}</div>}
+        </div>
+      ))}
+    </div>
+  );
+};
+
 /* ---------- active-stage detail: one titled text panel per stage kind ---------- */
 const StageDetail: React.FC<{
   stage: Stage; pipe: Pipe; params: RagParams; query: string;
   indexMode: IndexMode; onIndexMode: (m: IndexMode) => void;
   onRetrieval: (m: RagParams['retrieval']) => void;
   rerankActive: boolean;
-}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive }) => {
+  graphMode: 'local' | 'global'; onGraphMode: (m: 'local' | 'global') => void;
+}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive, graphMode, onGraphMode }) => {
   switch (stage.kind) {
     case 'hyde': {
       const doc = hydeDoc(query);
@@ -856,6 +991,39 @@ Question: ${query}`}
         </Panel>
       );
     }
+    case 'graphbuild': {
+      const nRel = RELATIONS.filter((r) => r.from !== r.to).length;
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+          <MonoLabel>Graph Build · {ENTITIES.length} entities · {nRel} relations · {COMMUNITIES.length} communities · {stage.note}</MonoLabel>
+          <GraphBuildView />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 620, textAlign: 'center', lineHeight: 1.6 }}>
+            Entities are wired by explicit relations (orbits, has-moon, visited-by…) and clustered into {COMMUNITIES.length} communities — structure a flat chunk index doesn&apos;t have. That structure is what Graph Search exploits next: local mode walks it for multi-hop questions, global mode reduces over it for broad ones.
+          </div>
+        </div>
+      );
+    }
+    case 'graphsearch': {
+      const local = pipe.localResult;
+      const global = pipe.globalResult;
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
+          <MonoLabel>Graph Search · {graphMode === 'local' ? 'local (ego-graph traversal)' : 'global (community map-reduce)'} · {stage.note}</MonoLabel>
+          <div style={{ display: 'flex', gap: 7 }}>
+            <AlgoPill accent={ACCENT} active={graphMode === 'local'} onClick={() => onGraphMode('local')}>Local</AlgoPill>
+            <AlgoPill accent={ACCENT} active={graphMode === 'global'} onClick={() => onGraphMode('global')}>Global</AlgoPill>
+          </div>
+          {graphMode === 'local'
+            ? <GraphLocalView seeds={local?.seeds ?? []} egoIds={local?.egoIds ?? new Set()} ranked={pipe.ranked} k={params.k} accent={ACCENT} />
+            : <GraphGlobalView ranked={global?.ranked ?? []} accent={ACCENT} />}
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 620, textAlign: 'center', lineHeight: 1.6 }}>
+            {graphMode === 'local'
+              ? 'Local search seeds on entities the query names, then walks one hop out — the ego-graph — and scopes retrieval to just the chunks in those documents, resolving a multi-hop question a flat vector search alone conflates with a lexically-similar but wrong document.'
+              : 'Global search skips per-chunk retrieval entirely: every community’s summary is scored against the query, and the top summaries themselves become the context — a map-reduce over the whole corpus for broad questions no single chunk answers alone.'}
+          </div>
+        </div>
+      );
+    }
     default:
       return (
         <Panel title={stage.label} note={stage.note}>
@@ -1046,7 +1214,33 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         grade === 'correct' ? 'correct · index trusted as-is' : `${grade} · ${web} web chunk(s) pulled in`,
       );
     }
-    // Milestone C adds: route, graphbuild, graphsearch, tree
+    case 'graphbuild': {
+      const nRel = RELATIONS.filter((r) => r.from !== r.to).length;
+      return log(
+        'knowledge graph construction', 'G = (V, E) over entities + relations, clustered into communities',
+        { entities: ENTITIES.length, relations: nRel, communities: COMMUNITIES.length },
+        `${ENTITIES.length} entities · ${nRel} relations · ${COMMUNITIES.length} communities`,
+      );
+    }
+    case 'graphsearch': {
+      if (pipe.graphMode === 'global') {
+        const ranked = pipe.globalResult?.ranked ?? [];
+        const top = ranked[0];
+        return log(
+          'global (community) search', 'score = cos(embed(q), embed(summary_c))',
+          { communities: ranked.length, topScore: +(top?.score ?? 0).toFixed(3) },
+          top ? `top community: ${top.label}` : 'no communities scored',
+        );
+      }
+      const seeds = pipe.localResult?.seeds ?? [];
+      const chunkIds = pipe.localResult?.chunkIds ?? [];
+      return log(
+        'local (ego-graph) search', 'ego(seeds) = seeds ∪ neighbors(seeds)',
+        { seeds: seeds.length, chunksInScope: chunkIds.length },
+        seeds.length ? `seeds: ${seeds.map((s) => s.label).join(', ')} → ${chunkIds.length} chunk(s) in scope` : 'no entity matched the query',
+      );
+    }
+    // Milestone C adds: route, tree
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -1059,6 +1253,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [stageIdx, setStageIdx] = useState(0);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const [indexMode, setIndexMode] = useState<IndexMode>('flat');
+  const [graphMode, setGraphMode] = useState<'local' | 'global'>('local');
 
   const variant = VARIANTS[variantId];
   const query = QUERIES[queryIdx];
@@ -1076,7 +1271,8 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     if (!params.rerank || base.some((s) => s.kind === 'rerank')) return base;
     const idx = Math.max(
       base.findIndex((s) => s.kind === 'retrieve'),
-      base.findIndex((s) => s.kind === 'fuse')
+      base.findIndex((s) => s.kind === 'fuse'),
+      base.findIndex((s) => s.kind === 'graphsearch'),
     );
     if (idx === -1) return base;
     const rerankStage: Stage = {
@@ -1116,6 +1312,12 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // chunks into what Augment/Generate/`candidates` consume (see below). No
   // variant's rail owns both 'critique' and 'grade', so these stay exclusive.
   const hasGrade = stages.some((s) => s.kind === 'grade');
+  // True when the rail owns a 'graphsearch' stage (GraphRAG) — the pipe below
+  // then OVERWRITES `ranked` outright (like Fusion does), built from either the
+  // local ego-graph's chunks or the global community summaries per `graphMode`,
+  // instead of running `retrieveRanked` at all. No variant's rail owns 'graphsearch'
+  // together with 'fuse'/'rewrite'/'hyde', so these stay mutually exclusive.
+  const hasGraph = stages.some((s) => s.kind === 'graphbuild' || s.kind === 'graphsearch');
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -1129,6 +1331,8 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     let queries: string[] | undefined;
     let perQueryRankings: number[][] | undefined;
     let fusedMap: Map<number, number> | undefined;
+    let localResult: ReturnType<typeof localSearch> | undefined;
+    let globalResult: ReturnType<typeof globalSearch> | undefined;
     if (hasFusion) {
       // RAG-Fusion deliberately ignores the Dense/Sparse/Hybrid retrieval-mode
       // toggle: that toggle picks one scorer for one query, while Fusion's whole
@@ -1140,6 +1344,35 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       const fusedOrder = [...fusedMap.entries()].sort((a, b) => b[1] - a[1]).map(([i]) => i);
       ranked = fusedOrder.map((idx, rank) => ({ chunk: chunks[idx], score: fusedMap!.get(idx) ?? 0, rank }));
       retrievalQuery = query.label;
+    } else if (hasGraph) {
+      // GraphRAG also overwrites `ranked` outright (like Fusion) rather than
+      // substituting one string into `retrieveRanked` — local and global search
+      // are structurally different retrieval mechanisms, not alternate scorers.
+      retrievalQuery = query.label;
+      if (graphMode === 'local') {
+        // Ego-graph: seed on entities the query names, pull in their direct
+        // neighbours, then scope retrieval to just the chunks living in THOSE
+        // entities' documents (not the whole corpus) — e.g. for the Saturn/moon
+        // query this excludes Venus's doc entirely, which is exactly why local
+        // search resolves the multi-hop a plain vector search conflates.
+        localResult = localSearch(query.label, chunks);
+        const idSet = new Set(localResult.chunkIds);
+        const qv = embedText(query.label);
+        ranked = chunks
+          .filter((c) => idSet.has(c.id))
+          .map((c) => ({ chunk: c, score: cosine(qv, c.vec), rank: 0 }))
+          .sort((a, b) => b.score - a.score)
+          .map((r, i) => ({ ...r, rank: i }));
+      } else {
+        // Global (map-reduce): no per-chunk retrieval — score each community
+        // summary against the query and represent it as a pseudo-chunk so it can
+        // flow through the exact same Augment/Generate every other variant uses.
+        globalResult = globalSearch(query.label);
+        ranked = globalResult.ranked.map((c, i) => ({
+          chunk: { id: `c${c.id}`, docId: -1, title: c.label, tags: ['community'], text: c.summary, vec: embedText(c.summary) },
+          score: c.score, rank: i,
+        }));
+      }
     } else {
       retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
       ranked = retrieveRanked(retrievalQuery, chunks, params);
@@ -1176,8 +1409,11 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     // Self-RAG's reflect: is the generated answer actually backed by the chunks
     // Critique kept, rather than trusted just because generation produced text?
     const supported = hasCritique ? isSupported(gen.answer, candidates.map((r) => r.chunk)) : undefined;
-    return { chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade]);
+    return {
+      chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
+      graphMode: hasGraph ? graphMode : undefined, localResult, globalResult,
+    };
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, graphMode]);
 
   const stage = stages[stageIdx];
 
@@ -1191,22 +1427,24 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     setLastLog(buildLog(stages[next], pipe, query.label, params, variant.name, rerankActive));
   };
   const sim = useSimLoop(step, { initialSpeed: 900 });
-  const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); };
+  const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); setGraphMode('local'); };
   // Toggling Rerank can change stages.length (the splice above) — reset back to
   // stage 0 so a mid-run toggle can't leave stageIdx pointing at a different
   // stage than the one the learner was looking at.
   const onRerankChange = (v: boolean) => { setParams({ ...params, rerank: v }); reset(); };
 
-  // RAIL + ACTIVE-STAGE DETAIL — embed/index/fuse need more room for the
-  // heatmap+scatter / ANN diagram / N-column RRF chart than the chunk/retrieve/
-  // augment/generate text-and-card panels, which stay at the original 620px.
-  const wideStage = stage.kind === 'embed' || stage.kind === 'index' || stage.kind === 'fuse';
+  // RAIL + ACTIVE-STAGE DETAIL — embed/index/fuse/graphbuild/graphsearch need
+  // more room for the heatmap+scatter / ANN diagram / N-column RRF chart / graph
+  // canvas than the chunk/retrieve/augment/generate text-and-card panels, which
+  // stay at the original 620px.
+  const wideStage = stage.kind === 'embed' || stage.kind === 'index' || stage.kind === 'fuse'
+    || stage.kind === 'graphbuild' || stage.kind === 'graphsearch';
   // LabStage's centre stage is `overflow:hidden` and vertically centers this
   // grid with no scrollbar of its own, so a tall stage-detail panel (embed's
-  // heatmap+scatter, index's ANN diagram, and future GraphRAG/RAPTOR/ColBERT
-  // visuals) can clip on short viewports (e.g. 1366×768). Cap+scroll just the
-  // detail region (not the Rail, which must stay visible above it) so every
-  // stage — current and future — stays reachable regardless of height.
+  // heatmap+scatter, index's ANN diagram, and future RAPTOR/ColBERT visuals) can
+  // clip on short viewports (e.g. 1366×768). Cap+scroll just the detail region
+  // (not the Rail, which must stay visible above it) so every stage — current
+  // and future — stays reachable regardless of height.
   const grid = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', width: wideStage ? 740 : 620 }}>
       <Rail stages={stages} active={stageIdx} accent={ACCENT} />
@@ -1216,6 +1454,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           indexMode={indexMode} onIndexMode={setIndexMode}
           onRetrieval={(m) => setParams({ ...params, retrieval: m })}
           rerankActive={rerankActive}
+          graphMode={graphMode} onGraphMode={setGraphMode}
         />
       </div>
     </div>
@@ -1253,7 +1492,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       currentParams={{
         topic: 'Retrieval-Augmented Generation', variant: variant.name, stage: stage.kind, query: query.label,
         topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded, supported: pipe.supported,
-        grade: pipe.grade,
+        grade: pipe.grade, graphMode: pipe.graphMode,
       }}
       apiPanel={apiPanel}
     />
