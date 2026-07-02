@@ -20,7 +20,7 @@ import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate,
 } from './rag/index';
-import type { RagParams, Stage, Chunk, Ranked, GenResult } from './rag/index';
+import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
 const ACCENT = '#a78bfa';
 
@@ -73,22 +73,65 @@ const Rail: React.FC<{ stages: Stage[]; active: number; accent: string }> = ({ s
   </div>
 );
 
+/* ---------- stage-specific visualizations (chunk) ---------- */
+
+const Tag: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span style={{
+    fontFamily: 'var(--mono)', fontSize: 9, padding: '1.5px 7px', borderRadius: 999,
+    border: '1px solid var(--border)', color: 'var(--t2)', letterSpacing: '.02em', whiteSpace: 'nowrap',
+  }}>{children}</span>
+);
+
+// Per-document cards of chunk cards. The four strategies visibly differ:
+// sentence → most/smallest chunks; fixed → equal char windows (may cut
+// mid-word) with a visible overlap; recursive → sentence-packed to ≤ size;
+// semantic → adjacent similar sentences merged.
+const ChunkView: React.FC<{ chunks: Chunk[]; strategy: ChunkStrategy; accent: string }> = ({ chunks, strategy, accent }) => {
+  const byDoc: { docId: number; title: string; chunks: Chunk[] }[] = [];
+  const seenDoc = new Map<number, number>();
+  chunks.forEach((c) => {
+    const i = seenDoc.get(c.docId);
+    if (i == null) { seenDoc.set(c.docId, byDoc.length); byDoc.push({ docId: c.docId, title: c.title, chunks: [c] }); }
+    else byDoc[i].chunks.push(c);
+  });
+  const avgChars = chunks.length ? Math.round(chunks.reduce((s, c) => s + c.text.length, 0) / chunks.length) : 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, width: '100%' }}>
+      <MonoLabel>{strategy} · {chunks.length} chunks · avg {avgChars} chars</MonoLabel>
+      <div className="custom-scrollbar" style={{
+        maxHeight: 400, overflowY: 'auto', paddingRight: 6,
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(258px, 1fr))', gap: 8,
+      }}>
+        {byDoc.map((doc) => (
+          <div key={doc.docId} style={{
+            background: 'rgba(8,11,20,.4)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0,
+          }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t1)', fontWeight: 600 }}>{doc.title}</div>
+            {doc.chunks.map((c) => (
+              <div key={c.id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: accent }}>{c.id}</span>
+                  {c.tags.map((t) => <Tag key={t}>{t}</Tag>)}
+                </div>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5 }}>{truncate(c.text, 90)}</div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 /* ---------- active-stage detail: one titled text panel per stage kind ---------- */
 const StageDetail: React.FC<{ stage: Stage; pipe: Pipe; params: RagParams; query: string }> = ({ stage, pipe, params, query }) => {
   switch (stage.kind) {
     case 'chunk': {
-      const nDocs = new Set(pipe.chunks.map((c) => c.docId)).size;
       return (
         <Panel title={`Chunk · ${params.strategy} · size ${params.size} / overlap ${params.overlap}`} note={stage.note}>
-          <div style={row}>{pipe.chunks.length} chunks from {nDocs} documents.</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto' }}>
-            {pipe.chunks.slice(0, 8).map((c) => (
-              <div key={c.id} style={row}>
-                <b style={{ color: ACCENT }}>{c.id}</b> <span style={{ color: 'var(--t2)' }}>({c.title})</span> — {truncate(c.text)}
-              </div>
-            ))}
-            {pipe.chunks.length > 8 && <div style={{ ...row, color: 'var(--t2)' }}>… +{pipe.chunks.length - 8} more</div>}
-          </div>
+          <ChunkView chunks={pipe.chunks} strategy={params.strategy} accent={ACCENT} />
         </Panel>
       );
     }
@@ -212,15 +255,27 @@ const RagParamsPanel: React.FC<{
       name="k · retrieved chunks" value={String(params.k)} min={1} max={8} step={1} current={params.k}
       onChange={(v) => setParams({ ...params, k: v })} hint="how many chunks retrieval returns" accent={accent}
     />
+    <div>
+      <MonoLabel style={{ marginBottom: 9 }}>Chunk strategy</MonoLabel>
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+        <AlgoPill accent={accent} active={params.strategy === 'fixed'} onClick={() => setParams({ ...params, strategy: 'fixed' })}>Fixed</AlgoPill>
+        <AlgoPill accent={accent} active={params.strategy === 'recursive'} onClick={() => setParams({ ...params, strategy: 'recursive' })}>Recursive</AlgoPill>
+        <AlgoPill accent={accent} active={params.strategy === 'semantic'} onClick={() => setParams({ ...params, strategy: 'semantic' })}>Semantic</AlgoPill>
+        <AlgoPill accent={accent} active={params.strategy === 'sentence'} onClick={() => setParams({ ...params, strategy: 'sentence' })}>Sentence</AlgoPill>
+      </div>
+    </div>
     <ParamSlider
       name="chunk size" value={`${params.size} chars`} min={40} max={400} step={20} current={params.size}
       onChange={(v) => setParams({ ...params, size: v, overlap: Math.min(params.overlap, Math.max(0, v - 20)) })}
-      hint="target passage length" accent={accent}
+      hint={params.strategy === 'sentence' ? 'ignored — sentence strategy splits on . ! ?' : 'target passage length'} accent={accent}
     />
-    <ParamSlider
-      name="chunk overlap" value={`${params.overlap} chars`} min={0} max={Math.max(0, params.size - 20)} step={4} current={params.overlap}
-      onChange={(v) => setParams({ ...params, overlap: v })} hint="shared chars between adjacent chunks" accent={accent}
-    />
+    <div style={{ opacity: params.strategy === 'fixed' ? 1 : 0.42, pointerEvents: params.strategy === 'fixed' ? 'auto' : 'none', transition: 'opacity .15s ease' }}>
+      <ParamSlider
+        name="chunk overlap" value={`${params.overlap} chars`} min={0} max={Math.max(0, params.size - 20)} step={4} current={params.overlap}
+        onChange={(v) => setParams({ ...params, overlap: v })}
+        hint={params.strategy === 'fixed' ? 'shared chars between adjacent chunks' : 'only used by the fixed strategy'} accent={accent}
+      />
+    </div>
     <ParamSlider
       name="generation budget" value={String(params.budget)} min={1} max={6} step={1} current={params.budget}
       onChange={(v) => setParams({ ...params, budget: v })} hint="max chunks stitched into the answer" accent={accent}
