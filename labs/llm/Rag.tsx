@@ -647,7 +647,7 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
   switch (stage.kind) {
     case 'rewrite': {
       const { added } = rewriteQuery(query);
-      return log("query rewrite", "q' = q ⊕ inferred(keywords)", { added: added.length }, added.join(', '));
+      return log("query rewrite", "q' = q ⊕ inferred(keywords)", { added: added.length }, added.length ? added.join(', ') : 'no new axis keywords');
     }
     case 'chunk':
       return log('splitting', `chunk(strategy=${params.strategy}, size=${params.size})`, { chunks: pipe.chunks.length }, `${pipe.chunks.length} chunks`);
