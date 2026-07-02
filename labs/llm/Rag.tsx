@@ -21,7 +21,7 @@ import { ragPython } from './python';
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
-  multiQuery, denseScores, topK, rrf,
+  multiQuery, denseScores, topK, rrf, isRelevant, isSupported,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy } from './rag/index';
 
@@ -50,6 +50,12 @@ const ACCENT = '#a78bfa';
 interface Pipe {
   chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string;
   queries?: string[]; perQueryRankings?: number[][]; fusedMap?: Map<number, number>;
+  // Self-RAG: `critique` tags the top-k RETRIEVED chunks (not the whole corpus —
+  // critique grades what retrieval actually surfaced) Relevant/Irrelevant;
+  // `candidates` above is already narrowed to just the Relevant survivors (see the
+  // pipe useMemo). `supported` is Reflect's isSupported(answer, kept chunks).
+  critique?: { chunk: Chunk; relevant: boolean }[];
+  supported?: boolean;
 }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
@@ -603,6 +609,60 @@ const StageDetail: React.FC<{
         </Panel>
       );
     }
+    case 'critique': {
+      const tags = pipe.critique ?? [];
+      const nRelevant = tags.filter((t) => t.relevant).length;
+      return (
+        <Panel title={`Critique · relevance grading of the top-${tags.length} retrieved chunks (τ ≥ 0.18)`} note={stage.note}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {tags.map(({ chunk, relevant }) => (
+              <div key={chunk.id} style={{
+                display: 'flex', alignItems: 'center', gap: 9, padding: '6px 10px', borderRadius: 7,
+                border: `1px solid ${relevant ? '#34d399' : 'var(--border)'}`,
+                background: relevant ? 'rgba(52,211,153,.06)' : 'rgba(148,158,196,.05)',
+                opacity: relevant ? 1 : 0.55,
+              }}>
+                <span style={{
+                  flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700, letterSpacing: '.03em',
+                  padding: '2px 8px', borderRadius: 999,
+                  color: relevant ? '#34d399' : '#8f97b8',
+                  border: `1px solid ${relevant ? '#34d399' : 'var(--border)'}`,
+                }}>{relevant ? 'Relevant' : 'Irrelevant'}</span>
+                <span style={{
+                  ...row, color: relevant ? 'var(--t0)' : 'var(--t2)',
+                  textDecoration: relevant ? 'none' : 'line-through',
+                }}>[{chunk.id}] {truncate(chunk.text, 78)}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            {nRelevant} of {tags.length} retrieved chunks graded Relevant (cross-encoder score ≥ 0.18) and kept — the rest are struck through and dropped before augmentation{nRelevant === 0 ? '; with nothing left to ground it, Generate will refuse rather than answer from irrelevant context.' : '.'}
+          </div>
+        </Panel>
+      );
+    }
+    case 'reflect': {
+      const supported = pipe.supported ?? false;
+      return (
+        <Panel title="Reflect · is the answer actually supported by the kept context?" note={stage.note}>
+          <span style={{
+            alignSelf: 'flex-start', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
+            padding: '3px 10px', borderRadius: 5, letterSpacing: '.04em',
+            color: supported ? '#34d399' : '#f87171',
+            border: `1px solid ${supported ? '#34d399' : '#f87171'}`,
+            background: supported ? 'rgba(52,211,153,.08)' : 'rgba(248,113,113,.08)',
+          }}>
+            {supported ? 'SUPPORTED' : 'UNSUPPORTED'}
+          </span>
+          <div style={{ ...row, color: 'var(--t0)', fontSize: 12.5, lineHeight: 1.7 }}>{pipe.gen.answer}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            {supported
+              ? 'At least half of the answer’s (non-trivial) vocabulary appears somewhere in the chunks Critique kept — the answer is not just fluent, it is verifiably grounded in retrieved text.'
+              : 'Fewer than half of the answer’s words appear in the kept context — Self-RAG flags this as Unsupported rather than silently trusting a fluent-sounding answer.'}
+          </div>
+        </Panel>
+      );
+    }
     case 'fuse': {
       const queries = pipe.queries ?? [];
       const perQueryRankings = pipe.perQueryRankings ?? [];
@@ -910,7 +970,16 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         'generation', 'answer ⊕ citations', { grounded: pipe.gen.grounded ? 1 : 0, cites: pipe.gen.citations.length },
         pipe.gen.grounded ? `grounded · ${pipe.gen.citations.join(', ')}` : 'refused (ungrounded)',
       );
-    // Milestone C adds: grade, critique, route, reflect, graphbuild, graphsearch, tree
+    case 'critique': {
+      const tags = pipe.critique ?? [];
+      const nRelevant = tags.filter((t) => t.relevant).length;
+      return log('relevance critique', 'keep chunk c iff rerank(q,c) ≥ τ (0.18)', { kept: nRelevant, of: tags.length }, `${nRelevant}/${tags.length} chunks kept`);
+    }
+    case 'reflect': {
+      const supported = pipe.supported ?? false;
+      return log('support reflection', 'covered = |tokens(answer) ∩ tokens(kept)| / |tokens(answer)|', { supported: supported ? 1 : 0 }, supported ? 'Supported' : 'Unsupported');
+    }
+    // Milestone C adds: grade, route, graphbuild, graphsearch, tree
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -971,6 +1040,10 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // rail owns `fuse` together with `rewrite`/`hyde`, so these three are mutually
   // exclusive in practice.
   const hasFusion = stages.some((s) => s.kind === 'fuse' || s.kind === 'multiquery');
+  // True when the rail owns a 'critique' stage (Self-RAG) — the pipe below then
+  // grades the top-k RETRIEVED chunks Relevant/Irrelevant and narrows what Augment/
+  // Generate/`candidates` consume to just the Relevant survivors (see below).
+  const hasCritique = stages.some((s) => s.kind === 'critique');
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -999,7 +1072,16 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
       ranked = retrieveRanked(retrievalQuery, chunks, params);
     }
-    const firstStage = ranked.slice(0, params.k);
+    const retrievedTopK = ranked.slice(0, params.k);
+    // Self-RAG's critique: grade each of the top-k RETRIEVED chunks (not the whole
+    // corpus — critique grades what retrieval actually surfaced), then drop the
+    // irrelevant ones before they ever reach augmentation. On an OOD query every
+    // chunk fails the grader, `firstStage` goes empty, and `generate` below
+    // correctly refuses instead of grounding on irrelevant context.
+    const critique = hasCritique
+      ? retrievedTopK.map((r) => ({ chunk: r.chunk, relevant: isRelevant(query.label, r.chunk) }))
+      : undefined;
+    const firstStage = critique ? retrievedTopK.filter((_, i) => critique[i].relevant) : retrievedTopK;
     const candidates: Ranked[] = rerankActive
       ? firstStage
           .map((r) => ({ chunk: r.chunk, score: rerankScore(query.label, r.chunk), rank: 0 }))
@@ -1007,8 +1089,11 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           .map((r, i) => ({ ...r, rank: i }))
       : firstStage;
     const gen = generate(query.label, candidates, params.budget);
-    return { chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion]);
+    // Self-RAG's reflect: is the generated answer actually backed by the chunks
+    // Critique kept, rather than trusted just because generation produced text?
+    const supported = hasCritique ? isSupported(gen.answer, candidates.map((r) => r.chunk)) : undefined;
+    return { chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported };
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique]);
 
   const stage = stages[stageIdx];
 
@@ -1083,7 +1168,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       tutor={tutor}
       currentParams={{
         topic: 'Retrieval-Augmented Generation', variant: variant.name, stage: stage.kind, query: query.label,
-        topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded,
+        topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded, supported: pipe.supported,
       }}
       apiPanel={apiPanel}
     />

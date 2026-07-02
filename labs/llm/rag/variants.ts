@@ -1,7 +1,7 @@
 // labs/llm/rag/variants.ts — a Variant is an ordered Stage list (the rail) + the
 // compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind.
-import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS } from './retrieval';
-import { QUERIES, contentTokens, embedText, cosine } from './corpus';
+import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS, rerankScore } from './retrieval';
+import { QUERIES, contentTokens, embedText, cosine, tokenize } from './corpus';
 
 export type StageKind =
   | 'chunk' | 'embed' | 'index' | 'retrieve' | 'rerank' | 'augment' | 'generate'
@@ -121,6 +121,37 @@ const FUSION: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion'];
+// --- Self-RAG: reflection tokens (relevance + support grading) ---
+export type ReflToken = 'Retrieve' | 'Relevant' | 'Irrelevant' | 'Supported' | 'Unsupported' | 'Useful';
+// Relevance grader — decide if a retrieved chunk is worth keeping for the query.
+// Reuses the "cross-encoder" rerankScore (dense + lexical overlap) and keeps the
+// chunk only if that score clears a threshold.
+export function isRelevant(query: string, chunk: Chunk, tau = 0.18): boolean {
+  return rerankScore(query, chunk) >= tau;
+}
+// Is the answer supported by the kept chunks? (token overlap of answer vs context)
+export function isSupported(answer: string, kept: Chunk[]): boolean {
+  const ctx = new Set(kept.flatMap((c) => tokenize(c.text)));
+  const a = tokenize(answer).filter((w) => w.length > 3);
+  const covered = a.filter((w) => ctx.has(w)).length / (a.length || 1);
+  return covered >= 0.5;
+}
+
+const SELF_RAG: Variant = {
+  id: 'self-rag', name: 'Self-RAG', group: 'Self-reflective', year: '2023',
+  blurb: 'Wraps retrieval in reflection tokens: a Critique step grades each retrieved chunk Relevant/Irrelevant and drops the irrelevant ones before augmentation, then a post-generation Reflect step checks whether the answer is actually Supported by the kept context instead of trusting it by default.',
+  stages: () => [
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
+    { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks.' },
+    { kind: 'critique', label: 'Critique', note: 'Grade each retrieved chunk Relevant/Irrelevant; drop the irrelevant ones.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the surviving relevant chunks into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+    { kind: 'reflect', label: 'Reflect', note: 'Check whether the answer is actually supported by the kept context.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag'];
 export { QUERIES };
