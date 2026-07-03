@@ -47,7 +47,10 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
   (vanishing-gradient vs skip connections), BatchNorm, Dropout, TransferLearning, Optimizers
   (SGD/Momentum/RMSProp/Adam + LR schedules), ArchitectureBuilder (compose CNN/MLP; analytic params/shapes/receptive-field + risk diagnostics: overfit/underfit/linear-collapse/vanishing-gradient/kernel-size); `model-checking`: MutualExclusion, RiverCrossing;
   `image`: Convolution, FeatureMaps; `audio`: Fourier, Spectrogram; `llm`: Tokenizer, Sampling,
-  Attention; `diffusion`: ForwardReverse, NoiseSchedule; `math`: GradientDescent, Taylor,
+  Attention, Rag (Retrieval-Augmented Generation — a stepped chunk→embed→index→retrieve→rerank→augment→generate
+  pipeline with 11 variants on a "variant = ordered Stage list + config" model: Naive, Advanced, HyDE,
+  RAG-Fusion, Self-RAG, CRAG, GraphRAG, RAPTOR, Contextual Retrieval, ColBERT, Agentic/Adaptive; one baked
+  Solar-System corpus; scale-free lexical+cosine grounding); `diffusion`: ForwardReverse, NoiseSchedule; `math`: GradientDescent, Taylor,
   LinearTransform, Derivatives (tangent slope + secant→limit), ChainRule (composite graph =
   product of local derivatives), MatrixMultiplication (dot product/projection + matrix·vector as
   composed transform), ConvexOptimization (convex vs non-convex; multi-start GD into different
@@ -65,7 +68,13 @@ the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
   sentiment embeddings + decision field)). Each area has `content.ts`, `python.ts`, `registry.ts`
   (+ area-specific helpers; the `sequence`, `stochastic`, and `nlp` areas add a `shared.ts` of
   hand-rolled cell maths / linear algebra — for `nlp`, baked embedding tables + cosine / TF-IDF /
-  n-gram / Viterbi / a tiny logistic fit).
+  n-gram / Viterbi / a tiny logistic fit). The `llm` **RAG** lab instead uses a dedicated
+  `labs/llm/rag/` module folder (`corpus.ts`, `retrieval.ts`, `graph.ts`, `variants.ts`, `index.ts`):
+  a `VARIANTS` registry keyed on "variant = ordered Stage list + config", over a baked Solar-System
+  corpus + a keyword→topic-axis lexicon (real chunking / BM25 / dense / RRF / MMR / ColBERT MaxSim /
+  knowledge-graph + community search / RAPTOR tree). `Rag.tsx` reuses `GraphCanvas` (knowledge graph)
+  and `Heatmap` (chunk embeddings / ColBERT token MaxSim) plus bespoke SVGs (chunk cards, the pipeline
+  rail, the RAPTOR tree); it exports runnable per-variant NumPy via `python.ts`'s `ragPython`.
   Viz primitives in `components/labkit/viz/`: `ScatterPlot` (points/field/circles/ellipses/lines),
   `FunctionPlot`, `GridBoard`, `GraphCanvas`, `Dendrogram`, `LayerDiagram`, `Heatmap`,
   `DistributionBars` (a few labs also render a small purpose-built SVG inline, e.g. Bayes'

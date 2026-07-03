@@ -53,7 +53,11 @@ client-side** — no TF.js/ONNX and no servers.
   queen), TF-IDF document similarity, n-gram language models (add-k smoothing, perplexity,
   token-by-token generation), named-entity recognition (Viterbi sequence labeling), semantic
   search / RAG retrieval, and embedding-based text classification.
-- **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention.
+- **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention, and
+  **Retrieval-Augmented Generation**: a stepped chunk → embed → index → retrieve → rerank → augment →
+  generate pipeline with **11 variants** (Naive, Advanced, HyDE, RAG-Fusion, Self-RAG, Corrective RAG,
+  GraphRAG, RAPTOR, Contextual Retrieval, ColBERT, Agentic/Adaptive) computed over a shared
+  Solar-System corpus, each variant re-sequencing the same pipeline.
 - **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
 - **Math Foundations** — gradient descent, Taylor series, linear transformations, derivatives
   (tangent slope and the secant→limit), the chain rule (composite functions as a product of local
