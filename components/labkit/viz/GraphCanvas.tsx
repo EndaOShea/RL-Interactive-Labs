@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '../../../utils/theme';
 
 // Node/edge graph (SVG). Powers graph search (BFS/Dijkstra/A*) and is reusable
 // for future trees/automata/Bayes-net labs. Coordinates are in [0,1].
@@ -21,14 +22,19 @@ export interface GraphCanvasProps {
 }
 
 const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, width = 560, height = 460, radius = 17 }) => {
+  const isLight = useTheme() === 'light';
   const pad = radius + 14;
   const sx = (x: number) => pad + x * (width - 2 * pad);
   const sy = (y: number) => pad + y * (height - 2 * pad);
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const edgeColor = (s?: string) => (s === 'path' ? '#fbbf24' : s === 'active' ? '#38bdf8' : 'rgba(120,130,170,.28)');
+  const edgeColor = (s?: string) => (s === 'path' ? '#fbbf24' : s === 'active' ? '#38bdf8' : (isLight ? 'rgba(50,60,90,.32)' : 'rgba(120,130,170,.28)'));
+  // 'current' is the max-contrast state (white on dark) — flip to a dark mark
+  // on light so it doesn't vanish into the now-light panel; its label flips
+  // the other way to keep reading against the (now inverted) fill.
+  const stateColor = (s: NodeState) => (isLight && s === 'current' ? 'var(--t0)' : NODE_COLORS[s]);
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       {/* edges */}
       {edges.map((e, i) => {
         const a = byId.get(e.from), b = byId.get(e.to);
@@ -50,14 +56,16 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, width = 560, he
       {/* nodes */}
       {nodes.map((n) => {
         const st = n.state || 'idle';
-        const color = n.color || NODE_COLORS[st];
+        const color = n.color || stateColor(st);
         const cx = sx(n.x), cy = sy(n.y);
         const glow = st === 'start' || st === 'goal' || st === 'current' || st === 'path';
-        const darkText = st === 'current' || st === 'path' || st === 'start' || st === 'goal' || st === 'frontier';
+        const textFill = st === 'current'
+          ? (isLight ? '#fff' : 'rgba(8,11,20,.85)')
+          : (st === 'path' || st === 'start' || st === 'goal' || st === 'frontier' ? 'rgba(8,11,20,.85)' : 'var(--t0)');
         return (
           <g key={n.id}>
             <circle cx={cx} cy={cy} r={radius} fill={color} stroke="rgba(8,11,20,.55)" strokeWidth={1.5} style={glow ? { filter: `drop-shadow(0 0 7px ${color})` } : undefined} />
-            <text x={cx} y={cy + 4} textAnchor="middle" fontSize="12" fontWeight={600} fontFamily="var(--disp)" fill={darkText ? 'rgba(8,11,20,.85)' : 'var(--t0)'}>{n.label ?? n.id}</text>
+            <text x={cx} y={cy + 4} textAnchor="middle" fontSize="12" fontWeight={600} fontFamily="var(--disp)" fill={textFill}>{n.label ?? n.id}</text>
             {n.sub && <text x={cx} y={cy + radius + 13} textAnchor="middle" fontSize="9.5" fontFamily="var(--mono)" fill="var(--t2)">{n.sub}</text>}
           </g>
         );

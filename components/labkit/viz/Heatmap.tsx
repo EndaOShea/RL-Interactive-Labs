@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '../../../utils/theme';
 
 // Matrix heatmap (SVG). Modes: 'gray' (images/feature maps), 'heat' (0..1 dark→
 // accent→white), 'diverging' (− red / + teal). Optional per-cell values + axis
@@ -19,22 +20,33 @@ export interface HeatmapProps {
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 function rgb(r: number, g: number, b: number) { return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`; }
 
-const Heatmap: React.FC<HeatmapProps> = ({ matrix, mode = 'heat', min, max, cell = 26, gap = 2, showValues, rowLabels, colLabels, accent = '#a855f7' }) => {
+const Heatmap: React.FC<HeatmapProps> = ({ matrix, mode = 'heat', min, max, cell = 26, gap = 2, showValues, rowLabels, colLabels, accent = 'var(--acc)' }) => {
   const rows = matrix.length, cols = matrix[0]?.length ?? 0;
   let lo = min ?? Infinity, hi = max ?? -Infinity;
   if (min == null || max == null) matrix.forEach((r) => r.forEach((v) => { lo = Math.min(lo, v); hi = Math.max(hi, v); }));
   if (!isFinite(lo)) lo = 0; if (!isFinite(hi)) hi = 1;
   const absMax = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
 
+  const isLight = useTheme() === 'light';
   const color = (v: number) => {
     if (mode === 'diverging') {
       const t = Math.max(-1, Math.min(1, v / absMax));
-      if (t >= 0) return rgb(lerp(20, 45, 1 - t), lerp(26, 212, t) + (1 - t) * 0, lerp(40, 191, t));
+      if (isLight) {
+        // light neutral midpoint → deepened teal (+) / red (−)
+        if (t >= 0) return rgb(lerp(238, 13, t), lerp(241, 148, t), lerp(247, 136, t));
+        const a = -t; return rgb(lerp(238, 220, a), lerp(241, 38, a), lerp(247, 38, a));
+      }
+      if (t >= 0) return rgb(lerp(20, 45, 1 - t), lerp(26, 212, t), lerp(40, 191, t));
       const a = -t; return rgb(lerp(20, 248, a), lerp(26, 113, a), lerp(40, 113, a));
     }
     const t = hi > lo ? (v - lo) / (hi - lo) : 0;
     if (mode === 'gray') return rgb(lerp(12, 240, t), lerp(15, 244, t), lerp(22, 250, t));
-    // heat: dark → accent → white
+    if (isLight) {
+      // Thermal ramp: pale blue → amber → red-orange
+      if (t < 0.5) { const u = t / 0.5; return rgb(lerp(230, 253, u), lerp(238, 230, u), lerp(251, 138, u)); }
+      const u = (t - 0.5) / 0.5; return rgb(lerp(253, 234, u), lerp(230, 88, u), lerp(138, 12, u));
+    }
+    // dark heat: dark → accent → white
     const ar = 168, ag = 85, ab = 247;
     if (t < 0.5) { const u = t / 0.5; return rgb(lerp(12, ar, u), lerp(15, ag, u), lerp(22, ab, u)); }
     const u = (t - 0.5) / 0.5; return rgb(lerp(ar, 255, u), lerp(ag, 255, u), lerp(ab, 255, u));

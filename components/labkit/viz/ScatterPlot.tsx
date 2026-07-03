@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { ACC, GOOD } from '../../stage/primitives';
+import { useTheme } from '../../../utils/theme';
 
 // Generic 2-D scatter plot (SVG). Powers k-NN, logistic regression, k-means and
 // PCA. Pure/presentational: the lab owns the data + animation, this renders one
@@ -42,6 +43,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
   centroids, markers, lines, circles, ellipses, showAxes = true, xLabel, yLabel, onAddPoint,
 }) => {
   const ref = useRef<SVGSVGElement | null>(null);
+  const isLight = useTheme() === 'light';
   const padL = 44, padR = 14, padT = 14, padB = 36;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
@@ -90,7 +92,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       onClick={handleClick}
-      style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', cursor: onAddPoint ? 'crosshair' : 'default', maxWidth: '100%' }}
+      style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', cursor: onAddPoint ? 'crosshair' : 'default', maxWidth: '100%' }}
     >
       {/* decision field */}
       {field?.map((c, i) => (
@@ -107,8 +109,8 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
         const interior = t > 0 && t < 1;
         return (
           <g key={t}>
-            {interior && <line x1={xpos} y1={padT} x2={xpos} y2={padT + plotH} stroke="rgba(120,130,170,.08)" />}
-            {interior && <line x1={padL} y1={ypos} x2={padL + plotW} y2={ypos} stroke="rgba(120,130,170,.08)" />}
+            {interior && <line x1={xpos} y1={padT} x2={xpos} y2={padT + plotH} stroke={isLight ? 'rgba(50,60,90,.12)' : 'rgba(120,130,170,.08)'} />}
+            {interior && <line x1={padL} y1={ypos} x2={padL + plotW} y2={ypos} stroke={isLight ? 'rgba(50,60,90,.12)' : 'rgba(120,130,170,.08)'} />}
             <line x1={xpos} y1={padT + plotH} x2={xpos} y2={padT + plotH + 3} stroke="var(--border)" />
             <text x={xpos} y={padT + plotH + 14} textAnchor="middle" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">{fmtTick(xv)}</text>
             <line x1={padL - 3} y1={ypos} x2={padL} y2={ypos} stroke="var(--border)" />
@@ -146,7 +148,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
         <circle
           key={i} cx={sx(p.x)} cy={sy(p.y)} r={p.size ?? 4.5}
           fill={colorOf(p.cls)} opacity={p.faint ? 0.4 : 0.95}
-          stroke="rgba(8,11,20,.7)" strokeWidth="0.8"
+          stroke={isLight ? 'rgba(255,255,255,.85)' : 'rgba(8,11,20,.7)'} strokeWidth="0.8"
         />
       ))}
 
