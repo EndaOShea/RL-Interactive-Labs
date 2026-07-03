@@ -21,9 +21,30 @@
   --good: #34d399;
   --bad: #f87171;
   --warn: #fbbf24;
+  --stage-bg: radial-gradient(130% 100% at 35% 30%, #131b30, #080b14 72%);
   --disp: 'Space Grotesk', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
   --body: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+/* ────────────────────────────────────────────────────────────
+   Light theme — opt-in via data-theme="light" on <html>.
+   Dark (the :root block above) stays the default and is untouched.
+   ──────────────────────────────────────────────────────────── */
+:root[data-theme="light"] {
+  --bg0: #eef1f7;   /* page / insets / nav / ticker */
+  --bg1: #f6f8fc;
+  --bg2: #ffffff;   /* cards / panels */
+  --bg3: #e3e8f2;   /* slider track / tooltip / pill bg */
+  --border: #dde3ef;
+  --t0: #12172a;
+  --t1: #4a5578;
+  --t2: #7c86a3;
+  --acc: #7c3aed;
+  --good: #059669;
+  --bad: #dc2626;
+  --warn: #d97706;
+  --stage-bg: radial-gradient(120% 80% at 50% -10%, #ffffff 0%, #f6f7fb 45%, #eef1f7 100%);
 }
 
 html, body {
@@ -127,3 +148,6 @@ input[type="range"].stage-range::-moz-range-thumb {
 *::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #2a3350; border-radius: 6px; }
+
+:root[data-theme="light"] *::-webkit-scrollbar-thumb,
+:root[data-theme="light"] .custom-scrollbar::-webkit-scrollbar-thumb { background: #c2c9da; }
