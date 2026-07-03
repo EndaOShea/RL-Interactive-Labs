@@ -4,9 +4,9 @@
 import React, { useMemo } from 'react';
 import type { NarrationControl } from '../../hooks/useNarration';
 
-export const ACC = '#a855f7';
-export const GOOD = '#34d399';
-export const BAD = '#f87171';
+export const ACC = 'var(--acc)';
+export const GOOD = 'var(--good)';
+export const BAD = 'var(--bad)';
 
 /* ---------- color helpers ---------- */
 export function hexToRgb(h: string): [number, number, number] {

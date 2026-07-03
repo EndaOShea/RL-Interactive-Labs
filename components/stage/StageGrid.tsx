@@ -77,7 +77,7 @@ const StageGrid: React.FC<{
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'rgba(255,255,255,.32)', position: 'absolute', top: 4, left: 5 }}>{c.label}</span>
               )}
               {/* planning flash */}
-              {c.planned && <div style={{ position: 'absolute', inset: 0, borderRadius: 7, background: `${ACC}55`, zIndex: 1, animation: 'ledPulse .9s ease-out' }} />}
+              {c.planned && <div style={{ position: 'absolute', inset: 0, borderRadius: 7, background: `color-mix(in srgb, ${ACC} 33%, transparent)`, zIndex: 1, animation: 'ledPulse .9s ease-out' }} />}
               {/* goal ring(s) */}
               {c.goal && (
                 <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 7, border: `1.5px solid ${c.goalColor || ACC}`, boxShadow: `0 0 18px -2px ${c.goalColor || ACC}`, zIndex: 2 }}>
