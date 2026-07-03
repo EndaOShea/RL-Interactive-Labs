@@ -10,12 +10,14 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { randomCNF, dpll, layoutTree, CNF_PRESETS, Clause, DpllOptions } from './dpll';
 import { dpllPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#818cf8';
 const KIND_COLOR: Record<string, string> = { root: '#cbd5e1', decide: '#2a3350', unit: '#38bdf8', pure: '#a78bfa', conflict: '#f87171', learn: '#fb923c', sat: '#34d399' };
 const name = (v: number) => String.fromCharCode(65 + v);
 
 const DpllLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [nVars, setNVars] = useState(5);
   const [nClauses, setNClauses] = useState(18);
   const [seed, setSeed] = useState(0);
@@ -110,7 +112,14 @@ const DpllLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const revealed = solved.order.slice(0, cursor);
   const ids = new Set(revealed.map((n) => n.id));
   const lastNode = revealed[revealed.length - 1];
-  const nodes: GNode[] = revealed.map((n, idx) => { const p = layout.get(n.id)!; return { id: n.id, x: p.x, y: p.y, label: n.label, color: idx === revealed.length - 1 ? '#fff' : KIND_COLOR[n.kind] }; });
+  // KIND_COLOR is shared with the (always-dark) Legend/AlgoPill accents below, so its
+  // declaration stays literal; only the graph-node fill gets a light-mode override here —
+  // 'decide' mirrors GraphCanvas's own idle->light mapping, 'root' is a pale marker that
+  // would otherwise vanish on the now-light canvas (same fix as the newest-node '#fff').
+  const nodeFill = (kind: string) => (isLight
+    ? (kind === 'decide' ? '#e2e8f2' : kind === 'root' ? 'var(--t0)' : KIND_COLOR[kind])
+    : KIND_COLOR[kind]);
+  const nodes: GNode[] = revealed.map((n, idx) => { const p = layout.get(n.id)!; return { id: n.id, x: p.x, y: p.y, label: n.label, color: idx === revealed.length - 1 ? (isLight ? 'var(--t0)' : '#fff') : nodeFill(n.kind) }; });
   const edges: GEdge[] = [];
   revealed.forEach((n) => n.children.forEach((c) => { if (ids.has(c.id)) edges.push({ from: n.id, to: c.id }); }));
 
@@ -126,7 +135,7 @@ const DpllLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 600 }}>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', letterSpacing: '.08em' }}>TRAIL</span>
         {trail.length === 0 ? <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>∅</span> : trail.map((t, i) => (
-          <span key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: lastNode?.kind === 'conflict' ? BAD : 'var(--t0)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 7px', background: 'rgba(8,11,20,.5)' }}>{t}</span>
+          <span key={i} style={{ fontFamily: 'var(--mono)', fontSize: 11, color: lastNode?.kind === 'conflict' ? BAD : 'var(--t0)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 7px', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.5)' }}>{t}</span>
         ))}
       </div>
     </div>
