@@ -2092,9 +2092,22 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // (not the Rail, which must stay visible above it) so every stage — current
   // and future — stays reachable regardless of height.
   const grid = (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center', width: wideStage ? 740 : 620 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', width: wideStage ? 740 : 620 }}>
       <Rail stages={stages} active={stageIdx} accent={ACCENT} />
-      <div className="custom-scrollbar" style={{ width: '100%', maxHeight: 'calc(100dvh - 300px)', overflowY: 'auto' }}>
+      {/* Run/step controls live INSIDE the lab layout — a fixed toolbar under the rail,
+          part of the normal flow — NOT in LabStage's floating bottom-centre slot, so they
+          never hover over the stage detail while running. */}
+      <SBGlass style={{ padding: 9, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <button style={sbBtn()} className="sb-btn" onClick={() => { sim.pause(); stepBack(); }} title="Previous stage">◀ Prev</button>
+        <button style={sbBtn(true)} className="sb-btn" onClick={sim.toggle}>{sim.isPlaying ? '❚❚ Pause' : '▶ Run'}</button>
+        <button style={sbBtn()} className="sb-btn" onClick={() => { sim.pause(); step(); }} title="Next stage">Next ▶</button>
+        <button style={sbBtn()} className="sb-btn" onClick={reset}>↺ Reset</button>
+        <span style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', whiteSpace: 'nowrap' }} title="auto-run interval">{sim.speed}ms</span>
+        <input type="range" className="stage-range" min={300} max={4000} step={100} value={sim.speed}
+          onChange={(e) => sim.setSpeed(Number(e.target.value))} style={{ width: 96, accentColor: ACCENT }} title="ms per stage while running" />
+      </SBGlass>
+      <div className="custom-scrollbar" style={{ width: '100%', maxHeight: 'calc(100dvh - 360px)', overflowY: 'auto' }}>
         <StageDetail
           stage={stage} pipe={pipe} params={params} query={query.label}
           indexMode={indexMode} onIndexMode={setIndexMode}
@@ -2121,18 +2134,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       grid={grid}
       narration={narration}
       algoDock={<VariantDock variantId={variantId} onSelect={(id) => { setVariantId(id); reset(); }} accent={ACCENT} />}
-      controls={(
-        <SBGlass style={{ padding: 9, display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button style={sbBtn()} className="sb-btn" onClick={() => { sim.pause(); stepBack(); }} title="Previous stage">◀ Prev</button>
-          <button style={sbBtn(true)} className="sb-btn" onClick={sim.toggle}>{sim.isPlaying ? '❚❚ Pause' : '▶ Run'}</button>
-          <button style={sbBtn()} className="sb-btn" onClick={() => { sim.pause(); step(); }} title="Next stage">Next ▶</button>
-          <button style={sbBtn()} className="sb-btn" onClick={reset}>↺ Reset</button>
-          <span style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', whiteSpace: 'nowrap' }} title="auto-run interval">{sim.speed}ms</span>
-          <input type="range" className="stage-range" min={300} max={4000} step={100} value={sim.speed}
-            onChange={(e) => sim.setSpeed(Number(e.target.value))} style={{ width: 96, accentColor: ACCENT }} title="ms per stage while running" />
-        </SBGlass>
-      )}
+      controls={null /* controls now live in the grid toolbar (under the rail), not floating over the stage */}
       lastLog={lastLog}
       contextInsight={`${variant.name}: ${variant.blurb}`}
       params={(
