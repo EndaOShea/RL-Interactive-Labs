@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { perceptronPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#2dd4bf';
 const DOM: [number, number] = [-1.2, 1.2];
@@ -38,6 +39,7 @@ const RULE_NOTE: Record<Rule, string> = {
 };
 
 const PerceptronLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [perClass, setPerClass] = useState(20);
   const [sep, setSep] = useState(0.5);
   const [noise, setNoise] = useState(0);
@@ -144,7 +146,7 @@ const PerceptronLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
 
   const classify = (x: number, y: number) => (w1 * x + w2 * y + b > 0 ? 1 : 0);
   const yAt = (x: number, off = 0) => (Math.abs(w2) < 1e-6 ? 0 : -(w1 * x + b - off) / w2);
-  const lines: ScatterLine[] = [{ x1: DOM[0], y1: yAt(DOM[0]), x2: DOM[1], y2: yAt(DOM[1]), color: '#fff', width: 2.4 }];
+  const lines: ScatterLine[] = [{ x1: DOM[0], y1: yAt(DOM[0]), x2: DOM[1], y2: yAt(DOM[1]), color: isLight ? 'var(--t0)' : '#fff', width: 2.4 }];
   // margin band (dashed) when using the margin rule
   if (rule === 'margin') {
     lines.push({ x1: DOM[0], y1: yAt(DOM[0], margin), x2: DOM[1], y2: yAt(DOM[1], margin), color: '#fbbf24', width: 1.2, dash: true });
@@ -158,7 +160,7 @@ const PerceptronLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
   }
   const points: ScatterPoint[] = data.map((p) => ({ x: p.x, y: p.y, cls: p.yy > 0 ? 1 : 0 }));
   const cur = data[idx];
-  const markers: ScatterMarker[] = cur ? [{ x: cur.x, y: cur.y, color: '#fff', r: 8, ring: true }] : [];
+  const markers: ScatterMarker[] = cur ? [{ x: cur.x, y: cur.y, color: isLight ? 'var(--t0)' : '#fff', r: 8, ring: true }] : [];
 
   return (
     <LabStage

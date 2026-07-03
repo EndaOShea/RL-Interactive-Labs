@@ -11,6 +11,7 @@ import {
   cloneW, cloneB, INPUT_PRESETS, ForwardResult, BackwardResult,
 } from './backpropMath';
 import { backpropPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#2dd4bf';
 const GOLD = '#fbbf24';
@@ -40,6 +41,7 @@ const seqIndex = (seq: { layer: number; unit: number }[], l: number, u: number) 
 const fmt = (v: number, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : '0');
 
 const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [activation, setActivation] = useState<ActName>('sigmoid');
   const [lr, setLr] = useState(0.5);
   const [target, setTarget] = useState(1);
@@ -240,7 +242,7 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
               const isActive = !!active && (active.dir === 'fwd'
                 ? (l === active.layer - 1 && j === active.unit)
                 : (l === active.layer && i === active.unit));
-              const stroke = isActive || isInspected ? '#fff' : baseStroke;
+              const stroke = isActive || isInspected ? (isLight ? 'var(--t0)' : '#fff') : baseStroke;
               const width = isActive ? 3 : isInspected ? 2.6 : sw;
               const opacity = isActive ? 1 : active ? (flowing ? 0.38 : 0.3) : (flowing ? 0.85 : 0.7);
               return (
@@ -256,8 +258,8 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
                   {isActive && (
                     <text
                       x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 3} textAnchor="middle"
-                      fontSize={10} fontFamily="var(--mono)" fill="#fff"
-                      stroke="rgba(8,11,20,0.95)" strokeWidth={2.6} paintOrder="stroke"
+                      fontSize={10} fontFamily="var(--mono)" fill={isLight ? 'var(--t0)' : '#fff'}
+                      stroke={isLight ? 'rgba(255,255,255,0.95)' : 'rgba(8,11,20,0.95)'} strokeWidth={2.6} paintOrder="stroke"
                     >
                       w={fmt(w, 2)}
                     </text>
