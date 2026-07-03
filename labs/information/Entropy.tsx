@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { entropyPython, LogBase } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fcd34d';
 const SURPRISE = '#f87171';
@@ -37,6 +38,7 @@ const PRESETS: Preset[] = [
 const FACE = ['①', '②', '③', '④', '⑤', '⑥'];
 
 const EntropyLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [weights, setWeights] = useState<number[]>([4, 1, 1, 1, 1, 1]);
   const [base, setBase] = useState<LogBase>('bits');
@@ -182,12 +184,12 @@ const EntropyLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       grid={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18, alignItems: 'stretch', width: 420 }}>
           {/* entropy meter */}
-          <div style={{ background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 14, padding: '16px 18px' }}>
+          <div style={{ background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 14, padding: '16px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '.1em', color: 'var(--t2)' }}>ENTROPY  H = −Σ p log p</span>
               <span style={{ fontFamily: 'var(--mono)', fontSize: 22, color: ACCENT }}>{H.toFixed(3)}<span style={{ fontSize: 12, color: 'var(--t2)' }}> {unit(base)}</span></span>
             </div>
-            <div style={{ position: 'relative', height: 12, borderRadius: 7, background: '#1c2440', overflow: 'hidden' }}>
+            <div style={{ position: 'relative', height: 12, borderRadius: 7, background: isLight ? 'var(--bg3)' : '#1c2440', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', inset: 0, width: `${meterPct * 100}%`, background: `linear-gradient(90deg, ${SURPRISE}, ${ACCENT})`, borderRadius: 7, transition: 'width .12s' }} />
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)', marginTop: 6 }}>

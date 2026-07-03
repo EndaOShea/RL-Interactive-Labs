@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { klPython, LogBase } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fcd34d';
 const P_COLOR = '#34d399';   // true distribution
@@ -47,6 +48,7 @@ const PRESETS: Preset[] = [
 ];
 
 const KlDivergenceLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [base, setBase] = useState<LogBase>('bits');
   const [pW, setPW] = useState<number[]>([3, 3, 2, 1, 1]);
@@ -179,7 +181,7 @@ const KlDivergenceLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
       grid={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: 430 }}>
           {/* identity readout */}
-          <div style={{ background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 18px' }}>
+          <div style={{ background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 14, padding: '14px 18px' }}>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '.08em', color: 'var(--t2)', marginBottom: 8 }}>H(p,q) = H(p) + KL(p‖q)</div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', fontFamily: 'var(--mono)', fontSize: 15 }}>
               <span style={{ color: ACCENT }}>{Hpq.toFixed(3)}</span>
@@ -190,7 +192,7 @@ const KlDivergenceLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
               <span style={{ color: 'var(--t2)', fontSize: 11 }}>{unit(base)}</span>
             </div>
             {/* stacked bar: H(p) floor + KL gap */}
-            <div style={{ position: 'relative', height: 12, borderRadius: 7, background: '#1c2440', overflow: 'hidden', marginTop: 11 }}>
+            <div style={{ position: 'relative', height: 12, borderRadius: 7, background: isLight ? 'var(--bg3)' : '#1c2440', overflow: 'hidden', marginTop: 11 }}>
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Hpq > 1e-9 ? (Hp / Hpq) * 100 : 0}%`, background: P_COLOR }} />
               <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${Hpq > 1e-9 ? (Hp / Hpq) * 100 : 0}%`, width: `${Hpq > 1e-9 ? (KLpq / Hpq) * 100 : 0}%`, background: KL_COLOR }} />
             </div>
