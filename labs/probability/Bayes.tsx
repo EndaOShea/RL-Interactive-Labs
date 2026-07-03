@@ -10,6 +10,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { bayesPython, BayesMode } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#c084fc';
 const PRIOR = '#60a5fa';
@@ -27,6 +28,7 @@ const CAT_COLOR = [TN, FP, FN, TP];
 // orange false-positives. (A categorical grid — a diverging heatmap cannot show
 // four distinct categories with the legend's colours.)
 const PopulationGrid: React.FC<{ cells: number[] }> = ({ cells }) => {
+  const isLight = useTheme() === 'light';
   const cell = 26, gap = 3, cols = 10;
   const rows = Math.ceil(cells.length / cols) || 1;
   const W = cols * (cell + gap) + 4, H = rows * (cell + gap) + 4;
@@ -38,7 +40,7 @@ const PopulationGrid: React.FC<{ cells: number[] }> = ({ cells }) => {
           <rect
             key={i} x={2 + col * (cell + gap)} y={2 + r * (cell + gap)}
             width={cell} height={cell} rx={5}
-            fill={CAT_COLOR[c] || TN} stroke="rgba(8,11,20,.55)" strokeWidth={0.8}
+            fill={CAT_COLOR[c] || TN} stroke={isLight ? 'rgba(255,255,255,.55)' : 'rgba(8,11,20,.55)'} strokeWidth={0.8}
           />
         );
       })}

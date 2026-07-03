@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { mcmcPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#c084fc';
 const TARGET = '#c084fc';   // target density
@@ -49,6 +50,7 @@ const N_BINS = 60;
 const ITERS_PER_STEP = 25;   // chain iterations advanced per animation tick
 
 const McmcLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [targetKey, setTargetKey] = useState<string>('bimodal');
   const [sigma, setSigma] = useState(0.8);
@@ -189,7 +191,7 @@ const McmcLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             xLabel="x" yLabel="density"
           />
           {/* recent-state trace strip */}
-          <svg width={580} height={42} viewBox="0 0 580 42" style={{ display: 'block', borderRadius: 10, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)' }}>
+          <svg width={580} height={42} viewBox="0 0 580 42" style={{ display: 'block', borderRadius: 10, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)' }}>
             <text x={8} y={14} fontFamily="var(--mono)" fontSize="9" fill="var(--t2)">trace · recent states</text>
             {traceSeries.map((tx, i) => {
               const px = 10 + (i / Math.max(1, traceSeries.length - 1)) * 560;
