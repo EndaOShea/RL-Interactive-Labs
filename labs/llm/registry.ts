@@ -1,6 +1,6 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { TOKENIZER_CONTENT, SAMPLING_CONTENT, ATTENTION_CONTENT } from './content';
+import { TOKENIZER_CONTENT, SAMPLING_CONTENT, ATTENTION_CONTENT, RAG_CONTENT } from './content';
 
 const ACCENT = '#a78bfa';
 
@@ -40,5 +40,17 @@ export const LLM_LABS: LabDescriptor[] = [
     codeFile: 'attention.py',
     content: ATTENTION_CONTENT,
     component: React.lazy(() => import('./Attention')),
+  },
+  {
+    id: 'rag',
+    category: 'llm',
+    title: 'Retrieval-Augmented Generation',
+    subtitle: 'chunk · embed · index · retrieve · rerank · generate',
+    blurb: 'Step an end-to-end RAG pipeline over a Solar-System corpus, then switch between ~11 architectures — Naive, Advanced, HyDE, RAG-Fusion, Self-RAG, CRAG, GraphRAG, RAPTOR, Contextual, ColBERT, Agentic — that re-sequence the flow.',
+    icon: 'M4 5h9l3 3v3M4 5v14h6M8 9h4M8 13h3M15 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm2.2 5.2L20 22',
+    accent: ACCENT,
+    codeFile: 'rag.py',
+    content: RAG_CONTENT,
+    component: React.lazy(() => import('./Rag')),
   },
 ];
