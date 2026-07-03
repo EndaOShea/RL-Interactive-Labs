@@ -7,6 +7,7 @@ import { AlgoPill, ParamSlider, RunControls, MonoLabel, Legend, GOOD, BAD } from
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { derivativesPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#22d3ee';
 const TANGENT_COLOR = '#f59e0b';
@@ -63,6 +64,7 @@ const sampleCurve = (f: (x: number) => number, domain: [number, number], n = 240
 };
 
 const Derivatives: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [fnId, setFnId] = useState('square');
   const fn = useMemo(() => FUNCTIONS.find((f) => f.id === fnId)!, [fnId]);
 
@@ -224,7 +226,7 @@ const Derivatives: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => 
                 : 'Overlay the full derivative curve f′(x) to see the slope at every point at once.'}
             </p>
           </div>
-          <p style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t1)', margin: 0, lineHeight: 1.6, padding: '11px 13px', borderRadius: 9, border: '1px solid var(--border)', background: 'rgba(20,26,44,.5)' }}>
+          <p style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t1)', margin: 0, lineHeight: 1.6, padding: '11px 13px', borderRadius: 9, border: '1px solid var(--border)', background: isLight ? 'var(--bg2)' : 'rgba(20,26,44,.5)' }}>
             secant&nbsp;=&nbsp;<b style={{ color: SECANT_COLOR }}>{secantSlope.toFixed(4)}</b>&nbsp;&nbsp;→&nbsp;&nbsp;f′(x₀)&nbsp;=&nbsp;<b style={{ color: TANGENT_COLOR }}>{fAnalytic.toFixed(4)}</b><br />
             |error|&nbsp;=&nbsp;<b style={{ color: errColor }}>{absErr.toFixed(4)}</b>
           </p>

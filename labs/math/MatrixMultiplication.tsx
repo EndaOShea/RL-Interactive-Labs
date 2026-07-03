@@ -9,6 +9,7 @@ import {
   matVec, det2, colsOf,
 } from './matrix-multiplication';
 import { matmulPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#22d3ee';
 const A_COL = '#22d3ee';   // vector a / x
@@ -31,6 +32,8 @@ interface Dot { at: Vec2; color: string; label?: string; }
 const Plane: React.FC<{ arrows: Arrow[]; dots?: Dot[]; lim?: number; size?: number }> = ({
   arrows, dots = [], lim = 4, size = 440,
 }) => {
+  const isLight = useTheme() === 'light';
+  const neutral = isLight ? '#7c86a3' : '#6b7494';   // --t2-equivalent; kept as a hex (not the var) so `.replace('#','')` still yields a clean marker id
   const pad = 26;
   const inner = size - pad * 2;
   const s = (v: number) => pad + ((v + lim) / (2 * lim)) * inner;       // x → px
@@ -39,9 +42,9 @@ const Plane: React.FC<{ arrows: Arrow[]; dots?: Dot[]; lim?: number; size?: numb
 
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
-      style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       <defs>
-        {[A_COL, B_COL, PROJ_COL, C1_COL, C2_COL, Y_COL, '#6b7494'].map((c) => (
+        {[A_COL, B_COL, PROJ_COL, C1_COL, C2_COL, Y_COL, neutral].map((c) => (
           <marker key={c} id={`ah-${c.replace('#', '')}`} markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto">
             <path d="M0,0 L7,3 L0,6 Z" fill={c} />
           </marker>
@@ -50,13 +53,13 @@ const Plane: React.FC<{ arrows: Arrow[]; dots?: Dot[]; lim?: number; size?: numb
       {/* grid */}
       {ticks.map((t) => (
         <g key={t}>
-          <line x1={s(t)} y1={pad} x2={s(t)} y2={size - pad} stroke="rgba(120,130,170,.07)" />
-          <line x1={pad} y1={sy(t)} x2={size - pad} y2={sy(t)} stroke="rgba(120,130,170,.07)" />
+          <line x1={s(t)} y1={pad} x2={s(t)} y2={size - pad} stroke={isLight ? 'rgba(50,60,90,.07)' : 'rgba(120,130,170,.07)'} />
+          <line x1={pad} y1={sy(t)} x2={size - pad} y2={sy(t)} stroke={isLight ? 'rgba(50,60,90,.07)' : 'rgba(120,130,170,.07)'} />
         </g>
       ))}
       {/* axes */}
-      <line x1={pad} y1={sy(0)} x2={size - pad} y2={sy(0)} stroke="rgba(120,130,170,.32)" strokeWidth="1.2" />
-      <line x1={s(0)} y1={pad} x2={s(0)} y2={size - pad} stroke="rgba(120,130,170,.32)" strokeWidth="1.2" />
+      <line x1={pad} y1={sy(0)} x2={size - pad} y2={sy(0)} stroke={isLight ? 'rgba(50,60,90,.32)' : 'rgba(120,130,170,.32)'} strokeWidth="1.2" />
+      <line x1={s(0)} y1={pad} x2={s(0)} y2={size - pad} stroke={isLight ? 'rgba(50,60,90,.32)' : 'rgba(120,130,170,.32)'} strokeWidth="1.2" />
       {/* numeric tick labels along the axes */}
       {ticks.filter((t) => t !== 0).map((t) => (
         <g key={`tl${t}`}>
@@ -77,7 +80,7 @@ const Plane: React.FC<{ arrows: Arrow[]; dots?: Dot[]; lim?: number; size?: numb
       })}
       {/* dots */}
       {dots.map((d, i) => (
-        <circle key={i} cx={s(d.at[0])} cy={sy(d.at[1])} r={4} fill={d.color} stroke="rgba(8,11,20,.7)" strokeWidth="0.8" />
+        <circle key={i} cx={s(d.at[0])} cy={sy(d.at[1])} r={4} fill={d.color} stroke={isLight ? 'rgba(255,255,255,.7)' : 'rgba(8,11,20,.7)'} strokeWidth="0.8" />
       ))}
       {/* labels */}
       {arrows.filter((a) => a.label).map((a, i) => (
@@ -88,43 +91,51 @@ const Plane: React.FC<{ arrows: Arrow[]; dots?: Dot[]; lim?: number; size?: numb
 };
 
 /* ---------- styled 2×2 matrix / vector cells ---------- */
-const MatrixCells: React.FC<{ A: Mat2; hiRow?: number; title?: string }> = ({ A, hiRow, title }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
-    {title && <MonoLabel style={{ fontSize: 9 }}>{title}</MonoLabel>}
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
-      {[A[0], A[1], A[2], A[3]].map((v, i) => {
-        const row = i < 2 ? 0 : 1;
-        const hot = hiRow === row;
-        return (
+const MatrixCells: React.FC<{ A: Mat2; hiRow?: number; title?: string }> = ({ A, hiRow, title }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+      {title && <MonoLabel style={{ fontSize: 9 }}>{title}</MonoLabel>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+        {[A[0], A[1], A[2], A[3]].map((v, i) => {
+          const row = i < 2 ? 0 : 1;
+          const hot = hiRow === row;
+          return (
+            <div key={i} style={{
+              width: 50, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--mono)', fontSize: 13, borderRadius: 6,
+              color: hot ? (isLight ? 'var(--t0)' : '#fff') : 'var(--t0)',
+              background: hot ? `color-mix(in srgb, ${C1_COL} 26%, transparent)` : (isLight ? 'var(--bg2)' : 'rgba(20,26,44,.6)'),
+              border: `1px solid ${hot ? C1_COL : 'var(--border)'}`,
+            }}>{f2(v)}</div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const VecCells: React.FC<{ v: Vec2; color: string; title?: string }> = ({ v, color, title }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+      {title && <MonoLabel style={{ fontSize: 9 }}>{title}</MonoLabel>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {v.map((n, i) => (
           <div key={i} style={{
             width: 50, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'var(--mono)', fontSize: 13, borderRadius: 6,
-            color: hot ? '#fff' : 'var(--t0)',
-            background: hot ? `color-mix(in srgb, ${C1_COL} 26%, transparent)` : 'rgba(20,26,44,.6)',
-            border: `1px solid ${hot ? C1_COL : 'var(--border)'}`,
-          }}>{f2(v)}</div>
-        );
-      })}
+            fontFamily: 'var(--mono)', fontSize: 13, color, borderRadius: 6,
+            background: isLight ? 'var(--bg2)' : 'rgba(20,26,44,.6)', border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`,
+          }}>{f2(n)}</div>
+        ))}
+      </div>
     </div>
-  </div>
-);
-
-const VecCells: React.FC<{ v: Vec2; color: string; title?: string }> = ({ v, color, title }) => (
-  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
-    {title && <MonoLabel style={{ fontSize: 9 }}>{title}</MonoLabel>}
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {v.map((n, i) => (
-        <div key={i} style={{
-          width: 50, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--mono)', fontSize: 13, color, borderRadius: 6,
-          background: 'rgba(20,26,44,.6)', border: `1px solid color-mix(in srgb, ${color} 40%, transparent)`,
-        }}>{f2(n)}</div>
-      ))}
-    </div>
-  </div>
-);
+  );
+};
 
 const MatrixMultiplication: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
+  const neutral = isLight ? '#7c86a3' : '#6b7494';   // --t2-equivalent; same reasoning as Plane's own `neutral`
   const [mode, setMode] = useState<Mode>('dot');
   // Part A vectors (also reused as x in Part B).
   const [a1, setA1] = useState(2);
@@ -220,7 +231,7 @@ const MatrixMultiplication: React.FC<LabKitProps> = ({ descriptor, tutor, apiPan
           { to: a, color: A_COL, label: 'a' },
           { to: projVec, color: PROJ_COL, label: 'proj', dash: true },
           // dashed drop line from a's tip to the projection point
-          { from: a, to: projVec, color: '#6b7494', dash: true, head: false, width: 1.4 },
+          { from: a, to: projVec, color: neutral, dash: true, head: false, width: 1.4 },
         ]}
         dots={[{ at: projVec, color: PROJ_COL }]}
       />
@@ -240,8 +251,8 @@ const MatrixMultiplication: React.FC<LabKitProps> = ({ descriptor, tutor, apiPan
     <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', justifyContent: 'center' }}>
       <Plane
         arrows={[
-          { to: [1, 0], color: '#6b7494', label: 'ê₁', width: 1.6 },
-          { to: [0, 1], color: '#6b7494', label: 'ê₂', width: 1.6 },
+          { to: [1, 0], color: neutral, label: 'ê₁', width: 1.6 },
+          { to: [0, 1], color: neutral, label: 'ê₂', width: 1.6 },
           { to: c1, color: C1_COL, label: 'A ê₁' },
           { to: c2, color: C2_COL, label: 'A ê₂' },
           { to: x, color: A_COL, label: 'x', dash: true },

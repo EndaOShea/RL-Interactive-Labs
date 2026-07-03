@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { taylorPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#22d3ee';
 const APPROX = '#fbbf24';
@@ -160,6 +161,7 @@ function introNarration(fn: Fn, mode: Mode, def: FnDef): string {
 }
 
 const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [fn, setFn] = useState<Fn>('sin');
   const [mode, setMode] = useState<Mode>('taylor');
@@ -334,7 +336,7 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           ]}
           markers={[
             { x: a, y: def.f(a), color: GOOD, label: `a=${a.toFixed(1)}` },
-            { x: evalX, y: def.f(evalX), color: '#f87171', label: `eval` },
+            { x: evalX, y: def.f(evalX), color: isLight ? 'var(--bad)' : '#f87171', label: `eval` },
           ]}
           xLabel="x" yLabel="f(x)"
         />

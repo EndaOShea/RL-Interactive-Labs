@@ -7,6 +7,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { CHAIN_PRESETS, evalChain, ChainPreset } from './chain-rule';
 import { chainRulePython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#22d3ee';
 
@@ -20,6 +21,7 @@ const fmt = (v: number, d = 3) => {
 const NODE_R = 40;
 
 const ChainGraph: React.FC<{ preset: ChainPreset; x0: number }> = ({ preset, x0 }) => {
+  const isLight = useTheme() === 'light';
   const ev = useMemo(() => evalChain(preset, x0), [preset, x0]);
   const n = ev.nodes.length;
   const gap = 168;
@@ -48,7 +50,7 @@ const ChainGraph: React.FC<{ preset: ChainPreset; x0: number }> = ({ preset, x0 
             <line x1={x1} y1={cy} x2={x2} y2={cy} stroke={ACCENT} strokeWidth={2} markerEnd="url(#cr-arrow)" opacity={0.85} />
             {/* local-derivative chip on the edge */}
             <rect x={midX - 56} y={cy - 56} width={112} height={34} rx={7}
-              fill="rgba(13,18,32,.92)" stroke="color-mix(in srgb, #22d3ee 45%, transparent)" />
+              fill={isLight ? 'var(--bg2)' : 'rgba(13,18,32,.92)'} stroke="color-mix(in srgb, #22d3ee 45%, transparent)" />
             <text x={midX} y={cy - 39} textAnchor="middle" fontFamily="var(--mono)" fontSize={10.5} fill="var(--t2)">
               {e.label.split('=')[0].trim()}
             </text>
@@ -72,7 +74,7 @@ const ChainGraph: React.FC<{ preset: ChainPreset; x0: number }> = ({ preset, x0 
         return (
           <g key={i}>
             <circle cx={x} cy={cy} r={NODE_R}
-              fill="rgba(13,18,32,.92)" stroke={col} strokeWidth={2.5}
+              fill={isLight ? 'var(--bg2)' : 'rgba(13,18,32,.92)'} stroke={col} strokeWidth={2.5}
               filter={isOut ? 'drop-shadow(0 0 10px rgba(52,211,153,.5))' : undefined} />
             <text x={x} y={cy - 8} textAnchor="middle" fontFamily="var(--mono)" fontSize={15} fill={col} fontWeight={700}>{nd.name}</text>
             <text x={x} y={cy + 13} textAnchor="middle" fontFamily="var(--mono)" fontSize={13} fill="var(--t0)">{fmt(nd.value)}</text>
