@@ -3,12 +3,14 @@ import { getCatalog, APP_NAME } from './registry';
 import CatalogCard from './CatalogCard';
 import { ACC } from '../components/stage/primitives';
 import ThemeToggle from '../components/ThemeToggle';
+import { useTheme } from '../utils/theme';
 
 // Scrollable landing page. Uses its own height:100vh; overflow:auto container
 // so it scrolls despite the global body{overflow:hidden} (index.css untouched).
 // A sticky top nav jumps to each category; a floating button returns to the top.
 const HomeCatalog: React.FC = () => {
   const groups = getCatalog();
+  const isLight = useTheme() === 'light';
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
 
@@ -23,7 +25,9 @@ const HomeCatalog: React.FC = () => {
       onScroll={() => setScrolled((scrollRef.current?.scrollTop ?? 0) > 360)}
       style={{
         width: '100vw', height: '100vh', overflowY: 'auto', position: 'relative',
-        background: 'radial-gradient(130% 90% at 30% 0%, #131b30, #080b14 70%)',
+        background: isLight
+          ? 'radial-gradient(130% 90% at 30% 0%, #ffffff, #eef1f7 70%)'
+          : 'radial-gradient(130% 90% at 30% 0%, #131b30, #080b14 70%)',
         color: 'var(--t0)',
       }}
     >
@@ -31,7 +35,7 @@ const HomeCatalog: React.FC = () => {
       <nav
         style={{
           position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', gap: 16,
-          padding: '10px 22px', background: 'rgba(8,11,20,.82)', backdropFilter: 'blur(10px)',
+          padding: '10px 22px', background: isLight ? 'rgba(255,255,255,.82)' : 'rgba(8,11,20,.82)', backdropFilter: 'blur(10px)',
           WebkitBackdropFilter: 'blur(10px)', borderBottom: '1px solid var(--border)',
         }}
       >
@@ -55,7 +59,7 @@ const HomeCatalog: React.FC = () => {
                 onClick={() => scrollToCat(category.id)}
                 style={{
                   flexShrink: 0, cursor: 'pointer', fontFamily: 'var(--mono)', fontSize: 11,
-                  color: 'var(--t1)', background: 'rgba(20,26,44,.5)', border: '1px solid var(--border)',
+                  color: 'var(--t1)', background: isLight ? 'rgba(255,255,255,.6)' : 'rgba(20,26,44,.5)', border: '1px solid var(--border)',
                   borderRadius: 20, padding: '5px 11px', whiteSpace: 'nowrap',
                   display: 'flex', alignItems: 'center', gap: 6,
                 }}
