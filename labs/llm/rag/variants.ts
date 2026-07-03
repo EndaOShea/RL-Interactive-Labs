@@ -2,6 +2,7 @@
 // compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind.
 import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS, rerankScore } from './retrieval';
 import { QUERIES, contentTokens, embedText, cosine, tokenize, WEB_DOCS } from './corpus';
+import { matchEntities } from './graph';
 
 export type StageKind =
   | 'chunk' | 'embed' | 'index' | 'retrieve' | 'rerank' | 'augment' | 'generate'
@@ -264,6 +265,58 @@ const COLBERT: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR, contextual: CONTEXTUAL, colbert: COLBERT };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor', 'contextual', 'colbert'];
+// --- Agentic / Adaptive RAG: route by query complexity, then treat retrieval
+// as a tool an agent can call repeatedly. `routeQuery` is informational — it
+// picks the strategy a full agent WOULD take (Rag.tsx's pipe still runs the
+// loop below regardless, so route/retrieve/reflect all stay reachable on the
+// rail); `agenticLoop` is the actual mechanism: retrieve, check whether every
+// entity the query names is literally covered by the retrieved text, and if
+// not, refine the query with the missing entity and re-retrieve, up to
+// maxIter. Rag.tsx's pipe branch (gated on `hasReflect`) feeds Augment/
+// Generate from the LAST step's retrieval, not the first-pass one the
+// Retrieve stage shows — mirrors how CRAG's grade can swap in web chunks
+// instead of the raw retrieval.
+export type Route = 'no-retrieval' | 'single-step' | 'multi-step';
+export function routeQuery(query: string): Route {
+  const toks = tokenize(query); const entities = matchEntities(query).length;
+  if (toks.length <= 3) return 'no-retrieval';
+  return entities >= 2 || /\b(which|compare|and|both|most)\b/.test(query.toLowerCase()) ? 'multi-step' : 'single-step';
+}
+export interface AgentStep { iter: number; query: string; topIds: string[]; covered: boolean; missing: string[] }
+// Agentic loop: retrieve → is every matched entity covered? → refine query with a
+// missing entity → re-retrieve, up to maxIter.
+export function agenticLoop(query: string, chunks: Chunk[], p: RagParams, maxIter = 3): AgentStep[] {
+  const wanted = matchEntities(query).map((e) => e.label.toLowerCase());
+  const steps: AgentStep[] = []; let q = query;
+  for (let i = 0; i < maxIter; i++) {
+    const ranked = retrieveRanked(q, chunks, p).slice(0, p.k);
+    const seen = new Set(ranked.flatMap((r) => tokenize(r.chunk.text)));
+    const missing = wanted.filter((w) => !seen.has(w));
+    steps.push({ iter: i, query: q, topIds: ranked.map((r) => r.chunk.id), covered: missing.length === 0, missing });
+    if (!missing.length) break;
+    q = `${query} ${missing.join(' ')}`; // refine
+  }
+  return steps;
+}
+
+const AGENTIC: Variant = {
+  id: 'agentic', name: 'Agentic / Adaptive RAG', group: 'Agentic', year: '2024',
+  blurb: 'Routes each query by complexity — trivial, single-hop, or multi-hop/comparative — before ever touching the index, then treats retrieval as a tool it can call more than once: after retrieving, it checks whether every entity the query names is actually covered by the retrieved text, and if not, refines the query with the missing entity and retrieves again (up to a few iterations) before augmenting and generating.',
+  stages: () => [
+    { kind: 'route', label: 'Route', note: 'Classify the query’s complexity and pick a retrieval strategy.' },
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
+    { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks — iteration 0 of the agentic loop.' },
+    // cfg.agentic distinguishes this from Self-RAG's OWN 'reflect' stage (a
+    // post-generation support check) — the two share a stage kind but never
+    // a variant, same convention as ColBERT's cfg.colbert marker on 'rerank'.
+    { kind: 'reflect', label: 'Reflect', note: 'Check whether every matched entity is covered by the retrieval; if not, refine the query and re-retrieve.', cfg: { agentic: true } },
+    { kind: 'augment', label: 'Augment', note: 'Pack the final iteration’s retrieved chunks into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR, contextual: CONTEXTUAL, colbert: COLBERT, agentic: AGENTIC };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor', 'contextual', 'colbert', 'agentic'];
 export { QUERIES };

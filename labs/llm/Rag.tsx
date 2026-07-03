@@ -24,9 +24,9 @@ import {
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
   multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
   ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout, buildTree, retrieveTree,
-  contextualize, maxSim, tokenize,
+  contextualize, maxSim, tokenize, matchEntities, routeQuery, agenticLoop,
 } from './rag/index';
-import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode } from './rag/index';
+import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode, Route, AgentStep } from './rag/index';
 
 const ACCENT = '#a78bfa';
 // per-community identity colour (GraphRAG graphbuild/graphsearch), distinct from
@@ -84,6 +84,18 @@ interface Pipe {
   // the top-k slice, so Augment/Generate need no RAPTOR-specific code at all.
   tree?: TreeNode[];
   treeHits?: { id: string; score: number }[];
+  // Agentic / Adaptive RAG: `route` is the complexity-router's decision
+  // (informational only — Rag.tsx's pipe still runs the loop below
+  // regardless of what a full agent would do with it, so route/retrieve/
+  // reflect all stay reachable on the fixed-length rail); `agentSteps` is the
+  // FULL retrieve→reflect→re-retrieve iteration trace (agenticLoop). `ranked`
+  // above stays the FIRST (iteration-0) retrieval over the untouched query —
+  // what the Retrieve stage panel shows, identical to every other variant —
+  // but `candidates`/`gen` are built from the LAST step's retrieval instead
+  // (see the pipe useMemo's `agentSteps` branch), mirroring how CRAG's
+  // `grade` can swap in web chunks instead of the raw retrieval.
+  route?: Route;
+  agentSteps?: AgentStep[];
 }
 
 const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.7 };
@@ -679,6 +691,49 @@ const StageDetail: React.FC<{
   hasContextual: boolean;
 }> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive, graphMode, onGraphMode, hasContextual }) => {
   switch (stage.kind) {
+    case 'route': {
+      const route = pipe.route ?? routeQuery(query);
+      const toks = tokenize(query);
+      const nEntities = matchEntities(query).length;
+      const comparative = /\b(which|compare|and|both|most)\b/.test(query.toLowerCase());
+      const OPTIONS: { id: Route; label: string; hint: string }[] = [
+        { id: 'no-retrieval', label: 'No retrieval', hint: 'trivially short (≤3 tokens) — a real agent answers directly' },
+        { id: 'single-step', label: 'Single-step', hint: 'one entity, no comparative wording — one retrieval pass suffices' },
+        { id: 'multi-step', label: 'Multi-step', hint: '≥2 entities or comparative wording — plan to loop until covered' },
+      ];
+      return (
+        <Panel title={`Route · complexity router → ${route}`} note={stage.note}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+            {OPTIONS.map((o) => (
+              <div key={o.id} style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '7px 11px', borderRadius: 7,
+                border: `1px solid ${o.id === route ? ACCENT : 'var(--border)'}`,
+                background: o.id === route ? 'rgba(167,139,250,.1)' : 'rgba(8,11,20,.35)',
+              }}>
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700, letterSpacing: '.03em', flexShrink: 0,
+                  color: o.id === route ? ACCENT : 'var(--t2)', minWidth: 108,
+                }}>{o.id === route ? '● ' : '○ '}{o.label}</span>
+                <span style={{ ...row, color: o.id === route ? 'var(--t0)' : 'var(--t2)', fontSize: 11 }}>{o.hint}</span>
+              </div>
+            ))}
+          </div>
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>deciding features for &quot;{query}&quot;</MonoLabel>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <Tag>{toks.length} token{toks.length === 1 ? '' : 's'}</Tag>
+              <Tag>{nEntities} matched entit{nEntities === 1 ? 'y' : 'ies'}</Tag>
+              <Tag>{comparative ? 'comparative wording ✓' : 'no comparative wording'}</Tag>
+            </div>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+            {route === 'no-retrieval' && 'The query is trivially short — a real agent would skip retrieval and answer directly. This demo still steps through the pipeline below so every stage stays reachable.'}
+            {route === 'single-step' && 'One matched entity and no comparative wording — a single retrieval pass is expected to be enough, without needing to loop.'}
+            {route === 'multi-step' && 'Multiple entities and/or comparative wording (which/compare/and/both/most) signal a multi-hop question — the agent plans to retrieve, check coverage, and refine/re-retrieve if needed.'}
+          </div>
+        </Panel>
+      );
+    }
     case 'hyde': {
       const doc = hydeDoc(query);
       const qVec = embedText(query);
@@ -974,6 +1029,58 @@ const StageDetail: React.FC<{
       );
     }
     case 'reflect': {
+      // Agentic mode (cfg.agentic, set on the rail in variants.ts) shows the
+      // FULL retrieve → reflect → re-retrieve iteration trace instead of
+      // Self-RAG's post-generation support check below — the two share a
+      // stage kind but never a variant, same convention as ColBERT's
+      // cfg.colbert marker on 'rerank' (which coexists with Advanced RAG's
+      // plain cross-encoder rerank stage).
+      if (stage.cfg?.agentic === true) {
+        const steps = pipe.agentSteps ?? [];
+        if (!steps.length) {
+          return (
+            <Panel title="Reflect · agentic retrieve → reflect loop" note={stage.note}>
+              <div style={{ ...row, color: 'var(--t2)' }}>No loop trace available for this run.</div>
+            </Panel>
+          );
+        }
+        const last = steps[steps.length - 1];
+        return (
+          <Panel title={`Reflect · agentic retrieve → reflect loop · ${steps.length} iteration${steps.length === 1 ? '' : 's'}`} note={stage.note}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {steps.map((s, i) => {
+                const isLast = i === steps.length - 1;
+                const color = s.covered ? '#34d399' : isLast ? '#f87171' : '#fbbf24';
+                return (
+                  <div key={s.iter} style={{
+                    display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 11px', borderRadius: 8,
+                    border: `1px solid ${color}`, background: `color-mix(in srgb, ${color} 8%, transparent)`,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700, color: ACCENT, flexShrink: 0 }}>ITER {s.iter}</span>
+                      <span style={{ ...row, color: 'var(--t0)', fontSize: 11.5 }}>&quot;{s.query}&quot;</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {s.topIds.map((id) => <Tag key={id}>{id}</Tag>)}
+                    </div>
+                    <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5 }}>
+                      <span style={{ color, fontWeight: 700, letterSpacing: '.03em' }}>{s.covered ? 'COVERED' : isLast ? 'GAVE UP' : 'MISSING → REFINING'}</span>
+                      {!s.covered && <span style={{ color: 'var(--t2)' }}> · &quot;{s.missing.join(', ')}&quot; not found in the retrieved text</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+              {steps.length === 1
+                ? 'Every entity the query named was already covered by iteration 0’s retrieval — no refinement was needed, and Augment/Generate below use this same set.'
+                : last.covered
+                  ? `Iteration 0's retrieval didn't literally mention every entity the query named — refining the query with what was missing and retrieving again covered it by iteration ${last.iter}. Augment/Generate below use iteration ${last.iter}'s set (${last.topIds.join(', ')}), not iteration 0's (${steps[0].topIds.join(', ')}).`
+                  : `The agent refined the query ${steps.length - 1} time${steps.length - 1 === 1 ? '' : 's'} but "${last.missing.join(', ')}" never showed up in the retrieved text before the iteration cap — dense retrieval embeds by topic axis only, so appending a bare proper noun it has no lexicon entry for can leave the ranking completely unchanged. Augment/Generate below proceed with iteration ${last.iter}'s best-effort set anyway (Sparse/Hybrid retrieval also scores literal term overlap, and would pick the appended word up).`}
+            </div>
+          </Panel>
+        );
+      }
       const supported = pipe.supported ?? false;
       return (
         <Panel title="Reflect · is the answer actually supported by the kept context?" note={stage.note}>
@@ -1451,6 +1558,20 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
       return log('relevance critique', 'keep chunk c iff rerank(q,c) ≥ τ (0.18)', { kept: nRelevant, of: tags.length }, `${nRelevant}/${tags.length} chunks kept`);
     }
     case 'reflect': {
+      // Same cfg.agentic marker StageDetail's 'reflect' branch checks — Self-
+      // RAG's OWN 'reflect' stage (post-generation support check) carries no
+      // such marker, so the two cases never disagree about which variant is
+      // actually active.
+      if (stage.cfg?.agentic === true) {
+        const steps = pipe.agentSteps ?? [];
+        const last = steps[steps.length - 1];
+        return log(
+          'agentic retrieve-reflect loop',
+          'missing = wanted − seen(top-k); refine q with missing until covered or maxIter',
+          { iterations: steps.length, covered: last?.covered ? 1 : 0 },
+          last ? `${steps.length} iteration${steps.length === 1 ? '' : 's'} · final: ${last.covered ? 'covered' : 'gave up · missing ' + last.missing.join(', ')}` : 'no steps',
+        );
+      }
       const supported = pipe.supported ?? false;
       return log('support reflection', 'covered = |tokens(answer) ∩ tokens(kept)| / |tokens(answer)|', { supported: supported ? 1 : 0 }, supported ? 'Supported' : 'Unsupported');
     }
@@ -1498,7 +1619,10 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         `${tree.length} nodes built · top-${params.k} hit: ${hits.map((h) => h.id).join(', ')}`,
       );
     }
-    // Milestone C adds: route
+    case 'route': {
+      const route = pipe.route ?? routeQuery(query);
+      return log('complexity routing', 'route = f(|tokens|, |entities|, comparative wording)', { route }, `routed → ${route}`);
+    }
     default:
       return log(stage.kind, stage.note, {}, stage.label);
   }
@@ -1601,6 +1725,21 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // marker directly on the active stage; only the pipe (which runs before
   // the learner has necessarily stepped to Rerank) needs this rail-level flag.
   const hasColbert = stages.some((s) => s.kind === 'rerank' && s.cfg?.colbert === true);
+  // True when the rail owns a 'route' stage (Agentic) — purely informational:
+  // the pipe below still runs the retrieve→reflect loop regardless of the
+  // router's decision, so every stage on the rail stays reachable.
+  const hasRoute = stages.some((s) => s.kind === 'route');
+  // True when the rail owns a 'reflect' stage explicitly marked Agentic mode
+  // (cfg.agentic, set in variants.ts) — Self-RAG's OWN 'reflect' stage (the
+  // post-generation support check) carries no such marker, so the two never
+  // collide despite sharing a stage kind (same convention as ColBERT's
+  // cfg.colbert marker on 'rerank', which coexists with Advanced RAG's plain
+  // cross-encoder rerank stage). The pipe below then runs the iterative
+  // retrieve→reflect→re-retrieve loop (agenticLoop) and feeds Augment/
+  // Generate from its FINAL iteration instead of the first-pass
+  // `retrievedTopK` below — mirrors how CRAG's grade can swap in web chunks
+  // instead of the raw retrieval.
+  const hasReflect = stages.some((s) => s.kind === 'reflect' && s.cfg?.agentic === true);
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -1711,11 +1850,24 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     // web doc is what actually grounds the answer).
     const grade = hasGrade ? gradeRetrieval(query.label, ranked) : undefined;
     const webChunks = grade && grade !== 'correct' ? webFallback(query.label) : undefined;
+    // Agentic / Adaptive RAG: `route` is informational (see hasRoute above);
+    // `agentSteps` is the full retrieve→reflect→re-retrieve trace, run over
+    // the SAME `chunks`/`params` that produced `ranked`/`retrievedTopK` above
+    // (iteration 0 of the loop is exactly that first-pass retrieval — the
+    // Retrieve stage panel keeps showing it, unchanged).
+    const route = hasRoute ? routeQuery(query.label) : undefined;
+    const agentSteps = hasReflect ? agenticLoop(query.label, chunks, params) : undefined;
     let firstStage: Ranked[];
     if (critique) firstStage = retrievedTopK.filter((_, i) => critique[i].relevant);
     else if (grade === 'incorrect') firstStage = webChunks ?? [];
     else if (grade === 'ambiguous') firstStage = [...retrievedTopK, ...(webChunks ?? [])];
-    else firstStage = retrievedTopK;
+    else if (agentSteps) {
+      // Augment/Generate consume the LAST iteration's retrieval (re-ranked
+      // over its, possibly entity-refined, query text) — not the first-pass
+      // `retrievedTopK` above, which is what the Retrieve stage panel shows.
+      const finalQuery = agentSteps[agentSteps.length - 1].query;
+      firstStage = retrieveRanked(finalQuery, chunks, params).slice(0, params.k);
+    } else firstStage = retrievedTopK;
     const candidates: Ranked[] = rerankActive
       ? firstStage
           .map((r) => ({
@@ -1735,9 +1887,9 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     const supported = hasCritique ? isSupported(gen.answer, candidates.map((r) => r.chunk)) : undefined;
     return {
       chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
-      graphMode: hasGraph ? graphMode : undefined, localResult, globalResult, tree, treeHits,
+      graphMode: hasGraph ? graphMode : undefined, localResult, globalResult, tree, treeHits, route, agentSteps,
     };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, hasContextual, hasColbert, graphMode]);
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, hasContextual, hasColbert, hasRoute, hasReflect, graphMode]);
 
   const stage = stages[stageIdx];
 
@@ -1821,7 +1973,8 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       currentParams={{
         topic: 'Retrieval-Augmented Generation', variant: variant.name, stage: stage.kind, query: query.label,
         topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded, supported: pipe.supported,
-        grade: pipe.grade, graphMode: pipe.graphMode,
+        grade: pipe.grade, graphMode: pipe.graphMode, route: pipe.route,
+        agenticIterations: pipe.agentSteps?.length,
       }}
       apiPanel={apiPanel}
     />
