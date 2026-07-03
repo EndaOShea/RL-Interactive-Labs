@@ -10,6 +10,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { clamp01, randn, ParamsWrap, ParamsHead } from './shared';
 import { linregPython } from './python';
 import { PresetChips, Preset } from './presets';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#34d399';
 const RESID = 'rgba(248,113,113,.5)';
@@ -30,6 +31,7 @@ const PRESETS: Preset<Cfg>[] = [
 ];
 
 const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [n, setN] = useState(45);
   const [noise, setNoise] = useState(0.05);
   const [alpha, setAlpha] = useState(0.3);
@@ -143,7 +145,7 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
           domain={[0, 1]}
           range={[0, 1]}
           scatter={data.map((p) => ({ x: p.x, y: p.y, color: 'var(--t1)' }))}
-          series={[...residuals, { points: curve, color: ACCENT, width: 2.6 }]}
+          series={[...residuals, { points: curve, color: isLight ? 'var(--good)' : ACCENT, width: 2.6 }]}
           xLabel="x"
           yLabel="y"
         />

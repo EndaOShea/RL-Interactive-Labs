@@ -10,6 +10,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from './shared';
 import { pcaPython } from './python';
 import { PresetChips, Preset } from './presets';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#34d399';
 const makeCloud = (n: number): [number, number][] => Array.from({ length: n }, () => [randn(), randn()]);
@@ -41,6 +42,7 @@ const PRESETS: Preset<Cfg>[] = [
 ];
 
 const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [count, setCount] = useState(180);
   const [angle, setAngle] = useState(0.5);
   const [elong, setElong] = useState(0.34);
@@ -118,11 +120,11 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     : points.map((p) => ({ x: p.x, y: p.y }));
 
   const lines: ScatterLine[] = [
-    { x1: pca.mx - pca.v1x * 2 * s1, y1: pca.my - pca.v1y * 2 * s1, x2: pca.mx + pca.v1x * 2 * s1, y2: pca.my + pca.v1y * 2 * s1, color: '#fff', width: 2.8 },
-    { x1: pca.mx - v2x * 2 * s2, y1: pca.my - v2y * 2 * s2, x2: pca.mx + v2x * 2 * s2, y2: pca.my + v2y * 2 * s2, color: ACCENT, width: 2, dash: true },
+    { x1: pca.mx - pca.v1x * 2 * s1, y1: pca.my - pca.v1y * 2 * s1, x2: pca.mx + pca.v1x * 2 * s1, y2: pca.my + pca.v1y * 2 * s1, color: isLight ? 'var(--t0)' : '#fff', width: 2.8 },
+    { x1: pca.mx - v2x * 2 * s2, y1: pca.my - v2y * 2 * s2, x2: pca.mx + v2x * 2 * s2, y2: pca.my + v2y * 2 * s2, color: isLight ? 'var(--good)' : ACCENT, width: 2, dash: true },
   ];
   // Richer visuals: a 2σ covariance ellipse showing the cloud's shape and orientation.
-  const ellipses: ScatterEllipse[] = [{ cx: pca.mx, cy: pca.my, rx: 2 * s1, ry: 2 * s2, angle: Math.atan2(pca.v1y, pca.v1x), color: ACCENT }];
+  const ellipses: ScatterEllipse[] = [{ cx: pca.mx, cy: pca.my, rx: 2 * s1, ry: 2 * s2, angle: Math.atan2(pca.v1y, pca.v1x), color: isLight ? 'var(--good)' : ACCENT }];
 
   const insight = `PC1 explains ${(pca.e1 * 100).toFixed(0)}% of the variance; keep ${kComp} component${kComp === 1 ? '' : 's'} for the ${(threshold * 100).toFixed(0)}% target. ` +
     (whiten ? 'Whitening rescales the projection to unit variance — the collapsed cloud is isotropic. '
@@ -146,7 +148,7 @@ const PcaLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           points={plotPoints}
           lines={lines}
           ellipses={ellipses}
-          centroids={[{ x: pca.mx, y: pca.my, color: '#fff' }]}
+          centroids={[{ x: pca.mx, y: pca.my, color: isLight ? 'var(--t0)' : '#fff' }]}
           xLabel="x₁"
           yLabel="x₂"
         />

@@ -10,6 +10,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { Pt, makeBlobs, clamp01, ParamsWrap, ParamsHead } from './shared';
 import { knnPython } from './python';
 import { PresetChips, Preset } from './presets';
+import { useTheme } from '../../utils/theme';
 
 const CENTERS = [{ x: 0.25, y: 0.30 }, { x: 0.72, y: 0.35 }, { x: 0.50, y: 0.75 }];
 const SPREAD = 0.1;
@@ -26,6 +27,7 @@ const PRESETS: Preset<KnnCfg>[] = [
 ];
 
 const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [perClass, setPerClass] = useState(14);
   const [k, setK] = useState(5);
   const [metric, setMetric] = useState<Metric>('l2');
@@ -101,9 +103,9 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const maxD = current.neighbors.reduce((m, n) => Math.max(m, n.d), 1e-6);
   const markers: ScatterMarker[] = [
     ...current.neighbors.map((n) => ({ x: n.x, y: n.y, cls: n.cls, ring: true, r: weighted ? 6 + 7 * (1 - n.d / maxD) : 9 })),
-    { x: query.x, y: query.y, color: '#fff', r: 6 },
+    { x: query.x, y: query.y, color: isLight ? 'var(--t0)' : '#fff', r: 6 },
   ];
-  const lines: ScatterLine[] = current.neighbors.map((n) => ({ x1: query.x, y1: query.y, x2: n.x, y2: n.y, color: weighted ? `rgba(238,241,250,${0.1 + 0.3 * (1 - n.d / maxD)})` : 'rgba(238,241,250,.22)', width: 1 }));
+  const lines: ScatterLine[] = current.neighbors.map((n) => ({ x1: query.x, y1: query.y, x2: n.x, y2: n.y, color: weighted ? (isLight ? `rgba(18,23,42,${0.1 + 0.3 * (1 - n.d / maxD)})` : `rgba(238,241,250,${0.1 + 0.3 * (1 - n.d / maxD)})`) : (isLight ? 'rgba(18,23,42,.22)' : 'rgba(238,241,250,.22)'), width: 1 }));
 
   const insight = `k=${k}, ${METRIC_LABEL[metric]}${weighted ? ', distance-weighted' : ''}. ` +
     (weighted ? 'Closer neighbours pull harder (1/d weighting), so a large k stays sharp near the query. '
