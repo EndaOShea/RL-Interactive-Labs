@@ -13,6 +13,7 @@ import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../com
 import GraphCanvas, { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
 import { RunControls, MonoLabel, AlgoPill } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
+import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead, ParamSlider } from './shared';
 import { ragPython } from './python';
@@ -26,7 +27,7 @@ import {
   ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout, buildTree, retrieveTree,
   contextualize, maxSim, tokenize, matchEntities, routeQuery, agenticLoop,
 } from './rag/index';
-import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode, Route, AgentStep } from './rag/index';
+import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode, Route, AgentStep, Variant } from './rag/index';
 
 const ACCENT = '#a78bfa';
 // per-community identity colour (GraphRAG graphbuild/graphsearch), distinct from
@@ -1628,6 +1629,107 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
   }
 }
 
+/* ---------- spoken narration: what THIS stage computes + what to watch ---------- */
+// Mirrors buildLog's switch one-for-one — same 18 StageKinds (variants.ts's full
+// union) + the SAME cfg markers ('rerank' + cfg.colbert for ColBERT, 'reflect' +
+// cfg.agentic for the agentic loop) so the two meanings sharing a kind never
+// cross-talk here either. Each case is a 1-2 sentence spoken explanation of the
+// mechanism, grounded in the LIVE pipe output (the current top hit, grade,
+// route, iteration count…) rather than a static script. `introFor` deliberately
+// isn't handed `params`, so retrieval wording stays mode-agnostic ("score
+// against the query", never "embed the query" — sparse/hybrid don't embed).
+function introFor(stage: Stage, variant: Variant, query: string, pipe: Pipe): string {
+  const top = pipe.ranked[0];
+  switch (stage.kind) {
+    case 'chunk':
+      return `Every source document is split into smaller passages here — small enough to retrieve precisely, large enough to keep their meaning intact. This corpus splits into ${pipe.chunks.length} chunks; watch how the boundaries fall differently across each document card below.`;
+    case 'embed':
+      if (variant.id === 'contextual') {
+        return `Before embedding, each chunk gets a short prefix stitched on first — the document and category it came from — so a bare fragment still carries its context into the vector. Watch the before/after comparison below: the contextualized vector sits measurably closer to the query than the bare chunk's.`;
+      }
+      return `Each chunk becomes a vector by summing its words' lexicon weights and normalizing to unit length, so chunks about the same topic land near each other in space. Watch the scatter plot — meaning clusters chunks together even when they share no exact words.`;
+    case 'index':
+      return `The chunk vectors are stored in an index for fast lookup at query time. Toggle Flat, IVF, or HNSW below — flat compares the query against every vector exactly, while IVF and HNSW are the approximate structures real vector databases use to stay fast at scale. Watch them still agree on the same neighbours here.`;
+    case 'retrieve': {
+      if (pipe.queries != null) {
+        return `Each of the ${pipe.queries.length} paraphrased queries gets its own full ranking over the corpus. Watch each column surface slightly different top hits — Fuse combines all of them into one order next.`;
+      }
+      if (pipe.tree != null) {
+        return `Every node in the tree — a leaf chunk or a summary, at any level — is scored against the query, so one high-level summary can outrank several individual chunks.${top ? ` Right now the top hit is "${top.chunk.title}".` : ''} Watch which level wins.`;
+      }
+      return `We score every chunk against the query and keep the closest few.${top ? ` Watch "${top.chunk.title}" rise to the top of the ranked list below.` : ''}`;
+    }
+    case 'rewrite': {
+      const { added } = rewriteQuery(query);
+      return `Before retrieval runs, the query is expanded with topic keywords it didn't originally contain — narrowing the gap between a short question and a longer passage.${added.length ? ` Watch "${added.join(', ')}" get appended to it below.` : ' Watch below — this query happened to add nothing new.'}`;
+    }
+    case 'hyde': {
+      const doc = hydeDoc(query);
+      return `Instead of embedding the bare question, we fabricate a hypothetical answer and embed THAT — a fuller passage sits closer, in vector space, to the real passages that would answer it. Watch the fabricated line below: "${truncate(doc, 70)}".`;
+    }
+    case 'multiquery': {
+      const n = pipe.queries?.length ?? multiQuery(query).length;
+      return `The query is paraphrased into ${n} variants, each retrieved separately next. Watch how differently each one is worded below — that diversity is exactly what Fuse exploits.`;
+    }
+    case 'fuse':
+      return `Reciprocal Rank Fusion combines the separate per-query rankings by 1/(k+rank), so a chunk that ranks respectably everywhere can outrank one that's a top hit for only a single phrasing.${top ? ` Watch "${top.chunk.title}" win on consensus at the top of the fused order.` : ''}`;
+    case 'rerank': {
+      if (stage.cfg?.colbert === true) {
+        return `Instead of one pooled vector per chunk, ColBERT keeps one vector per token and scores query↔chunk by MaxSim — summing, for every query token, its single best-matching chunk token. Watch the token-by-token heatmap: a chunk with a few precise word matches can now outrank one with a higher pooled similarity.`;
+      }
+      return `A slower, higher-quality cross-encoder re-scores just the retrieved candidates and reorders them — affordable here because it only runs on a handful of chunks, not the whole corpus. Watch the before/after order below: green connectors moved up, red moved down.`;
+    }
+    case 'augment':
+      return `The surviving top chunks are packed into the prompt, in ranked order, until the context budget runs out. Watch which of the ${pipe.candidates.length} candidates below make the cut, and which get dropped once the budget fills.`;
+    case 'generate':
+      return pipe.gen.grounded
+        ? `The answer is stitched together only from chunks that passed the grounding check, each tagged with its source citation — nothing here comes from parametric memory alone. Watch the citation tags ${pipe.gen.citations.join(', ')} below match the bracketed references inside the answer.`
+        : `No retrieved chunk clears the grounding bar for this query, so the model refuses rather than fabricate an answer from memory. Watch the refusal below — this is RAG's safety net against hallucination.`;
+    case 'critique': {
+      const tags = pipe.critique ?? [];
+      const nRelevant = tags.filter((t) => t.relevant).length;
+      return `Every retrieved chunk is graded Relevant or Irrelevant by a cross-encoder score against a threshold — a chunk that merely resembles the query without answering it gets struck through and dropped right here. Watch ${nRelevant} of ${tags.length} chunks survive the cut below.`;
+    }
+    case 'reflect': {
+      if (stage.cfg?.agentic === true) {
+        const steps = pipe.agentSteps ?? [];
+        return `After each retrieval, we check whether every entity the query named is actually covered by the retrieved text — if something's still missing, the query is refined with it and retrieval runs again. Watch the iteration trace below (${steps.length} so far) to see what was missing and whether another pass covered it.`;
+      }
+      return `After generating, we check whether the answer's own words are actually backed by the chunks that were kept — not trusted just because fluent text came out. Watch whether this run comes back Supported or Unsupported below.`;
+    }
+    case 'grade': {
+      const grade = pipe.grade ?? 'correct';
+      return `The top retrieved chunk's cosine confidence is checked against two thresholds: above the high bar trusts the index as-is, below the low bar discards it for a web search, and the band between keeps the index but backs it up with the web. This run grades ${grade} — watch the meter below and what that pulls into Augment next.`;
+    }
+    case 'route': {
+      const route = pipe.route ?? routeQuery(query);
+      return `The query is classified by complexity — trivial, single-hop, or multi-hop/comparative — before the index is even touched, so a simple question skips work only a hard one needs. This query routes to ${route} from the token count, entity matches, and comparative wording below; watch how that shapes the retrieval that follows.`;
+    }
+    case 'graphbuild': {
+      const nRel = RELATIONS.filter((r) => r.from !== r.to).length;
+      return `Instead of a flat chunk index, entities and their explicit relations — orbits, has-moon, has-atmosphere — are wired into a knowledge graph of ${ENTITIES.length} entities and ${nRel} relations, then clustered into ${COMMUNITIES.length} communities. Watch the graph below: this structure is what lets Search resolve a multi-hop chain a flat vector index would conflate.`;
+    }
+    case 'graphsearch': {
+      if (pipe.graphMode === 'global') {
+        const topC = pipe.globalResult?.ranked[0];
+        return `Global mode skips per-chunk retrieval entirely and instead scores each community's summary against the query — a map-reduce over the whole corpus for broad questions.${topC ? ` Watch "${topC.label}" win as the top-scoring community.` : ''}`;
+      }
+      const seeds = pipe.localResult?.seeds ?? [];
+      return seeds.length
+        ? `Local mode seeds on the entities the query names, then walks their direct neighbours in the graph — scoping retrieval to just those entities' documents instead of the whole corpus. Watch the walk start from ${seeds.map((s) => s.label).join(', ')} and resolve a chain a flat vector search would miss.`
+        : `Local mode seeds on the entities the query names, then walks their direct neighbours in the graph. Watch for no match here — this query doesn't name an entity the graph knows, so the walk has nothing to seed on.`;
+    }
+    case 'tree': {
+      const tree = pipe.tree ?? [];
+      const leaves = tree.filter((n) => n.level === 0).length;
+      const summaries = tree.filter((n) => n.level === 1).length;
+      return `The chunks are recursively summarized into a tree instead of a flat index: ${leaves} leaf chunks sit under ${summaries} community summaries and one corpus root. Watch every level get scored next — a broad question can be answered by one high-level summary node instead of stitching together many leaves.`;
+    }
+    default:
+      return stage.note;
+  }
+}
+
 const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [variantId, setVariantId] = useState('naive');
   const [queryIdx, setQueryIdx] = useState(0);
@@ -1636,6 +1738,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const [indexMode, setIndexMode] = useState<IndexMode>('flat');
   const [graphMode, setGraphMode] = useState<'local' | 'global'>('local');
+  const narration = useNarration();
 
   const variant = VARIANTS[variantId];
   const query = QUERIES[queryIdx];
@@ -1894,16 +1997,23 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const stage = stages[stageIdx];
 
   const step = () => {
-    // Resolve the next stage ONCE and use it for BOTH updates below — rail,
-    // active-stage detail, header STAGE X/Y and the Math ticker must all
-    // describe the SAME stage. (Previously buildLog ran on the pre-increment
-    // stage, so the ticker lagged the rail by one stage.)
+    // Resolve the next stage ONCE and use it for BOTH updates below (and the
+    // narration call) — rail, active-stage detail, header STAGE X/Y, the Math
+    // ticker, and the spoken intro must all describe the SAME stage. (Previously
+    // buildLog ran on the pre-increment stage, so the ticker lagged the rail by
+    // one stage; reusing this one `nextStage` for every consumer below is what
+    // keeps narration in sync rather than reintroducing that lag.)
     const next = (stageIdx + 1) % stages.length;
+    const nextStage = stages[next];
     setStageIdx(next);
-    setLastLog(buildLog(stages[next], pipe, query.label, params, variant.name, rerankActive));
+    setLastLog(buildLog(nextStage, pipe, query.label, params, variant.name, rerankActive));
+    narration.narratePhase(`${variantId}:${queryIdx}:${nextStage.kind}`, introFor(nextStage, variant, query.label, pipe));
   };
   const sim = useSimLoop(step, { initialSpeed: 900 });
-  const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); setGraphMode('local'); };
+  // Variant/query changes both route through reset() (VariantDock's onSelect and
+  // RagParamsPanel's setQueryIdx below), so cancelling narration here is enough
+  // to re-arm it on either change — no separate handler needed.
+  const reset = () => { sim.stop(); setStageIdx(0); setLastLog(null); setIndexMode('flat'); setGraphMode('local'); narration.cancel(); };
   // Toggling Rerank can change stages.length (the splice above) — reset back to
   // stage 0 so a mid-run toggle can't leave stageIdx pointing at a different
   // stage than the one the learner was looking at.
@@ -1948,11 +2058,12 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       stats={[
         { label: 'VARIANT', value: variant.name, color: ACCENT },
         { label: 'STAGE', value: `${stageIdx + 1}/${stages.length}` },
-        { label: 'k', value: params.k },
+        { label: 'RETRIEVAL', value: pipe.graphMode ?? params.retrieval },
         { label: 'GROUNDED', value: pipe.gen.grounded ? 'yes' : 'no', color: pipe.gen.grounded ? '#34d399' : '#f87171' },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, ragPython(variantId, params))}
       grid={grid}
+      narration={narration}
       algoDock={<VariantDock variantId={variantId} onSelect={(id) => { setVariantId(id); reset(); }} accent={ACCENT} />}
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
       lastLog={lastLog}
@@ -1972,7 +2083,9 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       tutor={tutor}
       currentParams={{
         topic: 'Retrieval-Augmented Generation', variant: variant.name, stage: stage.kind, query: query.label,
-        topChunks: pipe.candidates.map((r) => r.chunk.id), grounded: pipe.gen.grounded, supported: pipe.supported,
+        retrieval: pipe.graphMode ?? params.retrieval,
+        topChunks: pipe.candidates.map((r) => r.chunk.id), citations: pipe.gen.citations,
+        grounded: pipe.gen.grounded, supported: pipe.supported,
         grade: pipe.grade, graphMode: pipe.graphMode, route: pipe.route,
         agenticIterations: pipe.agentSteps?.length,
       }}
