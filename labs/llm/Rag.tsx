@@ -23,7 +23,7 @@ import { ragPython } from './python';
 import {
   VARIANTS, VARIANT_ORDER, QUERIES, DEFAULT_PARAMS,
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
-  multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
+  multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO, RELEVANCE_TAU,
   ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout, buildTree, retrieveTree,
   contextualize, maxSim, tokenize, matchEntities, routeQuery, agenticLoop,
 } from './rag/index';
@@ -54,8 +54,17 @@ const COMMUNITY_COLORS = ['#60a5fa', '#34d399', '#22d3ee', '#fb923c'];
 // for Fusion, and — same as rewrite/HyDE — Augment/Generate still consume
 // `ranked`/`candidates` exactly like every other variant, so the scale-free
 // `generate()` grounding (see variants.ts) needs no Fusion-specific case at all.
+// `firstStage` is the PRE-RERANK candidate pool `candidates` reorders — for most
+// variants that's just `ranked.slice(0, k)` (the raw retrieval top-k), but CRAG
+// (grade can swap in `webChunks`), Self-RAG (critique drops the irrelevant
+// survivors), and Agentic (the final loop iteration's re-retrieval, not
+// iteration 0) narrow or replace the pool BEFORE reranking ever runs. Exposing
+// it — instead of `RerankView` reaching for `ranked.slice(0, k)` directly — lets
+// the Rerank stage's before/after compare the SAME set, just reordered, rather
+// than the raw retrieval top-k against a pool that may have swapped in entirely
+// different chunks (e.g. web docs replacing index chunks under CRAG).
 interface Pipe {
-  chunks: Chunk[]; ranked: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string;
+  chunks: Chunk[]; ranked: Ranked[]; firstStage: Ranked[]; candidates: Ranked[]; gen: GenResult; retrievalQuery: string;
   queries?: string[]; perQueryRankings?: number[][]; fusedMap?: Map<number, number>;
   // Self-RAG: `critique` tags the top-k RETRIEVED chunks (not the whole corpus —
   // critique grades what retrieval actually surfaced) Relevant/Irrelevant;
@@ -832,7 +841,7 @@ const StageDetail: React.FC<{
     case 'multiquery': {
       const queries = multiQuery(query);
       return (
-        <Panel title={`Multi-Query · ${queries.length} generated paraphrases`} note={stage.note}>
+        <Panel title={`Multi-Query · ${queries.length} facet sub-queries`} note={stage.note}>
           <div>
             <MonoLabel style={{ marginBottom: 6 }}>original query</MonoLabel>
             <div style={{ ...row, color: 'var(--t1)' }}>&quot;{query}&quot;</div>
@@ -1012,7 +1021,7 @@ const StageDetail: React.FC<{
       const tags = pipe.critique ?? [];
       const nRelevant = tags.filter((t) => t.relevant).length;
       return (
-        <Panel title={`Critique · relevance grading of the top-${tags.length} retrieved chunks (τ ≥ 0.18)`} note={stage.note}>
+        <Panel title={`Critique · relevance grading of the top-${tags.length} retrieved chunks (τ ≥ ${RELEVANCE_TAU})`} note={stage.note}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {tags.map(({ chunk, relevant }) => (
               <div key={chunk.id} style={{
@@ -1035,7 +1044,7 @@ const StageDetail: React.FC<{
             ))}
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
-            {nRelevant} of {tags.length} retrieved chunks graded Relevant (cross-encoder score ≥ 0.18) and kept — the rest are struck through and dropped before augmentation{nRelevant === 0 ? '; with nothing left to ground it, Generate will refuse rather than answer from irrelevant context.' : '.'}
+            {nRelevant} of {tags.length} retrieved chunks graded Relevant (cross-encoder score ≥ {RELEVANCE_TAU}) and kept — the rest are struck through and dropped before augmentation{nRelevant === 0 ? '; with nothing left to ground it, Generate will refuse rather than answer from irrelevant context.' : '.'}
           </div>
         </Panel>
       );
@@ -1183,7 +1192,7 @@ const StageDetail: React.FC<{
       const heroChunkId = hero != null ? pipe.chunks[hero].id : null;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
-          <MonoLabel>Fuse · Reciprocal Rank Fusion of {queries.length} rankings → top-{params.k} · {stage.note}</MonoLabel>
+          <MonoLabel>Fuse · Reciprocal Rank Fusion of {queries.length} ranking{queries.length === 1 ? '' : 's'} → top-{params.k} · {stage.note}</MonoLabel>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <FuseView
               queries={queries} perQueryRankings={perQueryRankings} fused={fused} fusedOrder={fusedOrder}
@@ -1217,7 +1226,13 @@ const StageDetail: React.FC<{
           </Panel>
         );
       }
-      const before = pipe.ranked.slice(0, params.k);
+      // `before` is the PRE-rerank pool (`pipe.firstStage`), not `pipe.ranked.slice(0,
+      // k)` — for CRAG/Self-RAG/Agentic that pool is already grade/critique/
+      // final-iteration-narrowed, so anchoring on the raw retrieval top-k here would
+      // make before/after share few or zero ids (see Pipe's `firstStage` comment).
+      // `pipe.candidates` is always the SAME set as `firstStage`, only reordered
+      // when active (see the pipe useMemo), so before/after never disagree on ids.
+      const before = pipe.firstStage;
       const after = pipe.candidates;
       // ColBERT mode: the rail's OWN rerank stage carries cfg.colbert (set in
       // variants.ts), distinguishing it from Advanced RAG's cross-encoder
@@ -1388,9 +1403,12 @@ Question: ${query}`}
       );
     }
     default:
+      // Unreachable: every StageKind above is cased. Kept as a neutral,
+      // non-false fallback (not "a later milestone" — every kind IS handled)
+      // in case a future StageKind is ever added without its own case.
       return (
         <Panel title={stage.label} note={stage.note}>
-          <div style={{ ...row, color: 'var(--t2)' }}>Visualised in a later milestone.</div>
+          <div style={{ ...row, color: 'var(--t2)' }}>{stage.note}</div>
         </Panel>
       );
   }
@@ -1535,7 +1553,7 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
     }
     case 'multiquery': {
       const queries = multiQuery(query);
-      return log('multi-query generation', 'Qᵢ = paraphrase(q), i=1..N', { variants: queries.length }, `${queries.length} query variants generated`);
+      return log('multi-query generation', 'Qᵢ = facet(q), i=1..N', { variants: queries.length }, `${queries.length} query variants generated`);
     }
     case 'fuse': {
       const top = pipe.ranked.slice(0, params.k);
@@ -1570,7 +1588,7 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
     case 'critique': {
       const tags = pipe.critique ?? [];
       const nRelevant = tags.filter((t) => t.relevant).length;
-      return log('relevance critique', 'keep chunk c iff rerank(q,c) ≥ τ (0.18)', { kept: nRelevant, of: tags.length }, `${nRelevant}/${tags.length} chunks kept`);
+      return log('relevance critique', `keep chunk c iff rerank(q,c) ≥ τ (${RELEVANCE_TAU})`, { kept: nRelevant, of: tags.length }, `${nRelevant}/${tags.length} chunks kept`);
     }
     case 'reflect': {
       // Same cfg.agentic marker StageDetail's 'reflect' branch checks — Self-
@@ -1592,7 +1610,12 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
     }
     case 'grade': {
       const grade = pipe.grade ?? 'correct';
-      const top = +(pipe.ranked[0]?.score ?? 0).toFixed(3);
+      // SCALE-FREE echo: `pipe.ranked[0]?.score` is a BM25/RRF value under
+      // sparse/hybrid retrieval, not a cosine — showing it next to a formula
+      // thresholding at cosine hi/lo would self-contradict. Recompute the SAME
+      // cosine gradeRetrieval() actually grades off (mirrors StageDetail's
+      // 'grade' case and gradeRetrieval() itself), so the Math tab always matches.
+      const top = pipe.ranked[0] ? +cosine(embedText(query), pipe.ranked[0].chunk.vec).toFixed(3) : 0;
       const web = pipe.webChunks?.length ?? 0;
       return log(
         'retrieval grading', 'grade = top₁≥hi ? correct : top₁≤lo ? incorrect : ambiguous', { top1: top, grade },
@@ -1666,7 +1689,7 @@ function introFor(stage: Stage, variant: Variant, query: string, pipe: Pipe): st
       return `The chunk vectors are stored in an index for fast lookup at query time. Toggle Flat, IVF, or HNSW below — flat compares the query against every vector exactly, while IVF and HNSW are the approximate structures real vector databases use to stay fast at scale. Watch them still agree on the same neighbours here.`;
     case 'retrieve': {
       if (pipe.queries != null) {
-        return `Each of the ${pipe.queries.length} paraphrased queries gets its own full ranking over the corpus. Watch each column surface slightly different top hits — Fuse combines all of them into one order next.`;
+        return `Each of the ${pipe.queries.length} focused variants gets its own full ranking over the corpus. Watch each column surface slightly different top hits — Fuse combines all of them into one order next.`;
       }
       if (pipe.tree != null) {
         return `Every node in the tree — a leaf chunk or a summary, at any level — is scored against the query, so one high-level summary can outrank several individual chunks.${top ? ` Right now the top hit is "${top.chunk.title}".` : ''} Watch which level wins.`;
@@ -1683,7 +1706,7 @@ function introFor(stage: Stage, variant: Variant, query: string, pipe: Pipe): st
     }
     case 'multiquery': {
       const n = pipe.queries?.length ?? multiQuery(query).length;
-      return `The query is paraphrased into ${n} variants, each retrieved separately next. Watch how differently each one is worded below — that diversity is exactly what Fuse exploits.`;
+      return `The query is split into ${n} facet sub-queries, each retrieved separately next. Watch how differently each one is worded below — that diversity is exactly what Fuse exploits.`;
     }
     case 'fuse':
       return `Reciprocal Rank Fusion combines the separate per-query rankings by 1/(k+rank), so a chunk that ranks respectably everywhere can outrank one that's a top hit for only a single phrasing.${top ? ` Watch "${top.chunk.title}" win on consensus at the top of the fused order.` : ''}`;
@@ -1768,10 +1791,22 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const stages: Stage[] = useMemo(() => {
     const base = variant.stages(params);
     if (!params.rerank || base.some((s) => s.kind === 'rerank')) return base;
+    // Anchor on the LAST stage that determines the candidate pool the spliced
+    // Rerank node will actually reorder (pipe.firstStage — see Pipe's comment),
+    // not just Retrieve/Fuse: Grade (CRAG can swap in web chunks) and Critique
+    // (Self-RAG drops the irrelevant survivors) run AFTER Retrieve on their
+    // rails and narrow/replace what Rerank operates on, so splicing right after
+    // Retrieve would visually place Rerank BEFORE the stage that decides its
+    // own input. GraphSearch/Tree are included for the same reason (GraphRAG/
+    // RAPTOR overwrite the ranking outright); missing kinds resolve to -1 and
+    // drop out of the max, so variants without them are unaffected.
     const idx = Math.max(
       base.findIndex((s) => s.kind === 'retrieve'),
       base.findIndex((s) => s.kind === 'fuse'),
+      base.findIndex((s) => s.kind === 'grade'),
       base.findIndex((s) => s.kind === 'graphsearch'),
+      base.findIndex((s) => s.kind === 'tree'),
+      base.findIndex((s) => s.kind === 'critique'),
     );
     if (idx === -1) return base;
     const rerankStage: Stage = {
@@ -2006,7 +2041,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     // Critique kept, rather than trusted just because generation produced text?
     const supported = hasCritique ? isSupported(gen.answer, candidates.map((r) => r.chunk)) : undefined;
     return {
-      chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
+      chunks, ranked, firstStage, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
       graphMode: hasGraph ? graphMode : undefined, localResult, globalResult, tree, treeHits, route, agentSteps,
     };
   }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, hasContextual, hasColbert, hasRoute, hasReflect, graphMode]);

@@ -127,7 +127,8 @@ export type ReflToken = 'Retrieve' | 'Relevant' | 'Irrelevant' | 'Supported' | '
 // Relevance grader — decide if a retrieved chunk is worth keeping for the query.
 // Reuses the "cross-encoder" rerankScore (dense + lexical overlap) and keeps the
 // chunk only if that score clears a threshold.
-export function isRelevant(query: string, chunk: Chunk, tau = 0.18): boolean {
+export const RELEVANCE_TAU = 0.18;
+export function isRelevant(query: string, chunk: Chunk, tau = RELEVANCE_TAU): boolean {
   return rerankScore(query, chunk) >= tau;
 }
 // Is the answer supported by the kept chunks? (token overlap of answer vs context)
