@@ -100,7 +100,7 @@ const TextClassificationLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
       running={false}
       narration={narration}
       stats={[
-        { label: 'prediction', value: pred, color: pred === 'positive' ? POS : NEG },
+        { label: 'prediction', value: pred, color: pred === 'positive' ? (isLight ? 'var(--good)' : POS) : (isLight ? 'var(--bad)' : NEG) },
         { label: 'P(pos)', value: pPos.toFixed(3) },
         { label: 'train acc', value: trainAcc.toFixed(2), color: GOOD },
       ]}
