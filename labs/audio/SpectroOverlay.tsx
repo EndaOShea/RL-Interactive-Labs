@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '../../utils/theme';
 
 // Area-local overlay for the spectrogram lab: draws the per-frame peak-frequency
 // trace (the dominant bin over time) as a poly-line on top of the Heatmap, plus
@@ -20,6 +21,7 @@ export interface SpectroOverlayProps {
 }
 
 const SpectroOverlay: React.FC<SpectroOverlayProps> = ({ peakRows, nCols, nRows, cell, gap, current, color = '#fde68a' }) => {
+  const isLight = useTheme() === 'light';
   const w = nCols * (cell + gap);
   const h = nRows * (cell + gap);
   const cx = (c: number) => c * (cell + gap) + cell / 2;
@@ -42,7 +44,7 @@ const SpectroOverlay: React.FC<SpectroOverlayProps> = ({ peakRows, nCols, nRows,
         <circle key={c} cx={cx(c)} cy={cy(r)} r={1.7} fill={color} fillOpacity={0.9} />
       ) : null))}
       {current > 0 && current <= nCols && (
-        <line x1={playX} y1={0} x2={playX} y2={h} stroke="#fff" strokeOpacity={0.35} strokeWidth={1} strokeDasharray="3 3" />
+        <line x1={playX} y1={0} x2={playX} y2={h} stroke={isLight ? 'var(--t0)' : '#fff'} strokeOpacity={0.35} strokeWidth={1} strokeDasharray="3 3" />
       )}
     </svg>
   );
