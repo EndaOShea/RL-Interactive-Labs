@@ -3,6 +3,7 @@
 // and every lab so the whole app speaks one visual language.
 import React, { useMemo } from 'react';
 import type { NarrationControl } from '../../hooks/useNarration';
+import { useTheme } from '../../utils/theme';
 
 export const ACC = 'var(--acc)';
 export const GOOD = 'var(--good)';
@@ -19,22 +20,25 @@ export function mix(a: string, b: string, t: number): string {
 }
 
 /* ---------- glass panel ---------- */
-export const SBGlass: React.FC<{ children: React.ReactNode; style?: React.CSSProperties; className?: string }> = ({ children, style, className }) => (
-  <div
-    className={className}
-    style={{
-      background: 'rgba(13,18,32,.74)',
-      backdropFilter: 'blur(9px)',
-      WebkitBackdropFilter: 'blur(9px)',
-      border: '1px solid rgba(120,130,170,.18)',
-      borderRadius: 13,
-      boxShadow: '0 10px 34px -10px rgba(0,0,0,.65)',
-      ...style,
-    }}
-  >
-    {children}
-  </div>
-);
+export const SBGlass: React.FC<{ children: React.ReactNode; style?: React.CSSProperties; className?: string }> = ({ children, style, className }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div
+      className={className}
+      style={{
+        background: isLight ? 'rgba(255,255,255,.72)' : 'rgba(13,18,32,.74)',
+        backdropFilter: 'blur(9px)',
+        WebkitBackdropFilter: 'blur(9px)',
+        border: isLight ? '1px solid var(--border)' : '1px solid rgba(120,130,170,.18)',
+        borderRadius: 13,
+        boxShadow: isLight ? '0 10px 34px -12px rgba(30,30,60,.18)' : '0 10px 34px -10px rgba(0,0,0,.65)',
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+};
 
 /* ---------- instrument-column tab ---------- */
 export const SBTab: React.FC<{ children: React.ReactNode; active?: boolean; onClick?: () => void }> = ({ children, active, onClick }) => (
@@ -132,6 +136,7 @@ export const ParamSlider: React.FC<{
   name: string; value: string; min: number; max: number; step: number; current: number;
   onChange: (v: number) => void; hint?: string; accent?: string;
 }> = ({ name, value, min, max, step, current, onChange, hint, accent = ACC }) => {
+  const isLight = useTheme() === 'light';
   const pct = Math.max(0, Math.min(100, ((current - min) / (max - min)) * 100));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
@@ -140,7 +145,7 @@ export const ParamSlider: React.FC<{
         <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--t0)' }}>{value}</span>
       </div>
       <div style={{ position: 'relative', height: 14, display: 'flex', alignItems: 'center' }}>
-        <div style={{ position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 3, background: '#1c2440' }} />
+        <div style={{ position: 'absolute', left: 0, right: 0, height: 4, borderRadius: 3, background: isLight ? 'var(--bg3)' : '#1c2440' }} />
         <div style={{ position: 'absolute', left: 0, height: 4, borderRadius: 3, width: `${pct}%`, background: accent }} />
         <input
           type="range" className="stage-range"
@@ -263,13 +268,16 @@ export const NarrationToggle: React.FC<{ ctrl: NarrationControl; showRate?: bool
 };
 
 /* ---------- live-math ticker (one-liner along the stage floor) ---------- */
-export const MathTicker: React.FC<{ formula?: string; result?: string; delta?: string }> = ({ formula, result, delta }) => (
-  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 42, background: 'rgba(8,11,20,.9)', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 22px', gap: 16, overflow: 'hidden' }}>
-    <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '.1em', color: 'var(--acc)', flexShrink: 0 }}>∿ LIVE MATH</span>
-    <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-      {formula
-        ? <>{formula}{result && <>&nbsp;&nbsp;<span style={{ color: 'var(--t2)' }}>→</span>&nbsp;&nbsp;<b style={{ color: GOOD }}>{result}</b></>}{delta && <>&nbsp;<span style={{ color: 'var(--t2)' }}>{delta}</span></>}</>
-        : <span style={{ color: 'var(--t2)' }}>Press Run to stream real-time mathematical updates…</span>}
-    </span>
-  </div>
-);
+export const MathTicker: React.FC<{ formula?: string; result?: string; delta?: string }> = ({ formula, result, delta }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 42, background: isLight ? 'rgba(255,255,255,.9)' : 'rgba(8,11,20,.9)', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', padding: '0 22px', gap: 16, overflow: 'hidden' }}>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 10, letterSpacing: '.1em', color: 'var(--acc)', flexShrink: 0 }}>∿ LIVE MATH</span>
+      <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--t1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {formula
+          ? <>{formula}{result && <>&nbsp;&nbsp;<span style={{ color: 'var(--t2)' }}>→</span>&nbsp;&nbsp;<b style={{ color: GOOD }}>{result}</b></>}{delta && <>&nbsp;<span style={{ color: 'var(--t2)' }}>{delta}</span></>}</>
+          : <span style={{ color: 'var(--t2)' }}>Press Run to stream real-time mathematical updates…</span>}
+      </span>
+    </div>
+  );
+};
