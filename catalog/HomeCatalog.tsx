@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { getCatalog, APP_NAME } from './registry';
 import CatalogCard from './CatalogCard';
 import { ACC } from '../components/stage/primitives';
+import ThemeToggle from '../components/ThemeToggle';
 
 // Scrollable landing page. Uses its own height:100vh; overflow:auto container
 // so it scrolls despite the global body{overflow:hidden} (index.css untouched).
@@ -65,6 +66,7 @@ const HomeCatalog: React.FC = () => {
             );
           })}
         </div>
+        <ThemeToggle style={{ marginLeft: 'auto' }} />
       </nav>
 
       {/* hero */}

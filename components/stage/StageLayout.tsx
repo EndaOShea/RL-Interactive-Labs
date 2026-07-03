@@ -10,6 +10,7 @@ import {
   SBGlass, SBTab, LED, Sparkline, MonoLabel, CodeBadge, sbBtn, GOOD, MathTicker, NarrationToggle,
 } from './primitives';
 import type { NarrationControl } from '../../hooks/useNarration';
+import ThemeToggle from '../ThemeToggle';
 
 /* ─────────────────────────── icon-rail nav ─────────────────────────── */
 const NAV: { id: ModuleId; d: string; label: string }[] = [
@@ -45,6 +46,7 @@ const StageNav: React.FC<{ active: ModuleId; onSelect: (m: ModuleId) => void }> 
         </button>
       );
     })}
+    <ThemeToggle style={{ marginTop: 'auto' }} />
   </nav>
 );
 

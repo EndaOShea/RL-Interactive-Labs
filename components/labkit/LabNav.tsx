@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { CategoryId, labPath } from '../../catalog/types';
 import { labsForCategory } from '../../catalog/registry';
 import { ACC } from '../stage/primitives';
+import ThemeToggle from '../ThemeToggle';
 
 // Left icon rail for new-area labs: a Home button, then the current area's labs
 // (parity with the RL rail). Registry-driven; highlights the active lab.
@@ -34,6 +35,7 @@ const LabNav: React.FC<{ category: CategoryId; activeLabId: string; accent?: str
       {labs.map((l) => (
         <NavBtn key={l.id} to={labPath(l)} d={l.icon} label={l.title} active={l.id === activeLabId} accent={accent || l.accent} />
       ))}
+      <ThemeToggle style={{ marginTop: 'auto' }} />
     </nav>
   );
 };
