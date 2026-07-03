@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { batchNormPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#f43f5e';
 
@@ -74,6 +75,7 @@ function activationStat(A: number[][], idx: number): LayerStat {
 
 const BatchNormLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
+  const isLight = useTheme() === 'light';
   const [depth, setDepth] = useState(16);
   const [initScale, setInitScale] = useState(1.4);
   const [batchSize, setBatchSize] = useState(256);
@@ -172,7 +174,7 @@ const BatchNormLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
   };
   const refSeries: PlotSeries = {
     points: [{ x: 0, y: 1 }, { x: 1, y: 1 }],
-    color: 'rgba(160,170,210,.5)',
+    color: isLight ? 'rgba(60,70,100,.5)' : 'rgba(160,170,210,.5)',
     width: 1.2,
     dash: true,
   };
