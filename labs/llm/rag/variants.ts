@@ -244,6 +244,26 @@ const CONTEXTUAL: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR, contextual: CONTEXTUAL };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor', 'contextual'];
+// --- ColBERT: late-interaction reranking. First-stage retrieval is an
+// ordinary pooled single-vector cosine (identical to Naive); the rail's
+// OWN rerank stage is marked `cfg: { colbert: true }` so Rag.tsx's pipe and
+// StageDetail can tell it apart from Advanced RAG's cross-encoder rerank
+// stage and reorder candidates by token-level MaxSim (./retrieval's
+// `maxSim`) instead of `rerankScore`.
+const COLBERT: Variant = {
+  id: 'colbert', name: 'ColBERT', group: 'Structured', year: '2020',
+  blurb: 'Late interaction: keeps one embedding per TOKEN instead of pooling a chunk into a single vector, then scores query↔chunk by MaxSim — summing, for every query token, its single best-matching chunk token. A chunk that shares a few precise token-level matches with the query can outrank one with a higher pooled single-vector cosine.',
+  stages: () => [
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Map each chunk to a pooled vector, for the single-vector first-stage retrieval below.' },
+    { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks by pooled cosine.' },
+    { kind: 'rerank', label: 'Rerank', note: 'Reorder the candidates by token-level MaxSim (late interaction) instead of a single pooled vector.', cfg: { colbert: true } },
+    { kind: 'augment', label: 'Augment', note: 'Pack the MaxSim-reranked chunks into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR, contextual: CONTEXTUAL, colbert: COLBERT };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor', 'contextual', 'colbert'];
 export { QUERIES };

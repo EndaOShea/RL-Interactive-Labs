@@ -24,7 +24,7 @@ import {
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
   multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
   ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout, buildTree, retrieveTree,
-  contextualize,
+  contextualize, maxSim, tokenize,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode } from './rag/index';
 
@@ -368,6 +368,48 @@ const RerankView: React.FC<{ before: Ranked[]; after: Ranked[]; accent: string }
         </text>
       ))}
     </svg>
+  );
+};
+
+// ColBERT pick marker: a purely-additive SVG absolutely positioned over the
+// shared Heatmap (same convention as the audio area's Spectrogram/
+// SpectroOverlay pair — Heatmap itself has no notion of a "pick", so the ring
+// is drawn separately using the SAME cell/gap cell-center geometry). One ring
+// per query-token ROW, at that row's arg-max chunk-token COLUMN (`picks[r]`).
+const ColbertPickOverlay: React.FC<{ picks: number[]; cell: number; gap: number; nCols: number; color: string }> = ({ picks, cell, gap, nCols, color }) => {
+  const w = nCols * (cell + gap), h = picks.length * (cell + gap);
+  const cx = (c: number) => c * (cell + gap) + cell / 2;
+  const cy = (r: number) => r * (cell + gap) + cell / 2;
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', overflow: 'visible' }}>
+      {picks.map((c, r) => (c >= 0 ? (
+        <rect key={r} x={cx(c) - cell / 2 - 1} y={cy(r) - cell / 2 - 1} width={cell + 2} height={cell + 2} rx={4}
+          fill="none" stroke={color} strokeWidth={2} />
+      ) : null))}
+    </svg>
+  );
+};
+
+// Composes the token×token Heatmap with the pick overlay above — the wrapper
+// div's left/top offset matches Heatmap's OWN padL/padT when both row AND
+// column labels are given (30/18 — see components/labkit/viz/Heatmap.tsx),
+// so the overlay's (0,0)-relative cell geometry lands exactly on the grid.
+// Wrapped in a horizontal scroller: a long chunk (wide `size` slider) can
+// produce more token columns than the panel is wide, and this must never
+// clip or blow out the surrounding layout.
+const ColbertHeatmapView: React.FC<{ queryTokens: string[]; chunkTokens: string[]; matrix: number[][]; picks: number[]; accent: string }> = ({ queryTokens, chunkTokens, matrix, picks, accent }) => {
+  const cell = 22, gap = 2, padL = 30, padT = 18;
+  const flat = matrix.flat();
+  const max = Math.max(0.01, ...flat);
+  return (
+    <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        <Heatmap matrix={matrix} mode="heat" min={0} max={max} cell={cell} gap={gap} rowLabels={queryTokens} colLabels={chunkTokens} accent={accent} />
+        <div style={{ position: 'absolute', left: padL, top: padT }}>
+          <ColbertPickOverlay picks={picks} cell={cell} gap={gap} nCols={chunkTokens.length} color="#fde68a" />
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -1055,6 +1097,36 @@ const StageDetail: React.FC<{
       }
       const before = pipe.ranked.slice(0, params.k);
       const after = pipe.candidates;
+      // ColBERT mode: the rail's OWN rerank stage carries cfg.colbert (set in
+      // variants.ts), distinguishing it from Advanced RAG's cross-encoder
+      // rerank stage below (cfg is unset there) — `pipe.candidates` was
+      // ALREADY reordered by maxSim for this run (see the pipe useMemo), so
+      // this branch only needs to visualise it, never recompute the order.
+      if (stage.cfg?.colbert === true) {
+        const top = after[0];
+        const queryTokens = tokenize(query);
+        const chunkTokens = top ? tokenize(top.chunk.text) : [];
+        const { score, matrix, picks } = top ? maxSim(queryTokens, chunkTokens) : { score: 0, matrix: [] as number[][], picks: [] as number[] };
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center', width: '100%' }}>
+            <MonoLabel>Rerank · ColBERT late interaction · token-level MaxSim over top candidate {top ? `"${top.chunk.id}"` : '—'}</MonoLabel>
+            {top ? (
+              <>
+                <ColbertHeatmapView queryTokens={queryTokens} chunkTokens={chunkTokens} matrix={matrix} picks={picks} accent={ACCENT} />
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t1)' }}>
+                  ΣmaxSim(query, <b style={{ color: ACCENT }}>{top.chunk.id}</b>) = <b>{score.toFixed(3)}</b> — each row is one query token&apos;s cosine against every chunk token; <span style={{ color: '#fde68a' }}>amber</span> rings mark the arg-max (its single best chunk-token match).
+                </div>
+              </>
+            ) : <div style={{ ...row, color: 'var(--t2)' }}>No candidate to compare.</div>}
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <RerankView before={before} after={after} accent={ACCENT} />
+            </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
+              Unlike a single pooled vector, ColBERT keeps one embedding per token and scores query↔chunk by summing each query token&apos;s BEST chunk-token match (MaxSim) — a chunk that only shares a few precise token-level matches with the query can outrank one with a higher pooled single-vector cosine.
+            </div>
+          </div>
+        );
+      }
       return (
         <Panel title={`Rerank · cross-encoder re-score of the top-${before.length} retrieval candidates`} note={stage.note}>
           <div style={{ display: 'flex', justifyContent: 'center' }}>
@@ -1350,14 +1422,19 @@ function buildLog(stage: Stage, pipe: Pipe, query: string, params: RagParams, va
         `fused top-${params.k}: ${top.map((r) => r.chunk.id).join(', ')}`,
       );
     }
-    case 'rerank':
+    case 'rerank': {
       // Guarded on `rerankActive` (not a bare `params.rerank`) — this case can
       // only run for a stage that's actually on the rail, and by construction
       // that implies rerankActive is true, but the check keeps this case honest
       // if that invariant ever changes rather than silently mislabeling a run.
-      return rerankActive
-        ? log('reranking', 'score = 0.6·cos + 0.4·overlap', { k: params.k }, 'candidates reordered')
-        : log('reranking', 'rerank stage present but inactive', { k: params.k }, 'skipped');
+      if (!rerankActive) return log('reranking', 'rerank stage present but inactive', { k: params.k }, 'skipped');
+      // ColBERT mode carries cfg.colbert on its rail's OWN rerank stage (see
+      // variants.ts) — the same marker StageDetail's 'rerank' branch checks,
+      // so the Math tab never disagrees with what candidates actually show.
+      return stage.cfg?.colbert === true
+        ? log('late interaction (ColBERT)', 'score = Σᵢ maxⱼ cos(qᵢ, cⱼ)', { k: params.k }, 'candidates reordered by token-level MaxSim')
+        : log('reranking', 'score = 0.6·cos + 0.4·overlap', { k: params.k }, 'candidates reordered');
+    }
     case 'augment':
       // pipe.candidates (not the full pipe.ranked corpus) is what Augment actually
       // packs, so cap against its length — matches the budget bar on screen even
@@ -1516,6 +1593,14 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // unlike hasGraph/hasTree/hasFusion above, there is no distinct stage kind
   // to structurally key off.
   const hasContextual = variantId === 'contextual';
+  // True when the rail owns a 'rerank' stage explicitly marked ColBERT mode
+  // (cfg.colbert, set in variants.ts) — the pipe below then reorders
+  // candidates by token-level maxSim (late interaction) instead of the
+  // cross-encoder rerankScore Advanced RAG's rerank stage uses. StageDetail's
+  // 'rerank' branch and buildLog's 'rerank' case check the SAME stage.cfg
+  // marker directly on the active stage; only the pipe (which runs before
+  // the learner has necessarily stepped to Rerank) needs this rail-level flag.
+  const hasColbert = stages.some((s) => s.kind === 'rerank' && s.cfg?.colbert === true);
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -1633,7 +1718,14 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     else firstStage = retrievedTopK;
     const candidates: Ranked[] = rerankActive
       ? firstStage
-          .map((r) => ({ chunk: r.chunk, score: rerankScore(query.label, r.chunk), rank: 0 }))
+          .map((r) => ({
+            chunk: r.chunk,
+            // ColBERT mode reorders by token-level MaxSim instead of the
+            // cross-encoder rerankScore every other reranking variant
+            // (Advanced RAG, or any variant with the Rerank toggle on) uses.
+            score: hasColbert ? maxSim(tokenize(query.label), tokenize(r.chunk.text)).score : rerankScore(query.label, r.chunk),
+            rank: 0,
+          }))
           .sort((a, b) => b.score - a.score)
           .map((r, i) => ({ ...r, rank: i }))
       : firstStage;
@@ -1645,7 +1737,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
       graphMode: hasGraph ? graphMode : undefined, localResult, globalResult, tree, treeHits,
     };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, hasContextual, graphMode]);
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, hasContextual, hasColbert, graphMode]);
 
   const stage = stages[stageIdx];
 
@@ -1670,7 +1762,11 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // canvas than the chunk/retrieve/augment/generate text-and-card panels, which
   // stay at the original 620px.
   const wideStage = stage.kind === 'embed' || stage.kind === 'index' || stage.kind === 'fuse'
-    || stage.kind === 'graphbuild' || stage.kind === 'graphsearch' || stage.kind === 'tree';
+    || stage.kind === 'graphbuild' || stage.kind === 'graphsearch' || stage.kind === 'tree'
+    // ColBERT's rerank panel needs the wide layout too (a token×token heatmap
+    // can run wider than the 620px text-panel stages) — Advanced RAG's
+    // cross-encoder rerank panel (no cfg.colbert) stays at the normal width.
+    || (stage.kind === 'rerank' && stage.cfg?.colbert === true);
   // LabStage's centre stage is `overflow:hidden` and vertically centers this
   // grid with no scrollbar of its own, so a tall stage-detail panel (embed's
   // heatmap+scatter, index's ANN diagram, and future RAPTOR/ColBERT visuals) can
