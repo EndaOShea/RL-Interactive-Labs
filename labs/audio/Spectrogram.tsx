@@ -7,6 +7,7 @@ import Heatmap from '../../components/labkit/viz/Heatmap';
 import { AlgoPill, RunControls, Legend, MonoLabel, ParamSlider } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
+import { useTheme } from '../../utils/theme';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { spectrogramPython } from './python';
@@ -81,6 +82,7 @@ const SpectrogramLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   const [peakRows, setPeakRows] = useState<number[]>([]); // display-row of peak per col (-1 empty)
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const narration = useNarration();
+  const isLight = useTheme() === 'light';
 
   const samples = useMemo(() => makeSignal(signal), [signal]);
 
@@ -318,9 +320,9 @@ const SpectrogramLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
       legend={(
         <Legend title="SPECTROGRAM" items={[
-          { color: '#0c0f16', label: 'low energy' },
-          { color: '#a855f7', label: 'mid' },
-          { color: '#ffffff', label: 'high energy' },
+          { color: isLight ? '#b9cdec' : '#0c0f16', label: 'low energy' },
+          { color: isLight ? '#fbbf24' : '#a855f7', label: 'mid' },
+          { color: isLight ? '#ea580c' : '#ffffff', label: 'high energy' },
           { color: TRACE, label: 'peak trace' },
         ]} />
       )}
