@@ -891,6 +891,11 @@ const StageDetail: React.FC<{
       );
     }
     case 'index': {
+      // Contextual Retrieval indexes `contextualize(c).vec`, not `c.vec` (see
+      // the pipe useMemo) — swap it in here too so the landing positions and
+      // the HNSW/IVF neighbour structure reflect what's actually indexed,
+      // not the bare-chunk vectors this variant never retrieves against.
+      const indexChunks = hasContextual ? pipe.chunks.map((c) => ({ ...c, vec: contextualize(c).vec })) : pipe.chunks;
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
           <MonoLabel>Index · {pipe.chunks.length} chunk vectors · {stage.note}</MonoLabel>
@@ -899,7 +904,7 @@ const StageDetail: React.FC<{
             <AlgoPill accent={ACCENT} active={indexMode === 'ivf'} onClick={() => onIndexMode('ivf')}>IVF</AlgoPill>
             <AlgoPill accent={ACCENT} active={indexMode === 'hnsw'} onClick={() => onIndexMode('hnsw')}>HNSW</AlgoPill>
           </div>
-          <IndexView chunks={pipe.chunks} mode={indexMode} accent={ACCENT} />
+          <IndexView chunks={indexChunks} mode={indexMode} accent={ACCENT} />
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', maxWidth: 460, textAlign: 'center', lineHeight: 1.6 }}>
             {indexMode === 'flat' && 'Flat (brute-force): every query compares against all N vectors exactly — what Naive RAG actually runs. '}
             {indexMode === 'ivf' && 'IVF: a coarse quantizer splits the space into 9 cells (nlist=9); a query only probes the nearest cell(s) instead of everything. '}
@@ -924,7 +929,10 @@ const StageDetail: React.FC<{
       // rewrite stage ran, `pipe.ranked` was scored against the rewritten text,
       // so the marker must match or the lines/ranking below would look wrong.
       const qPt = project2(embedText(pipe.retrievalQuery));
-      const chunkPts = pipe.chunks.map((c) => project2(c.vec));
+      // Contextual Retrieval actually retrieved against `contextualize(c).vec`
+      // (see the pipe useMemo), not `c.vec` — project THAT here too, or the
+      // dots would land at positions the ranking above didn't actually use.
+      const chunkPts = pipe.chunks.map((c) => project2(hasContextual ? contextualize(c).vec : c.vec));
       // RAPTOR's top-k can include summary/root pseudo-chunks (docId -1) that
       // have no vector position among `pipe.chunks` (the leaf-only corpus) —
       // split them out so the scatter only ever plots/lines real leaf chunks
@@ -947,8 +955,11 @@ const StageDetail: React.FC<{
         const p = ptById.get(r.chunk.id)!;
         return { x1: qPt[0], y1: qPt[1], x2: p[0], y2: p[1], color: ACCENT, width: 2 };
       });
+      // truncate for the title — HyDE's `retrievalQuery` is a fabricated
+      // hypothetical-answer PASSAGE (~130 chars), not a short question, and
+      // would otherwise blow out this single-line heading.
       return (
-        <Panel title={`Retrieve · top-${params.k} of ${isTree ? `${pipe.tree!.length} tree nodes` : `${pipe.chunks.length} chunks`} by ${scoreLabel} score for "${pipe.retrievalQuery}"`} note={stage.note}>
+        <Panel title={`Retrieve · top-${params.k} of ${isTree ? `${pipe.tree!.length} tree nodes` : `${pipe.chunks.length} chunks`} by ${scoreLabel} score for "${truncate(pipe.retrievalQuery, 60)}"`} note={stage.note}>
           {!isFused && !isTree && (
             <div style={{ display: 'flex', gap: 7 }}>
               <AlgoPill accent={ACCENT} active={params.retrieval === 'dense'} onClick={() => onRetrieval('dense')}>Dense</AlgoPill>
@@ -1065,7 +1076,10 @@ const StageDetail: React.FC<{
                       {s.topIds.map((id) => <Tag key={id}>{id}</Tag>)}
                     </div>
                     <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5 }}>
-                      <span style={{ color, fontWeight: 700, letterSpacing: '.03em' }}>{s.covered ? 'COVERED' : isLast ? 'GAVE UP' : 'MISSING → REFINING'}</span>
+                      {/* "present in context" — not "COVERED"/"SOLVED" — this only means the matched
+                          entity STRING appears somewhere in the retrieved text; it says nothing about
+                          whether the eventual answer is actually correct. */}
+                      <span style={{ color, fontWeight: 700, letterSpacing: '.03em' }}>{s.covered ? 'ENTITY PRESENT IN CONTEXT' : isLast ? 'GAVE UP' : 'MISSING → REFINING'}</span>
                       {!s.covered && <span style={{ color: 'var(--t2)' }}> · &quot;{s.missing.join(', ')}&quot; not found in the retrieved text</span>}
                     </div>
                   </div>
@@ -1074,9 +1088,9 @@ const StageDetail: React.FC<{
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
               {steps.length === 1
-                ? 'Every entity the query named was already covered by iteration 0’s retrieval — no refinement was needed, and Augment/Generate below use this same set.'
+                ? 'Every entity the query named was already present, as a literal string match, in iteration 0’s retrieved text — no refinement was needed, and Augment/Generate below use this same set. (This only checks the entity was mentioned, not that the eventual answer is correct.)'
                 : last.covered
-                  ? `Iteration 0's retrieval didn't literally mention every entity the query named — refining the query with what was missing and retrieving again covered it by iteration ${last.iter}. Augment/Generate below use iteration ${last.iter}'s set (${last.topIds.join(', ')}), not iteration 0's (${steps[0].topIds.join(', ')}).`
+                  ? `Iteration 0's retrieval didn't literally mention every entity the query named — refining the query with what was missing and retrieving again surfaced it by iteration ${last.iter}. Augment/Generate below use iteration ${last.iter}'s set (${last.topIds.join(', ')}), not iteration 0's (${steps[0].topIds.join(', ')}). (Presence is a literal string match, not a correctness check on the final answer.)`
                   : `The agent refined the query ${steps.length - 1} time${steps.length - 1 === 1 ? '' : 's'} but "${last.missing.join(', ')}" never showed up in the retrieved text before the iteration cap — dense retrieval embeds by topic axis only, so appending a bare proper noun it has no lexicon entry for can leave the ranking completely unchanged. Augment/Generate below proceed with iteration ${last.iter}'s best-effort set anyway (Sparse/Hybrid retrieval also scores literal term overlap, and would pick the appended word up).`}
             </div>
           </Panel>
@@ -1924,15 +1938,18 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       });
     } else {
       retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
-      // Contextual Retrieval: retrieve over chunks RE-EMBEDDED with a
-      // prepended, chunk-specific situating context (contextualize()) instead
-      // of the bare chunk. `chunks` below (returned as `pipe.chunks`) stays
-      // the plain, un-prefixed corpus list the Chunk/Index panels render,
-      // like every other variant — only the chunk objects `ranked`/
-      // `candidates`/`gen` reference are swapped, so Retrieve/Augment/
-      // Generate see the contextualized text+vec while Chunk/Index never do.
+      // Contextual Retrieval: retrieve by the RE-EMBEDDED vector (a prepended,
+      // chunk-specific situating context via contextualize()) but keep `text`
+      // as the RAW chunk — only what gets EMBEDDED/RETRIEVED-BY changes, not
+      // what Augment packs or Generate extracts from, so the answer never
+      // repeats the "From the article on…" prefix per citation (the prefix is
+      // still shown for display in the Embed panel's before/after compare,
+      // via a fresh `contextualize()` call there). `chunks` below (returned
+      // as `pipe.chunks`) stays the plain, un-prefixed corpus list the Chunk
+      // panel renders, like every other variant — only the chunk objects
+      // `ranked`/`candidates`/`gen` reference get the swapped vector.
       const retrievalChunks = hasContextual
-        ? chunks.map((c) => { const cxd = contextualize(c); return { ...c, text: cxd.text, vec: cxd.vec }; })
+        ? chunks.map((c) => ({ ...c, vec: contextualize(c).vec }))
         : chunks;
       ranked = retrieveRanked(retrievalQuery, retrievalChunks, params);
     }

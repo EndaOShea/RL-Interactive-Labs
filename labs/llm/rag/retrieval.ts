@@ -20,11 +20,27 @@ export function hydeDoc(query: string): string {
   return `${query.replace(/\?$/, '')}. In the Solar System, this concerns ${added.join(', ') || 'planets and moons'}. A likely answer describes the relevant body and its ${added.join(' and ') || 'properties'}.`;
 }
 
-// RAG-Fusion: deterministic query variations (stand-ins for an LLM's paraphrases).
-// Retrieval runs once per variation; the rankings are fused with RRF below.
+// RAG-Fusion: facet-diverse query variants (stand-ins for an LLM's paraphrases).
+// A generic paraphrase ("facts about X" / "explain X") adds no new LEXICON
+// tokens, so it embeds ~identically to the original query and fusion never
+// reorders anything. Instead, reuse the SAME per-axis hit detection
+// rewriteQuery uses (LEXICON/AXES) and emit one focused sub-query per axis the
+// query touches, built from the query's OWN word(s) that triggered that axis
+// (e.g. "Which moon of Saturn has a thick atmosphere?" hits the moons axis via
+// "moon" and the atmosphere axis via "thick"+"atmosphere" → sub-queries "moon"
+// and "thick atmosphere"). Each sub-query's embedding leans entirely into ONE
+// facet of the question, so it can surface a chunk that the whole-query
+// embedding buries under a stronger competing facet — RRF below then fuses
+// per-facet rankings back together.
 export function multiQuery(query: string): string[] {
-  const base = query.replace(/\?$/, '');
-  return [query, `facts about ${base}`, `explain ${base}`, `${rewriteQuery(query).rewritten}`];
+  const byAxis = new Map<Axis, string[]>();
+  for (const t of tokenize(query)) {
+    const hit = LEXICON[t];
+    if (!hit) continue;
+    AXES.forEach((a) => { if (hit[a] != null) byAxis.set(a, [...(byAxis.get(a) ?? []), t]); });
+  }
+  const facets = AXES.filter((a) => byAxis.has(a)).map((a) => byAxis.get(a)!.join(' '));
+  return [query, ...facets];
 }
 
 export interface Chunk { id: string; docId: number; title: string; tags: string[]; text: string; vec: number[]; }

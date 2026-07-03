@@ -86,7 +86,11 @@ function accumulate(v: number[], tok: string) {
 }
 // Function words that carry no retrieval signal — stripped before BM25 and the
 // lexical grounding check so "how/is/what" can't create spurious matches.
-export const STOP = new Set(['the','a','an','is','are','was','were','be','been','of','to','in','on','and','or','with','that','this','these','those','from','for','by','at','as','it','its','how','what','which','who','why','when','where','does','do','did','can','could','would','should','will','may','might','must','shall','you','we','they','i','my','your','their','there','here','about','into','than','then','so','such','not','no','if','but','out','up','down','over','under','one','some','any','all','more','most','have','has','had']);
+export const STOP = new Set(['the','a','an','is','are','was','were','be','been','of','to','in','on','and','or','with','that','this','these','those','from','for','by','at','as','it','its','how','what','which','who','why','when','where','does','do','did','can','could','would','should','will','may','might','must','shall','you','we','they','i','my','your','their','there','here','about','into','than','then','so','such','not','no','if','but','out','up','down','over','under','one','some','any','all','more','most','have','has','had',
+  // HyDE's fabricated-answer boilerplate (see hydeDoc in retrieval.ts) — generic
+  // scaffolding words around the real topic keywords, stripped so sparse (BM25)
+  // mode isn't noisy scoring against filler instead of substance.
+  'solar','system','concerns','likely','answer','describes','relevant','body','properties']);
 export function contentTokens(s: string): string[] { return tokenize(s).filter((w) => !STOP.has(w)); }
 export function embedText(text: string): number[] {
   const v = new Array(DIM).fill(0); for (const t of tokenize(text)) accumulate(v, t); return l2norm(v);
