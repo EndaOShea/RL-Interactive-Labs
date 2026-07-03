@@ -11,7 +11,7 @@ import LabStage from '../../components/labkit/LabStage';
 import Heatmap from '../../components/labkit/viz/Heatmap';
 import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../components/labkit/viz/ScatterPlot';
 import GraphCanvas, { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
-import { RunControls, MonoLabel, AlgoPill } from '../../components/stage/primitives';
+import { SBGlass, sbBtn, MonoLabel, AlgoPill } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
@@ -1490,8 +1490,8 @@ const RagParamsPanel: React.FC<{
       onChange={(v) => setParams({ ...params, budget: v })} hint="max chunks stitched into the answer" accent={accent}
     />
     <ParamSlider
-      name="Speed" value={`${speed}ms`} min={200} max={2000} step={100} current={speed}
-      onChange={setSpeed} hint="ms per Step while running" accent={accent}
+      name="Speed" value={`${speed}ms`} min={300} max={4000} step={100} current={speed}
+      onChange={setSpeed} hint="ms per stage while auto-running (or use ◀ Prev / Next ▶)" accent={accent}
     />
     <div>
       <MonoLabel style={{ marginBottom: 9 }}>Retrieval mode</MonoLabel>
@@ -2048,20 +2048,24 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
 
   const stage = stages[stageIdx];
 
-  const step = () => {
-    // Resolve the next stage ONCE and use it for BOTH updates below (and the
-    // narration call) — rail, active-stage detail, header STAGE X/Y, the Math
-    // ticker, and the spoken intro must all describe the SAME stage. (Previously
-    // buildLog ran on the pre-increment stage, so the ticker lagged the rail by
-    // one stage; reusing this one `nextStage` for every consumer below is what
-    // keeps narration in sync rather than reintroducing that lag.)
-    const next = (stageIdx + 1) % stages.length;
-    const nextStage = stages[next];
-    setStageIdx(next);
-    setLastLog(buildLog(nextStage, pipe, query.label, params, variant.name, rerankActive));
-    narration.narratePhase(`${variantId}:${queryIdx}:${nextStage.kind}`, introFor(nextStage, variant, query.label, pipe));
+  // Land on a specific stage index and update EVERY consumer for that SAME stage —
+  // rail, active-stage detail, header STAGE X/Y, the Math ticker, and the spoken
+  // intro. (buildLog/narration must describe the stage we land on, not a
+  // pre/post-increment neighbour, or the ticker lags the rail.) Both forward
+  // (auto-run + Next ▶) and backward (◀ Prev) stepping route through here, so
+  // clicking back is fully symmetric with stepping forward.
+  const goToStage = (idx: number) => {
+    const target = stages[idx];
+    setStageIdx(idx);
+    setLastLog(buildLog(target, pipe, query.label, params, variant.name, rerankActive));
+    narration.narratePhase(`${variantId}:${queryIdx}:${target.kind}`, introFor(target, variant, query.label, pipe));
   };
-  const sim = useSimLoop(step, { initialSpeed: 900 });
+  const step = () => goToStage((stageIdx + 1) % stages.length);
+  const stepBack = () => goToStage((stageIdx - 1 + stages.length) % stages.length);
+  // Default to a slow, readable auto-pace (was 900ms — too fast to follow); the
+  // on-stage slider (300–4000ms) + Prev/Next let the learner set the ms and walk
+  // the pipeline in either direction at their own pace.
+  const sim = useSimLoop(step, { initialSpeed: 1600 });
   // Variant/query changes both route through reset() (VariantDock's onSelect and
   // RagParamsPanel's setQueryIdx below), so cancelling narration here is enough
   // to re-arm it on either change — no separate handler needed.
@@ -2117,7 +2121,18 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       grid={grid}
       narration={narration}
       algoDock={<VariantDock variantId={variantId} onSelect={(id) => { setVariantId(id); reset(); }} accent={ACCENT} />}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      controls={(
+        <SBGlass style={{ padding: 9, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button style={sbBtn()} className="sb-btn" onClick={() => { sim.pause(); stepBack(); }} title="Previous stage">◀ Prev</button>
+          <button style={sbBtn(true)} className="sb-btn" onClick={sim.toggle}>{sim.isPlaying ? '❚❚ Pause' : '▶ Run'}</button>
+          <button style={sbBtn()} className="sb-btn" onClick={() => { sim.pause(); step(); }} title="Next stage">Next ▶</button>
+          <button style={sbBtn()} className="sb-btn" onClick={reset}>↺ Reset</button>
+          <span style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 2px' }} />
+          <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', whiteSpace: 'nowrap' }} title="auto-run interval">{sim.speed}ms</span>
+          <input type="range" className="stage-range" min={300} max={4000} step={100} value={sim.speed}
+            onChange={(e) => sim.setSpeed(Number(e.target.value))} style={{ width: 96, accentColor: ACCENT }} title="ms per stage while running" />
+        </SBGlass>
+      )}
       lastLog={lastLog}
       contextInsight={`${variant.name}: ${variant.blurb}`}
       params={(
