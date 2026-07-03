@@ -43,7 +43,7 @@ const Dendrogram: React.FC<DendrogramProps> = ({ root, maxHeight, leafCount, cut
   const cutY = cut != null ? yOf(cut) : null;
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       {segs.map((s, i) => (
         <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="var(--t1)" strokeWidth={1.6} strokeLinecap="round" />
       ))}

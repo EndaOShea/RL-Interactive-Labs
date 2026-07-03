@@ -92,7 +92,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       onClick={handleClick}
-      style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', cursor: onAddPoint ? 'crosshair' : 'default', maxWidth: '100%' }}
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', cursor: onAddPoint ? 'crosshair' : 'default', maxWidth: '100%' }}
     >
       {/* decision field */}
       {field?.map((c, i) => (

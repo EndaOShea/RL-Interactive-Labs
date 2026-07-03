@@ -30,11 +30,21 @@ const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, width = 560, he
   const edgeColor = (s?: string) => (s === 'path' ? '#fbbf24' : s === 'active' ? '#38bdf8' : (isLight ? 'rgba(50,60,90,.32)' : 'rgba(120,130,170,.28)'));
   // 'current' is the max-contrast state (white on dark) — flip to a dark mark
   // on light so it doesn't vanish into the now-light panel; its label flips
-  // the other way to keep reading against the (now inverted) fill.
-  const stateColor = (s: NodeState) => (isLight && s === 'current' ? 'var(--t0)' : NODE_COLORS[s]);
+  // the other way to keep reading against the (now inverted) fill. 'idle' and
+  // 'visited' are dark fills whose label (textFill) falls through to
+  // var(--t0) — near-black in light mode — so they also need a light fill to
+  // stay legible, mirroring GridBoard's 'empty' override.
+  const stateColor = (s: NodeState) => {
+    if (isLight) {
+      if (s === 'current') return 'var(--t0)';
+      if (s === 'idle') return '#e2e8f2';
+      if (s === 'visited') return '#cfe0f5';
+    }
+    return NODE_COLORS[s];
+  };
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       {/* edges */}
       {edges.map((e, i) => {
         const a = byId.get(e.from), b = byId.get(e.to);

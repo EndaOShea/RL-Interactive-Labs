@@ -50,7 +50,7 @@ const FunctionPlot: React.FC<FunctionPlotProps> = ({
   return (
     <svg
       width={width} height={height} viewBox={`0 0 ${width} ${height}`}
-      style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', maxWidth: '100%' }}
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}
     >
       <rect x={padL} y={padT} width={plotW} height={plotH} fill="none" stroke="var(--border)" strokeWidth="1" />
       {showAxes && [0, 0.25, 0.5, 0.75, 1].map((t) => {

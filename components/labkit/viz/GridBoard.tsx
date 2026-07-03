@@ -72,7 +72,7 @@ const GridBoard: React.FC<GridBoardProps> = ({ cols, rows, state, label, cell = 
   return (
     <svg
       width={W} height={H} viewBox={`0 0 ${W} ${H}`}
-      style={{ display: 'block', borderRadius: 14, background: 'var(--bg2)', border: '1px solid var(--border)', maxWidth: '100%', maxHeight: '70vh', touchAction: 'none' }}
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%', maxHeight: '70vh', touchAction: 'none' }}
     >
       {Array.from({ length: cols * rows }, (_, idx) => {
         const r = Math.floor(idx / cols), c = idx % cols;
