@@ -297,7 +297,7 @@ const StageLayout: React.FC<StageLayoutProps> = (p) => {
         <StageNav active={p.activeModule} onSelect={p.onSelectModule} />
 
         {/* STAGE */}
-        <section style={{ flex: 1, position: 'relative', background: 'radial-gradient(130% 100% at 35% 30%, #131b30, #080b14 72%)', overflow: 'hidden', minWidth: 0 }}>
+        <section style={{ flex: 1, position: 'relative', background: 'var(--stage-bg)', overflow: 'hidden', minWidth: 0 }}>
           <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(120,130,170,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(120,130,170,.05) 1px,transparent 1px)', backgroundSize: '44px 44px' }} />
           <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 220px 40px rgba(0,0,0,.55)', pointerEvents: 'none' }} />
 

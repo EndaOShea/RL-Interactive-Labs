@@ -4,6 +4,7 @@
 // here so each lab's render stays tiny.
 import React from 'react';
 import { GOOD, BAD, ACC } from './primitives';
+import { useTheme } from '../../utils/theme';
 
 export interface CellSpec {
   wall?: boolean;
@@ -21,8 +22,6 @@ export interface CellSpec {
   arrows?: { rot: number; op: number }[];
 }
 
-const BASE = '#0e1320';
-
 const Arrow: React.FC<{ rot: number; op: number }> = ({ rot, op }) => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
     style={{ position: 'absolute', transform: `rotate(${rot}deg)`, opacity: op, zIndex: 3 }}>
@@ -30,14 +29,20 @@ const Arrow: React.FC<{ rot: number; op: number }> = ({ rot, op }) => (
   </svg>
 );
 
-const Orb: React.FC<{ color: string }> = ({ color }) => (
-  <div style={{
-    width: '52%', height: '52%', borderRadius: '50%', zIndex: 4,
-    background: color === '#fff' ? 'radial-gradient(circle at 32% 30%, #fff, #cbd5f5 40%, #8b9bd8)' : color,
-    border: '2px solid rgba(255,255,255,.85)',
-    boxShadow: `0 0 16px -1px ${color === '#fff' ? 'rgba(255,255,255,.5)' : color}, 0 2px 6px rgba(0,0,0,.5)`,
-  }} />
-);
+const Orb: React.FC<{ color: string }> = ({ color }) => {
+  const isLight = useTheme() === 'light';
+  const white = isLight
+    ? 'radial-gradient(circle at 32% 30%, #8b93ad, #4a5578 60%, #2e3653)'  // slate orb on light
+    : 'radial-gradient(circle at 32% 30%, #fff, #cbd5f5 40%, #8b9bd8)';
+  return (
+    <div style={{
+      width: '52%', height: '52%', borderRadius: '50%', zIndex: 4,
+      background: color === '#fff' ? white : color,
+      border: `2px solid ${isLight ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.85)'}`,
+      boxShadow: `0 0 16px -1px ${color === '#fff' ? (isLight ? 'rgba(74,85,120,.45)' : 'rgba(255,255,255,.5)') : color}, 0 2px 6px rgba(0,0,0,${isLight ? '.28' : '.5'})`,
+    }} />
+  );
+};
 
 const StageGrid: React.FC<{
   cols: number; rows: number; cell?: number; gap?: number;
@@ -45,6 +50,15 @@ const StageGrid: React.FC<{
 }> = ({ cols, rows, cell = 52, gap = 7, spec }) => {
   const W = cols * cell + (cols - 1) * gap;
   const H = rows * cell + (rows - 1) * gap;
+  const isLight = useTheme() === 'light';
+  const BASE = isLight ? '#e9edf5' : '#0e1320';
+  const emptyBorder = isLight ? '#dde3ef' : '#1c2440';
+  const wallBg = isLight
+    ? 'repeating-linear-gradient(45deg,#d6dce8,#d6dce8 5px,#c8cfde 5px,#c8cfde 10px)'
+    : 'repeating-linear-gradient(45deg,#1c2236,#1c2236 5px,#161b2c 5px,#161b2c 10px)';
+  const wallBorder = isLight ? '#c2c9da' : '#2a3350';
+  const heatBorderBase = isLight ? '#dde3ef' : '#232c45';
+  const labelColor = isLight ? 'rgba(18,23,42,.42)' : 'rgba(255,255,255,.32)';
 
   return (
     <div style={{ position: 'relative', width: W, height: H }}>
@@ -54,15 +68,15 @@ const StageGrid: React.FC<{
         {Array.from({ length: cols * rows }).map((_, idx) => {
           const c = spec(idx);
           let bg = BASE;
-          let border = '#1c2440';
+          let border = emptyBorder;
           if (c.wall) {
-            bg = 'repeating-linear-gradient(45deg,#1c2236,#1c2236 5px,#161b2c 5px,#161b2c 10px)';
-            border = '#2a3350';
+            bg = wallBg;
+            border = wallBorder;
           } else if (c.heat) {
             const hc = c.heat > 0 ? GOOD : BAD;
             const a = Math.min(0.62, 0.1 + Math.abs(c.heat) * 0.52);
             bg = `color-mix(in srgb, ${hc} ${(a * 100).toFixed(0)}%, ${BASE})`;
-            border = `color-mix(in srgb, ${hc} 28%, #232c45)`;
+            border = `color-mix(in srgb, ${hc} 28%, ${heatBorderBase})`;
           }
           return (
             <div key={idx} style={{
@@ -74,7 +88,7 @@ const StageGrid: React.FC<{
             }}>
               {/* value label */}
               {c.label && !c.wall && (
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'rgba(255,255,255,.32)', position: 'absolute', top: 4, left: 5 }}>{c.label}</span>
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: labelColor, position: 'absolute', top: 4, left: 5 }}>{c.label}</span>
               )}
               {/* planning flash */}
               {c.planned && <div style={{ position: 'absolute', inset: 0, borderRadius: 7, background: `color-mix(in srgb, ${ACC} 33%, transparent)`, zIndex: 1, animation: 'ledPulse .9s ease-out' }} />}
