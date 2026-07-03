@@ -10,6 +10,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { classifyPython } from './python';
 import { fitLogistic, classifyProb, SENTIMENT_POINTS } from './shared';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#14b8a6';
 const NEG = '#f87171';
@@ -30,6 +31,7 @@ const truncate = (text: string, max = 28) =>
   text.length > max ? text.slice(0, max - 1) + '…' : text;
 
 const TextClassificationLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [testIdx, setTestIdx] = useState(0);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
@@ -51,7 +53,7 @@ const TextClassificationLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
 
   // Test-review marker: white ring so it is visually distinct from training points.
   const markers: ScatterMarker[] = [
-    { x: test.vec[0], y: test.vec[1], color: '#ffffff', r: 7, ring: true },
+    { x: test.vec[0], y: test.vec[1], color: isLight ? 'var(--t0)' : '#ffffff', r: 7, ring: true },
   ];
 
   const classify = () => {
@@ -123,7 +125,7 @@ const TextClassificationLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
           />
           <div style={{
             width: 500,
-            background: 'rgba(8,11,20,.55)',
+            background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)',
             border: '1px solid var(--border)',
             borderRadius: 10,
             padding: '10px 14px',
@@ -185,7 +187,7 @@ const TextClassificationLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
             color: 'var(--t2)',
             letterSpacing: '.03em',
             lineHeight: 1.7,
-            background: 'rgba(8,11,20,.45)',
+            background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.45)',
             border: '1px solid var(--border)',
             borderRadius: 8,
             padding: '10px 12px',
