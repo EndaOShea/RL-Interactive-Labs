@@ -527,7 +527,9 @@ git commit -m "feat(theme): light translation of the /rl stage backdrop + grid"
 
 ## Task 7: Shared viz-primitive audit (`components/labkit/viz/*`)
 
-Fixing the shared primitives re-themes many labs at once. The **procedure per file**: (1) `grep -nE '#[0-9a-fA-F]{6}|rgba?\(' <file>`; (2) classify each colour — **structural** (panel/plot background, axis/grid stroke, tick/label text, halo/outline used for contrast) → make theme-aware; **data accent** (a series/class/category colour that reads on both light and dark) → leave; (3) prefer an existing token (`var(--bg2)`, `var(--border)`, `var(--t2)`) over a new literal; use a `useTheme()` branch only when a token doesn't fit (e.g. a translucent halo).
+Fixing the shared primitives re-themes many labs at once. The **procedure per file**: (1) `grep -nE '#[0-9a-fA-F]{6}|rgba?\(' <file>`; (2) classify each colour — **structural** (panel/plot background, axis/grid stroke, tick/label text, halo/outline used for contrast) → make theme-aware; **data accent** (a series/class/category colour that reads on both light and dark) → leave; (3) make it theme-aware **preserving dark byte-identically**.
+
+**Dark-preservation rule (governs — the plan's #1 Global Constraint):** the dark-mode rendered value must not change. So: swap a literal for a token ONLY when that token's DARK value equals the literal you're replacing (e.g. a lab's `#232c45` → `var(--border)`, whose dark IS `#232c45` — dark-identical AND light-adaptive). When no token's dark value matches (e.g. `rgba(8,11,20,.55)` — no token equals it; `var(--bg2)` dark is `#131a2c`, different), use `isLight ? '<light value>' : '<the original literal verbatim>'` so dark stays exact. **Never** blind-swap a dark literal to a token whose dark value differs.
 
 **Files (checklist — audit each):**
 - [ ] `components/labkit/viz/ScatterPlot.tsx`
@@ -602,7 +604,8 @@ The remaining hard-coded colours live in individual labs. Sweep **area by area**
 
 **Per-area procedure:**
 1. `grep -rnE '#[0-9a-fA-F]{6}|rgba?\(' labs/<area>/` (skip `content.ts`/`python.ts` — copy/strings, not rendered styling; focus on `*.tsx` + any `shared.ts` that returns colours).
-2. Classify each hit: **structural** (a background, panel, axis/grid, border, tick/label text, or a dark/white contrast halo) → make theme-aware (token first, else `useTheme()` branch); **data accent** that reads on both backgrounds → leave.
+2. Classify each hit: **structural** (a background, panel, axis/grid, border, tick/label text, or a dark/white contrast halo) → make theme-aware **preserving dark byte-identically** (see the Dark-preservation rule below); **data accent** that reads on both backgrounds → leave.
+   - **Dark-preservation rule:** swap a literal → token ONLY if the token's DARK value equals that literal (dark-identical + light-adaptive). Otherwise use `isLight ? '<light>' : '<original literal verbatim>'`. Never swap a dark literal to a token whose dark value differs (e.g. `rgba(8,11,20,.55)` → `var(--bg2)` is WRONG — changes dark from translucent near-black to opaque `#131a2c`).
 3. Watch specifically for: `background: 'rgba(8,11,20,…)'` / `#080b14` / `#0d1220` / `#0e13xx` panels; `#fff`/`#ffffff` used as a fill or agent/marker on what is now a light background; dark gridline/axis literals; `#111`/`#000`-ish text.
 4. Rebuild/refresh in **light** mode, eyeball the lab, fix stragglers, commit.
 
