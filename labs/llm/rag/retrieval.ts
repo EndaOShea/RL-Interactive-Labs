@@ -131,3 +131,12 @@ export function maxSim(qTokens: string[], cTokens: string[]): { score: number; m
   const score = matrix.reduce((s, row) => s + Math.max(...row), 0);
   return { score, matrix, picks };
 }
+
+// Anthropic Contextual Retrieval: prepend a chunk-specific situating context
+// before embedding, so a bare chunk isn't stranded from its document.
+export function contextualize(chunk: Chunk): { context: string; text: string; vec: number[] } {
+  const doc = DOCS[chunk.docId];
+  const context = `From the article on ${doc.title} (${doc.category}${doc.type ? ', ' + doc.type : ''}):`;
+  const text = `${context} ${chunk.text}`;
+  return { context, text, vec: embedText(text) };
+}

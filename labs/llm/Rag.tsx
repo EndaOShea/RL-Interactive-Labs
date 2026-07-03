@@ -24,6 +24,7 @@ import {
   chunkAll, retrieveRanked, generate, AXES, project2, cosine, embedText, rerankScore, rewriteQuery, hydeDoc,
   multiQuery, denseScores, topK, rrf, isRelevant, isSupported, gradeRetrieval, webFallback, GRADE_HI, GRADE_LO,
   ENTITIES, RELATIONS, COMMUNITIES, neighbors, localSearch, globalSearch, graphLayout, buildTree, retrieveTree,
+  contextualize,
 } from './rag/index';
 import type { RagParams, Stage, Chunk, Ranked, GenResult, ChunkStrategy, Grade, Entity, TreeNode } from './rag/index';
 
@@ -157,6 +158,24 @@ function strideSample<T>(arr: T[], cap: number): T[] {
   return Array.from({ length: cap }, (_, i) => arr[Math.floor(i * step)]);
 }
 
+// Contextual Retrieval demo pick: the chunk whose query-similarity benefits
+// MOST from context-prepending (the largest after − before cosine lift) —
+// computed live against whichever query/chunk-strategy/size is active, so the
+// before/after comparison in the embed panel is always genuinely
+// illustrative instead of hardcoding one chunk id that might not even exist
+// under the current chunking parameters.
+function pickContextualDemo(chunks: Chunk[], query: string): { chunk: Chunk; before: number; after: number } | null {
+  if (!chunks.length) return null;
+  const qv = embedText(query);
+  let best = chunks[0], bestBefore = cosine(qv, chunks[0].vec), bestAfter = cosine(qv, contextualize(chunks[0]).vec);
+  for (const c of chunks.slice(1)) {
+    const before = cosine(qv, c.vec);
+    const after = cosine(qv, contextualize(c).vec);
+    if (after - before > bestAfter - bestBefore) { best = c; bestBefore = before; bestAfter = after; }
+  }
+  return { chunk: best, before: bestBefore, after: bestAfter };
+}
+
 const Tag: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <span style={{
     fontFamily: 'var(--mono)', fontSize: 9, padding: '1.5px 7px', borderRadius: 999,
@@ -270,6 +289,45 @@ const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> 
           textAnchor="end" fontSize={9} fontFamily="var(--mono)" fill="var(--t2)">{n}</text>
       )))}
     </svg>
+  );
+};
+
+// Contextual Retrieval's before/after card: one chunk, raw vs context-
+// prepended, each with its own cosine to the query — the score lift IS the
+// technique. `chunk.text` is the RAW (un-prefixed) text (pipe.chunks always
+// stays the plain corpus chunk list — see the pipe useMemo's comment), so
+// `contextualize()` is called fresh here purely for display.
+const ContextualEmbedCompare: React.FC<{ chunks: Chunk[]; query: string; accent: string }> = ({ chunks, query, accent }) => {
+  const demo = pickContextualDemo(chunks, query);
+  if (!demo) return null;
+  const { chunk, before, after } = demo;
+  const ctx = contextualize(chunk);
+  const lift = after - before;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 660 }}>
+      <MonoLabel style={{ fontSize: 9 }}>Contextual Retrieval · before / after for chunk {chunk.id}</MonoLabel>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 260, border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', background: 'rgba(8,11,20,.4)' }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)', marginBottom: 4 }}>BEFORE · raw chunk</div>
+          <div style={{ ...row, color: 'var(--t1)', fontSize: 11 }}>{chunk.text}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginTop: 6 }}>
+            cos(query, chunk) = <b style={{ color: 'var(--t0)' }}>{before.toFixed(3)}</b>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 260, border: `1px solid ${accent}`, borderRadius: 8, padding: '8px 10px', background: 'rgba(167,139,250,.06)' }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: accent, marginBottom: 4 }}>AFTER · context-prepended</div>
+          <div style={{ ...row, fontSize: 11 }}>
+            <span style={{ color: accent, background: 'rgba(167,139,250,.18)', borderRadius: 4, padding: '0 3px' }}>{ctx.context}</span>
+            {' '}
+            <span style={{ color: 'var(--t1)' }}>{chunk.text}</span>
+          </div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginTop: 6 }}>
+            cos(query, chunk) = <b style={{ color: accent }}>{after.toFixed(3)}</b>{' '}
+            <span style={{ color: lift > 0.0005 ? '#34d399' : 'var(--t2)' }}>({lift >= 0 ? '+' : ''}{lift.toFixed(3)})</span>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -576,7 +634,8 @@ const StageDetail: React.FC<{
   onRetrieval: (m: RagParams['retrieval']) => void;
   rerankActive: boolean;
   graphMode: 'local' | 'global'; onGraphMode: (m: 'local' | 'global') => void;
-}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive, graphMode, onGraphMode }) => {
+  hasContextual: boolean;
+}> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive, graphMode, onGraphMode, hasContextual }) => {
   switch (stage.kind) {
     case 'hyde': {
       const doc = hydeDoc(query);
@@ -715,6 +774,7 @@ const StageDetail: React.FC<{
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
           <MonoLabel>Embed · lexicon → {AXES.length}-D axis vector, L2-normalised · {stage.note}</MonoLabel>
+          {hasContextual && <ContextualEmbedCompare chunks={chunks} query={query} accent={ACCENT} />}
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'center' }}>
               <MonoLabel style={{ fontSize: 9 }}>chunk × axis</MonoLabel>
@@ -1447,6 +1507,15 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   // for a broad question. No variant's rail owns 'tree' together with
   // 'fuse'/'graphsearch', so these stay mutually exclusive.
   const hasTree = stages.some((s) => s.kind === 'tree');
+  // True for the Contextual Retrieval variant — the pipe below re-embeds
+  // every chunk with a prepended, chunk-specific situating context
+  // (contextualize()) before retrieval; Augment/Generate then consume those
+  // (text-prefixed) chunk objects too. Gated on variantId (not a stage kind)
+  // because Contextual's rail reuses the SAME chunk/embed/index/retrieve/
+  // augment/generate stage kinds every foundational variant already has —
+  // unlike hasGraph/hasTree/hasFusion above, there is no distinct stage kind
+  // to structurally key off.
+  const hasContextual = variantId === 'contextual';
 
   // pipeline outputs (memoized on query+params+stages).
   // `candidates` = the top-k retrieved chunks, optionally re-sorted by the
@@ -1528,7 +1597,17 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       });
     } else {
       retrievalQuery = hasHyde ? hydeDoc(query.label) : hasRewrite ? rewriteQuery(query.label).rewritten : query.label;
-      ranked = retrieveRanked(retrievalQuery, chunks, params);
+      // Contextual Retrieval: retrieve over chunks RE-EMBEDDED with a
+      // prepended, chunk-specific situating context (contextualize()) instead
+      // of the bare chunk. `chunks` below (returned as `pipe.chunks`) stays
+      // the plain, un-prefixed corpus list the Chunk/Index panels render,
+      // like every other variant — only the chunk objects `ranked`/
+      // `candidates`/`gen` reference are swapped, so Retrieve/Augment/
+      // Generate see the contextualized text+vec while Chunk/Index never do.
+      const retrievalChunks = hasContextual
+        ? chunks.map((c) => { const cxd = contextualize(c); return { ...c, text: cxd.text, vec: cxd.vec }; })
+        : chunks;
+      ranked = retrieveRanked(retrievalQuery, retrievalChunks, params);
     }
     const retrievedTopK = ranked.slice(0, params.k);
     // Self-RAG's critique: grade each of the top-k RETRIEVED chunks (not the whole
@@ -1566,7 +1645,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       chunks, ranked, candidates, gen, retrievalQuery, queries, perQueryRankings, fusedMap, critique, supported, grade, webChunks,
       graphMode: hasGraph ? graphMode : undefined, localResult, globalResult, tree, treeHits,
     };
-  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, graphMode]);
+  }, [queryIdx, params, stages, rerankActive, hasRewrite, hasHyde, hasFusion, hasCritique, hasGrade, hasGraph, hasTree, hasContextual, graphMode]);
 
   const stage = stages[stageIdx];
 
@@ -1608,6 +1687,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           onRetrieval={(m) => setParams({ ...params, retrieval: m })}
           rerankActive={rerankActive}
           graphMode={graphMode} onGraphMode={setGraphMode}
+          hasContextual={hasContextual}
         />
       </div>
     </div>

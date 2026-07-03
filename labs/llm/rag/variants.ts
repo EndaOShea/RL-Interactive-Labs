@@ -225,6 +225,25 @@ const RAPTOR: Variant = {
   ],
 };
 
-export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR };
-export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor'];
+// --- Contextual Retrieval: prepend a chunk-specific situating context before
+// embedding (see ./retrieval's `contextualize`) so a bare, pronoun-heavy
+// fragment isn't stranded from the document that gives it meaning. Rag.tsx's
+// pipe branch (gated on `hasContextual`) re-embeds every chunk with
+// `contextualize(chunk)` and retrieves/augments/generates over those —
+// Augment/Generate still answer the ORIGINAL query.
+const CONTEXTUAL: Variant = {
+  id: 'contextual', name: 'Contextual Retrieval', group: 'Structured', year: '2024',
+  blurb: 'Prepends a short, chunk-specific situating context — which document and category a chunk came from — before it is embedded (and indexed), so a bare fragment is no longer stranded from the document that gives it meaning. Chunking is unchanged; only what gets embedded and retrieved against changes.',
+  stages: () => [
+    { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
+    { kind: 'embed', label: 'Embed', note: 'Prepend a chunk-specific situating context, then vectorize — not the bare chunk.' },
+    { kind: 'index', label: 'Index', note: 'Store the contextualized vectors in the index.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest contextualized chunks.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the retrieved (contextualized) chunks into the prompt.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
+  ],
+};
+
+export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR, contextual: CONTEXTUAL };
+export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor', 'contextual'];
 export { QUERIES };
