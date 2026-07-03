@@ -9,6 +9,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { hmmPython } from './python';
 import { rng } from './shared';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#e879f9';
 const FAIR = '#34d399';     // state 0
@@ -91,6 +92,7 @@ const FACE = ['1', '2', '3', '4', '5', '6'];
 const Timeline: React.FC<{
   obs: number[]; truth: number[]; filtered: number[]; viterbi: number[]; smoothed?: number[]; total: number;
 }> = ({ obs, truth, filtered, viterbi, smoothed, total }) => {
+  const isLight = useTheme() === 'light';
   const cw = Math.max(20, Math.min(30, Math.floor(540 / Math.max(1, total))));
   const W = total * cw + 70, rowH = 26, gap = 6;
   const rows = smoothed ? 5 : 4;
@@ -106,7 +108,7 @@ const Timeline: React.FC<{
   const yTru = ry; ry += rowH + gap;
   const yVit = ry;
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, maxWidth: '100%' }}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, maxWidth: '100%' }}>
       {Row(yObs, 'roll')}{Row(yFil, 'P(loaded)')}{smoothed && Row(ySmo, 'smoothed')}{Row(yTru, 'true die')}{Row(yVit, 'Viterbi')}
       {obs.map((o, t) => {
         const x = labelX + t * cw;
@@ -117,13 +119,13 @@ const Timeline: React.FC<{
         return (
           <g key={t}>
             {/* observed roll */}
-            <rect x={x + 1} y={yObs} width={cw - 2} height={rowH} rx={4} fill="#141b2e" stroke="var(--border)" strokeWidth={0.6} />
+            <rect x={x + 1} y={yObs} width={cw - 2} height={rowH} rx={4} fill={isLight ? 'var(--bg3)' : '#141b2e'} stroke="var(--border)" strokeWidth={0.6} />
             <text x={x + cw / 2} y={yObs + rowH / 2 + 4} textAnchor="middle" fontFamily="var(--mono)" fontSize="12" fill={o === 5 ? LOADED : 'var(--t1)'} fontWeight={o === 5 ? 700 : 400}>{FACE[o]}</text>
             {/* filtered posterior P(loaded) as a colour cell */}
-            <rect x={x + 1} y={yFil} width={cw - 2} height={rowH} rx={4} fill={mix(p)} stroke="rgba(8,11,20,.5)" strokeWidth={0.6} />
+            <rect x={x + 1} y={yFil} width={cw - 2} height={rowH} rx={4} fill={mix(p)} stroke={isLight ? 'rgba(255,255,255,.5)' : 'rgba(8,11,20,.5)'} strokeWidth={0.6} />
             <text x={x + cw / 2} y={yFil + rowH / 2 + 3} textAnchor="middle" fontFamily="var(--mono)" fontSize="8.5" fill="rgba(8,11,20,.8)">{p.toFixed(2)}</text>
             {/* smoothed (only when complete) */}
-            {smoothed && <rect x={x + 1} y={ySmo} width={cw - 2} height={rowH} rx={4} fill={mix(sm)} stroke="rgba(8,11,20,.5)" strokeWidth={0.6} />}
+            {smoothed && <rect x={x + 1} y={ySmo} width={cw - 2} height={rowH} rx={4} fill={mix(sm)} stroke={isLight ? 'rgba(255,255,255,.5)' : 'rgba(8,11,20,.5)'} strokeWidth={0.6} />}
             {/* true state */}
             <rect x={x + 1} y={yTru} width={cw - 2} height={rowH} rx={4} fill={tru === 1 ? LOADED : FAIR} opacity={0.9} />
             {/* viterbi */}
