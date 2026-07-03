@@ -10,6 +10,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { forwardReversePython } from './python';
 import { DenoiseBar, PresetRow } from './viz';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#f59e0b';
 type Schedule = 'cosine' | 'linear';
@@ -82,6 +83,7 @@ const PRESETS: Preset[] = [
 ];
 
 const ForwardReverseLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [schedule, setSchedule] = useState<Schedule>('cosine');
   const [dataset, setDataset] = useState<Dataset>('two-moons');
   const [sampler, setSampler] = useState<Sampler>('ddpm');
@@ -267,7 +269,7 @@ const ForwardReverseLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
         { label: 'ᾱ_t', value: ab.toFixed(3) },
         { label: 'SNR', value: snr.toFixed(2) },
         { label: 'SAMP', value: sampler.toUpperCase(), color: sampler === 'ddim' ? '#38bdf8' : '#a78bfa' },
-        { label: 'DIR', value: dir === 1 ? 'forward' : 'reverse', color: dir === 1 ? '#f87171' : '#34d399' },
+        { label: 'DIR', value: dir === 1 ? 'forward' : 'reverse', color: dir === 1 ? (isLight ? 'var(--bad)' : '#f87171') : (isLight ? 'var(--good)' : '#34d399') },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, forwardReversePython(schedule, T, dataset, sampler, steps, guidance))}
       grid={(

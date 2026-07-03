@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '../../utils/theme';
 
 // Area-local viz helpers for the Diffusion labs. These are SMALL, self-contained
 // overlays drawn next to / on top of the shared ScatterPlot / FunctionPlot
@@ -20,6 +21,7 @@ export const DenoiseBar: React.FC<{
   label?: string;
   width?: number;
 }> = ({ noiseFrac, dir, label, width = 196 }) => {
+  const isLight = useTheme() === 'light';
   const f = Math.max(0, Math.min(1, noiseFrac));
   const signal = 1 - f;
   return (
@@ -28,13 +30,13 @@ export const DenoiseBar: React.FC<{
         <span style={{ fontFamily: 'var(--mono)', fontSize: 9, letterSpacing: '.1em', color: 'var(--t2)' }}>
           {dir === 1 ? 'NOISING →' : '← DENOISING'}
         </span>
-        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: dir === 1 ? '#f87171' : '#34d399' }}>
+        <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: dir === 1 ? (isLight ? 'var(--bad)' : '#f87171') : (isLight ? 'var(--good)' : '#34d399') }}>
           {(signal * 100).toFixed(0)}% signal
         </span>
       </div>
-      <div style={{ position: 'relative', height: 10, borderRadius: 6, overflow: 'hidden', background: '#1c2440', border: '1px solid var(--border)' }}>
+      <div style={{ position: 'relative', height: 10, borderRadius: 6, overflow: 'hidden', background: isLight ? 'var(--bg3)' : '#1c2440', border: '1px solid var(--border)' }}>
         <div style={{ position: 'absolute', inset: 0, width: `${signal * 100}%`, background: 'linear-gradient(90deg,#34d399,#f59e0b)' }} />
-        <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${signal * 100}%`, width: 2, background: '#fff', opacity: 0.85 }} />
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: `${signal * 100}%`, width: 2, background: isLight ? 'var(--t0)' : '#fff', opacity: 0.85 }} />
       </div>
       {label && <div style={{ fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--t2)', marginTop: 6, letterSpacing: '.04em' }}>{label}</div>}
     </div>
@@ -63,7 +65,7 @@ export const PresetRow: React.FC<{
             fontFamily: 'var(--mono)', fontSize: 11, letterSpacing: '.02em', padding: '6px 11px', borderRadius: 7,
             color: active ? '#fff' : 'var(--t1)',
             background: active ? accent : 'transparent',
-            border: `1px solid ${active ? accent : '#232c45'}`,
+            border: `1px solid ${active ? accent : 'var(--border)'}`,
             boxShadow: active ? `0 0 14px -3px ${accent}` : 'none',
             cursor: 'pointer',
           }}
