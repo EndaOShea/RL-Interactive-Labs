@@ -92,6 +92,12 @@ Each lab fills the viewport as one cinematic stage:
     variable values, the result, and a plain-English read on each parameter's effect.
   - **Context** — concept cards and lifecycle notes for the topic.
 
+### Light & dark
+The platform is **dark-first with an opt-in light theme.** A sun/moon toggle sits at the foot of
+every nav rail; your choice is remembered (in `localStorage`, not `prefers-color-scheme`), applied
+before first paint so there's no flash. Dark mode is the default and is left pixel-for-pixel
+unchanged.
+
 ### Multi-provider AI tutor
 A context-aware tutor docked in the instrument column sees your current parameters and recent
 behaviour and explains *why* the simulation does what it does. Pick a provider and model behind
@@ -153,7 +159,8 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 - **Frontend:** React 19 + TypeScript, built with Vite; `react-router-dom` for the catalog +
   area routes
 - **Styling:** a CSS-variable design system (`index.css`) with inline-styled "stage"
-  components; Tailwind for the base layer; Space Grotesk + IBM Plex fonts
+  components; **light/dark theming** via a `data-theme` attribute + a `:root[data-theme="light"]`
+  token override; Tailwind for the base layer; Space Grotesk + IBM Plex fonts
 - **Icons:** Lucide React (error boundary)
 - **AI:** `@google/genai` SDK for Gemini; `fetch` for OpenAI / Anthropic / DeepSeek, behind a
   unified client
@@ -169,7 +176,8 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 │   └── HomeCatalog.tsx           # Scrollable catalog home
 ├── components/
 │   ├── stage/                    # RL "Cinematic Stage" (frozen): StageLayout, StageGrid, …
-│   └── labkit/                   # Generic twin for new areas: LabStage, LabNav, TutorDock, viz/
+│   ├── labkit/                   # Generic twin for new areas: LabStage, LabNav, TutorDock, viz/
+│   └── ThemeToggle.tsx           # Sun/moon light-dark toggle (mounted in every nav rail)
 ├── labs/<area>/                  # Per-area labs (*.tsx) + content.ts, python.ts, registry.ts
 ├── hooks/                        # useSimLoop (play/pause/reset), useTutorState (per-area tutor)
 ├── services/
@@ -178,10 +186,12 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 │   └── providers.ts              # Provider registry (Google / OpenAI / Anthropic / DeepSeek)
 ├── utils/
 │   ├── apiHelpers.ts             # Rate limiting (5 RPM / 20 RPD) + retry/backoff
-│   └── downloadCode.ts           # Runnable-Python export for new-area labs
+│   ├── downloadCode.ts           # Runnable-Python export for new-area labs
+│   └── theme.ts                  # Light/dark store: data-theme attr + localStorage['pp-theme']
 ├── constants.ts                  # RL defaults, MODULE_CONTENT, LIFECYCLE_CONTEXTS
 ├── types.ts                      # ModuleId, SimulationUpdate, provider + reasoning types
-├── index.css                     # Design tokens, fonts, themed range inputs/scrollbars
+├── index.css                     # Design tokens (+ light-mode :root[data-theme=light]), fonts, scrollbars
+├── public/theme-init.js          # No-flash theme init, loaded first in <head> (CSP-safe)
 ├── security-headers.conf         # CSP (provider hosts + Google Fonts), shared nginx headers
 ├── nginx.conf                    # Static serve + SPA fallback
 └── vite.config.ts

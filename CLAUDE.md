@@ -22,7 +22,11 @@ deliberately left untouched and now lives at the `/rl` route; a catalog home (`/
 The app is now a small multi-page platform under `react-router-dom`. **The RL code is frozen**:
 `App.tsx`, `components/TheoryLabs.tsx`, `components/stage/*`, `constants.ts`, and the RL parts of
 `types.ts` are never edited — new areas import their reusable, generic pieces (`primitives.tsx`,
-the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only.
+the exported `LiveMath`, `ApiKeyPanel`, `services/*`) read-only. **The sole exception is the
+site-wide light-mode work** (see **Theming (light / dark mode)** below): it made *theme-only* edits
+— `isLight ? light : dark` colour branches and CSS-var swaps, with dark mode kept byte-identical —
+to `TheoryLabs.tsx`, `stage/StageLayout.tsx`, `stage/StageGrid.tsx`, and `stage/primitives.tsx`;
+`App.tsx` and `constants.ts` stay untouched.
 
 - **Routing** — `index.tsx` renders `AppRouter.tsx`: `/` → `catalog/HomeCatalog` (scrollable
   catalog), `/rl` → the untouched `<App/>`, `/<category>/:labId?` → `components/labkit/AreaHost`
@@ -248,6 +252,39 @@ tab reset naturally.)
   inputs/scrollbars live in `index.css`. Stage components are inline-styled with CSS variables;
   Tailwind remains for the base layer + `ErrorBoundary`. The CSP in `security-headers.conf`
   allows the provider hosts plus `fonts.googleapis.com` / `fonts.gstatic.com`.
+
+### Theming (light / dark mode)
+The platform is **dark-first with an opt-in light theme**, switched by a `data-theme` attribute on
+`<html>` (absent = dark, the default; `"light"` = light). **Dark mode is byte-identical** to before
+the feature: light values live only under the `:root[data-theme="light"]` override or behind a
+`useTheme() === 'light'` branch whose dark side is the *original literal, verbatim*.
+- **Store** — `utils/theme.ts`: `getTheme` / `setTheme` / `toggleTheme` + a `useTheme()` hook
+  (`useSyncExternalStore`). Flips the `<html>` attribute and persists to `localStorage['pp-theme']`;
+  `prefers-color-scheme` is intentionally ignored (dark-first).
+- **No-flash init** — `public/theme-init.js`, a same-origin script loaded first in `<head>` (CSP-safe
+  under `script-src 'self'` — never inline); applies the saved theme before first paint.
+- **Toggle** — `components/ThemeToggle.tsx` (sun/moon), mounted in all three nav rails:
+  `catalog/HomeCatalog.tsx`, `components/labkit/LabNav.tsx`, and the frozen `stage/StageLayout.tsx`.
+- **Tokens** — `index.css` defines the light palette as a *purely additive* `:root[data-theme="light"]{…}`
+  override of the default `:root` dark tokens ("Clean Daylight"); the ~938 `var(--…)` / `color-mix()`
+  usages re-theme for free. New stage vars `--stage-bg` / `--stage-grid` / `--stage-vignette` (dark
+  defaults = the original literals) are consumed by **both** stage shells (`StageLayout` **and**
+  `labkit/LabStage` — the labkit stage was the one that had to be added).
+- **Per-element pattern** — hard-coded structural darks that don't flow through a var become
+  `isLight ? '<light>' : '<original dark literal, verbatim>'`. `primitives.tsx`'s `ACC`/`GOOD`/`BAD`
+  were re-pointed to `var(--acc/good/bad)` (their dark values equal the old hex, so this is
+  dark-identical *and* light-adaptive); `SBGlass` / `ParamSlider` track / `MathTicker` and the grid
+  `Heatmap` ('heat' mode → a light **Thermal** blue→amber→red ramp) are `useTheme()`-branched. Leave
+  data / category / accent colours alone — they read on both themes. Watch two traps: a token whose
+  dark value ≠ the literal you're replacing (don't blind-swap — branch instead), and colours that feed
+  SVG marker `id`/`url(#…)` refs (keep those literal, e.g. `MatrixMultiplication.tsx`).
+- **`useTheme` import depth** — `labs/<area>/*` → `'../../utils/theme'`; `components/labkit/viz/*` →
+  `'../../../utils/theme'`; `components/stage/*` → `'../../utils/theme'`; `components/*` → `'../utils/theme'`.
+- **When adding a lab/area:** prefer `var(--…)` tokens; for any hard-coded dark, use the
+  `isLight ? light : original` pattern and keep the dark branch exactly the original (verify with a
+  dark-mode diff). Design + implementation record: `docs/superpowers/{specs,plans}/2026-07-03-light-mode-*.md`.
+  A few cosmetic light-mode minors are deferred (e.g. GridBoard walls render a stark black block on
+  light) — polish, not blockers.
 
 ## Development notes
 - Each lab in `TheoryLabs.tsx` is self-contained; shared helpers (`downloadPython`, grid
