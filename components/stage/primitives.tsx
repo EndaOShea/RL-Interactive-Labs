@@ -84,6 +84,7 @@ export const LED: React.FC<{ color?: string; label?: string; pulse?: boolean }> 
 export const Sparkline: React.FC<{ w?: number; h?: number; color?: string; seed?: number; fill?: boolean; values?: number[]; points?: number }> = ({
   w = 200, h = 44, color = ACC, seed = 1, fill = true, values, points = 40,
 }) => {
+  const isLight = useTheme() === 'light';
   const pts = useMemo(() => {
     if (values && values.length > 1) {
       const lo = Math.min(...values), hi = Math.max(...values);
@@ -105,7 +106,7 @@ export const Sparkline: React.FC<{ w?: number; h?: number; color?: string; seed?
     <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
       {fill && <polygon points={area} fill={color} opacity="0.12" />}
       <polyline points={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={w} cy={h - pts[pts.length - 1] * h} r="2.6" fill="#fff" stroke={color} strokeWidth="1.5" />
+      <circle cx={w} cy={h - pts[pts.length - 1] * h} r="2.6" fill={isLight ? color : '#fff'} stroke={color} strokeWidth="1.5" />
     </svg>
   );
 };

@@ -154,7 +154,7 @@ const TextClassificationLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
           items={[
             { color: POS,     label: 'positive' },
             { color: NEG,     label: 'negative' },
-            { color: '#ffffff', label: 'test ◎' },
+            { color: isLight ? 'var(--t0)' : '#ffffff', label: 'test ◎' },
           ]}
         />
       )}

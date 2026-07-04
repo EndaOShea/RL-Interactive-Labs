@@ -8,6 +8,7 @@ import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { makeBlobs, ParamsWrap, ParamsHead } from './shared';
+import { useTheme } from '../../utils/theme';
 import { kmeansPython } from './python';
 import { PresetChips, Preset } from './presets';
 
@@ -60,6 +61,7 @@ const PRESETS: Preset<Cfg>[] = [
 ];
 
 const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [total, setTotal] = useState(160);
   const [k, setK] = useState(4);
   const [method, setMethod] = useState<Init>('kpp');
@@ -199,7 +201,7 @@ const KMeansLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       legend={(
         <Legend title="CLUSTERS" items={[
           ...Array.from({ length: Math.min(k, CLASS_COLORS.length) }, (_, j) => ({ color: CLASS_COLORS[j], label: `Cluster ${j}` })),
-          { node: <span style={{ color: '#fff', fontWeight: 700 }}>＋</span>, label: 'Centroid' },
+          { node: <span style={{ color: isLight ? 'var(--t0)' : '#fff', fontWeight: 700 }}>＋</span>, label: 'Centroid' },
         ]} />
       )}
       rewardLabel="INERTIA"

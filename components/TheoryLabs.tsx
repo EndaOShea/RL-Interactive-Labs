@@ -119,6 +119,7 @@ interface LabProps {
 
 // --- 1. Model-Free vs Model-Based (Universal RL Lab) ---
 export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   // --- Environment State ---
   const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
@@ -1140,7 +1141,7 @@ for episode in range(200):
           { color: GOOD, label: 'High' },
           { color: BAD, label: 'Low' },
           ...(algoMode === 'based' ? [{ color: ACC, label: 'Planning' }] : []),
-          ...((subAlgo === 'reinforce' || subAlgo === 'ac') ? [{ node: <span style={{ color: '#fff', fontSize: 12 }}>↑</span>, label: 'Policy' }] : []),
+          ...((subAlgo === 'reinforce' || subAlgo === 'ac') ? [{ node: <span style={{ color: isLight ? 'var(--t0)' : '#fff', fontSize: 12 }}>↑</span>, label: 'Policy' }] : []),
         ]} />
       )}
       rewardLabel="AVG REWARD"
@@ -1169,6 +1170,7 @@ for episode in range(200):
 
 // --- 2. Deterministic vs Stochastic Lab ---
 export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+  const isLight = useTheme() === 'light';
     const narration = useNarration();
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
@@ -1597,7 +1599,7 @@ for episode in range(100):
         <Legend title="POLICY" items={[
           { color: GOOD, label: 'High Q' },
           { color: BAD, label: 'Low Q' },
-          { node: <span style={{ color: '#fff', fontSize: 12 }}>↑</span>, label: policyType === 'deterministic' ? 'Greedy' : 'Softmax' },
+          { node: <span style={{ color: isLight ? 'var(--t0)' : '#fff', fontSize: 12 }}>↑</span>, label: policyType === 'deterministic' ? 'Greedy' : 'Softmax' },
         ]} />
       )}
       rewardLabel="AVG REWARD"
