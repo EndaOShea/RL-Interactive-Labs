@@ -1,5 +1,6 @@
 import React from 'react';
 import { ACC } from '../../stage/primitives';
+import { useTheme } from '../../../utils/theme';
 
 // Dendrogram (merge tree) for hierarchical clustering. Leaves sit at the bottom;
 // each internal node's height is the distance at which its two children merged.
@@ -19,6 +20,7 @@ export interface DendrogramProps {
 }
 
 const Dendrogram: React.FC<DendrogramProps> = ({ root, maxHeight, leafCount, cut, leafColor, width = 540, height = 440 }) => {
+  const isLight = useTheme() === 'light';
   const padL = 14, padR = 14, padT = 18, padB = 22;
   const plotW = width - padL - padR, plotH = height - padT - padB;
   const xOf = (i: number) => (leafCount <= 1 ? padL + plotW / 2 : padL + (i / (leafCount - 1)) * plotW);
@@ -41,7 +43,7 @@ const Dendrogram: React.FC<DendrogramProps> = ({ root, maxHeight, leafCount, cut
   const cutY = cut != null ? yOf(cut) : null;
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       {segs.map((s, i) => (
         <line key={i} x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2} stroke="var(--t1)" strokeWidth={1.6} strokeLinecap="round" />
       ))}
@@ -52,7 +54,7 @@ const Dendrogram: React.FC<DendrogramProps> = ({ root, maxHeight, leafCount, cut
         </g>
       )}
       {leaves.map((l, i) => (
-        <circle key={i} cx={l.x} cy={yOf(0)} r={4.5} fill={leafColor ? leafColor(l.id) : (l.color || 'var(--t2)')} stroke="rgba(8,11,20,.6)" strokeWidth={0.8} />
+        <circle key={i} cx={l.x} cy={yOf(0)} r={4.5} fill={leafColor ? leafColor(l.id) : (l.color || 'var(--t2)')} stroke={isLight ? 'rgba(255,255,255,.85)' : 'rgba(8,11,20,.6)'} strokeWidth={0.8} />
       ))}
       <text x={padL} y={12} fontSize="9.5" fontFamily="var(--mono)" fill="var(--t2)">merge distance ↑</text>
     </svg>

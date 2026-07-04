@@ -1,5 +1,6 @@
 import React from 'react';
 import { ACC } from '../../stage/primitives';
+import { useTheme } from '../../../utils/theme';
 
 // Generic function / line plot (SVG). Powers linear-regression (data + fitted
 // line, loss curve) and future activation / optimizer / calculus labs.
@@ -32,6 +33,7 @@ const FunctionPlot: React.FC<FunctionPlotProps> = ({
   series = [], scatter = [], markers = [], domain = [0, 1], range = [0, 1],
   width = 520, height = 460, showAxes = true, xLabel, yLabel,
 }) => {
+  const isLight = useTheme() === 'light';
   const padL = 44, padR = 14, padT = 14, padB = 36;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
@@ -48,7 +50,7 @@ const FunctionPlot: React.FC<FunctionPlotProps> = ({
   return (
     <svg
       width={width} height={height} viewBox={`0 0 ${width} ${height}`}
-      style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}
     >
       <rect x={padL} y={padT} width={plotW} height={plotH} fill="none" stroke="var(--border)" strokeWidth="1" />
       {showAxes && [0, 0.25, 0.5, 0.75, 1].map((t) => {
@@ -59,8 +61,8 @@ const FunctionPlot: React.FC<FunctionPlotProps> = ({
         const interior = t > 0 && t < 1;
         return (
           <g key={t}>
-            {interior && <line x1={xpos} y1={padT} x2={xpos} y2={padT + plotH} stroke="rgba(120,130,170,.08)" />}
-            {interior && <line x1={padL} y1={ypos} x2={padL + plotW} y2={ypos} stroke="rgba(120,130,170,.08)" />}
+            {interior && <line x1={xpos} y1={padT} x2={xpos} y2={padT + plotH} stroke={isLight ? 'rgba(50,60,90,.12)' : 'rgba(120,130,170,.08)'} />}
+            {interior && <line x1={padL} y1={ypos} x2={padL + plotW} y2={ypos} stroke={isLight ? 'rgba(50,60,90,.12)' : 'rgba(120,130,170,.08)'} />}
             <line x1={xpos} y1={padT + plotH} x2={xpos} y2={padT + plotH + 3} stroke="var(--border)" />
             <text x={xpos} y={padT + plotH + 14} textAnchor="middle" fill="var(--t2)" fontSize="8.5" fontFamily="var(--mono)">{fmtTick(xv)}</text>
             <line x1={padL - 3} y1={ypos} x2={padL} y2={ypos} stroke="var(--border)" />
@@ -88,13 +90,13 @@ const FunctionPlot: React.FC<FunctionPlotProps> = ({
 
       {/* scatter */}
       {scatter.map((p, i) => (
-        <circle key={i} cx={sx(p.x)} cy={clampY(sy(p.y))} r={p.r ?? 4} fill={p.color || 'var(--t1)'} opacity={0.9} stroke="rgba(8,11,20,.7)" strokeWidth="0.8" />
+        <circle key={i} cx={sx(p.x)} cy={clampY(sy(p.y))} r={p.r ?? 4} fill={p.color || 'var(--t1)'} opacity={0.9} stroke={isLight ? 'rgba(255,255,255,.85)' : 'rgba(8,11,20,.7)'} strokeWidth="0.8" />
       ))}
 
       {/* markers */}
       {markers.map((m, i) => (
         <g key={i}>
-          <circle cx={sx(m.x)} cy={clampY(sy(m.y))} r={m.r ?? 5} fill="#fff" stroke={m.color || ACC} strokeWidth="2" />
+          <circle cx={sx(m.x)} cy={clampY(sy(m.y))} r={m.r ?? 5} fill={isLight ? 'var(--t0)' : '#fff'} stroke={m.color || ACC} strokeWidth="2" />
           {m.label && <text x={sx(m.x) + 8} y={clampY(sy(m.y)) - 6} fill="var(--t1)" fontSize="10" fontFamily="var(--mono)">{m.label}</text>}
         </g>
       ))}

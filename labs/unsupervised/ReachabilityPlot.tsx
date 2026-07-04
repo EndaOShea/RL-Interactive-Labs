@@ -1,5 +1,6 @@
 import React from 'react';
 import { CLASS_COLORS } from '../../components/labkit/viz/ScatterPlot';
+import { useTheme } from '../../utils/theme';
 
 // Area-local OPTICS reachability plot: a bar per point in the reachability
 // ordering, height = reachability distance. Valleys = clusters; tall bars are
@@ -23,6 +24,7 @@ export interface ReachabilityPlotProps {
 const ReachabilityPlot: React.FC<ReachabilityPlotProps> = ({
   reach, labels, revealed, threshold, width = 440, height = 150, accent = '#f472b6',
 }) => {
+  const isLight = useTheme() === 'light';
   const padL = 30, padR = 10, padT = 12, padB = 18;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
@@ -41,11 +43,11 @@ const ReachabilityPlot: React.FC<ReachabilityPlotProps> = ({
   return (
     <svg
       width={width} height={height} viewBox={`0 0 ${width} ${height}`}
-      style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}
     >
       <rect x={padL} y={padT} width={plotW} height={plotH} fill="none" stroke="var(--border)" strokeWidth="1" />
       {[0.5].map((t) => (
-        <line key={t} x1={padL} y1={padT + t * plotH} x2={padL + plotW} y2={padT + t * plotH} stroke="rgba(120,130,170,.08)" />
+        <line key={t} x1={padL} y1={padT + t * plotH} x2={padL + plotW} y2={padT + t * plotH} stroke={isLight ? 'rgba(50,60,90,.08)' : 'rgba(120,130,170,.08)'} />
       ))}
 
       {reach.map((r, i) => {

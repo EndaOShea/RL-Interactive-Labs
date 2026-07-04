@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { svmPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fbbf24';
 const DOM: [number, number] = [-1.2, 1.2];
@@ -63,6 +64,7 @@ const PRESETS: Preset[] = [
 ];
 
 const SvmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [perClass, setPerClass] = useState(35);
   const [sep, setSep] = useState(0.5);
@@ -231,16 +233,16 @@ const SvmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const classify = (x: number, y: number) => (decision(x, y) > 0 ? 1 : 0);
   const yAt = (x: number, off: number) => Math.abs(w2) < 1e-6 ? 0 : (off - w1 * x - b) / w2;
   const lines: ScatterLine[] = isLinear && (Math.abs(w1) + Math.abs(w2) > 1e-6) ? [
-    { x1: DOM[0], y1: yAt(DOM[0], 0), x2: DOM[1], y2: yAt(DOM[1], 0), color: '#fff', width: 2.4 },
+    { x1: DOM[0], y1: yAt(DOM[0], 0), x2: DOM[1], y2: yAt(DOM[1], 0), color: isLight ? 'var(--t0)' : '#fff', width: 2.4 },
     { x1: DOM[0], y1: yAt(DOM[0], 1), x2: DOM[1], y2: yAt(DOM[1], 1), color: ACCENT, width: 1.4, dash: true },
     { x1: DOM[0], y1: yAt(DOM[0], -1), x2: DOM[1], y2: yAt(DOM[1], -1), color: ACCENT, width: 1.4, dash: true },
   ] : [];
   const points: ScatterPoint[] = data.map((p) => ({ x: p.x, y: p.y, cls: p.yy > 0 ? 1 : 0 }));
   const svMarkers: ScatterMarker[] = isLinear
     ? ((Math.abs(w1) + Math.abs(w2) > 1e-6)
-        ? data.filter((p) => p.yy * (w1 * p.x + w2 * p.y + b) <= 1 + 1e-6).map((p) => ({ x: p.x, y: p.y, color: '#fff', r: 9, ring: true }))
+        ? data.filter((p) => p.yy * (w1 * p.x + w2 * p.y + b) <= 1 + 1e-6).map((p) => ({ x: p.x, y: p.y, color: isLight ? 'var(--t0)' : '#fff', r: 9, ring: true }))
         : [])
-    : data.filter((_, i) => alphaRef.current[i] !== 0).map((p) => ({ x: p.x, y: p.y, color: '#fff', r: 9, ring: true }));
+    : data.filter((_, i) => alphaRef.current[i] !== 0).map((p) => ({ x: p.x, y: p.y, color: isLight ? 'var(--t0)' : '#fff', r: 9, ring: true }));
 
   const fieldKey = isLinear ? `lin-${epoch}` : `${kern}-${gamma}-${degree}-${dualVer}`;
 

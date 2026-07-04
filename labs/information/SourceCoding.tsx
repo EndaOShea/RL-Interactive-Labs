@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { huffmanPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fcd34d';
 const LEAF = '#38bdf8';
@@ -56,6 +57,7 @@ const PRESETS: Preset[] = [
 const logB2 = (x: number) => Math.log2(x);
 
 const SourceCodingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [symbols, setSymbols] = useState<string[]>(PRESETS[1].symbols);
   const [weights, setWeights] = useState<number[]>(PRESETS[1].weights);
@@ -301,7 +303,7 @@ const SourceCodingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
         <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
           <GraphCanvas nodes={graph.nodes} edges={graph.edges} width={500} height={420} radius={16} />
           <div style={{ width: 150, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 13px' }}>
+            <div style={{ background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 13px' }}>
               <MonoLabel style={{ fontSize: 9, marginBottom: 8 }}>CODEWORDS</MonoLabel>
               {codeList.map(({ s, p, code }) => (
                 <div key={s} style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'var(--mono)', fontSize: 11, marginBottom: 4 }}>
@@ -312,7 +314,7 @@ const SourceCodingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
               ))}
             </div>
             {built && (
-              <div style={{ background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, padding: '11px 13px', fontFamily: 'var(--mono)', fontSize: 10.5, lineHeight: 1.7 }}>
+              <div style={{ background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, padding: '11px 13px', fontFamily: 'var(--mono)', fontSize: 10.5, lineHeight: 1.7 }}>
                 <div style={{ color: ENTROPY_C }}>H = {H.toFixed(3)} b</div>
                 <div style={{ color: ACCENT }}>L = {avgLen.toFixed(3)} b</div>
                 <div style={{ color: MERGE }}>η = H/L = {efficiency.toFixed(3)}</div>

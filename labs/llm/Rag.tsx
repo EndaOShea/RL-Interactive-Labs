@@ -12,6 +12,7 @@ import Heatmap from '../../components/labkit/viz/Heatmap';
 import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../components/labkit/viz/ScatterPlot';
 import GraphCanvas, { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
 import { SBGlass, sbBtn, MonoLabel, AlgoPill } from '../../components/stage/primitives';
+import { useTheme } from '../../utils/theme';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
@@ -113,47 +114,53 @@ const row: React.CSSProperties = { fontFamily: 'var(--mono)', fontSize: 11.5, co
 const truncate = (t: string, max = 70) => (t.length > max ? t.slice(0, max - 1) + '…' : t);
 
 /* ---------- titled text panel shared by every StageDetail branch ---------- */
-const Panel: React.FC<{ title: string; note?: string; children: React.ReactNode }> = ({ title, note, children }) => (
-  <div style={{
-    width: 620, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)',
-    borderRadius: 10, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 9,
-  }}>
-    <div>
-      <MonoLabel>{title}</MonoLabel>
-      {note && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', marginTop: 4, lineHeight: 1.5 }}>{note}</div>}
+const Panel: React.FC<{ title: string; note?: string; children: React.ReactNode }> = ({ title, note, children }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div style={{
+      width: 620, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)',
+      borderRadius: 10, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 9,
+    }}>
+      <div>
+        <MonoLabel>{title}</MonoLabel>
+        {note && <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', marginTop: 4, lineHeight: 1.5 }}>{note}</div>}
+      </div>
+      {children}
     </div>
-    {children}
-  </div>
-);
+  );
+};
 
 /* ---------- horizontal stage rail: numbered nodes + connectors ---------- */
-const Rail: React.FC<{ stages: Stage[]; active: number; accent: string }> = ({ stages, active, accent }) => (
-  <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
-    {stages.map((s, i) => (
-      <React.Fragment key={`${s.kind}-${i}`}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 64 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
-            border: `1.5px solid ${i <= active ? accent : 'var(--border)'}`,
-            background: i === active ? accent : i < active ? `color-mix(in srgb, ${accent} 22%, transparent)` : 'rgba(8,11,20,.6)',
-            color: i === active ? '#fff' : i < active ? accent : 'var(--t2)',
-            filter: i === active ? `drop-shadow(0 0 8px ${accent})` : 'none',
-            transition: 'all .25s ease',
-          }}>
-            {i < active ? '✓' : i + 1}
+const Rail: React.FC<{ stages: Stage[]; active: number; accent: string }> = ({ stages, active, accent }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
+      {stages.map((s, i) => (
+        <React.Fragment key={`${s.kind}-${i}`}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, width: 64 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600,
+              border: `1.5px solid ${i <= active ? accent : 'var(--border)'}`,
+              background: i === active ? accent : i < active ? `color-mix(in srgb, ${accent} 22%, transparent)` : (isLight ? 'var(--bg2)' : 'rgba(8,11,20,.6)'),
+              color: i === active ? '#fff' : i < active ? accent : 'var(--t2)',
+              filter: i === active ? `drop-shadow(0 0 8px ${accent})` : 'none',
+              transition: 'all .25s ease',
+            }}>
+              {i < active ? '✓' : i + 1}
+            </div>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '.03em', textAlign: 'center', color: i === active ? accent : 'var(--t2)' }}>
+              {s.label}
+            </span>
           </div>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, letterSpacing: '.03em', textAlign: 'center', color: i === active ? accent : 'var(--t2)' }}>
-            {s.label}
-          </span>
-        </div>
-        {i < stages.length - 1 && (
-          <div style={{ flex: 1, height: 2, minWidth: 8, marginTop: 14, background: i < active ? accent : 'var(--border)', opacity: i < active ? 0.7 : 0.4 }} />
-        )}
-      </React.Fragment>
-    ))}
-  </div>
-);
+          {i < stages.length - 1 && (
+            <div style={{ flex: 1, height: 2, minWidth: 8, marginTop: 14, background: i < active ? accent : 'var(--border)', opacity: i < active ? 0.7 : 0.4 }} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+};
 
 /* ---------- stage-specific visualizations (chunk / embed / index) ---------- */
 
@@ -210,6 +217,7 @@ const Tag: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 // mid-word) with a visible overlap; recursive → sentence-packed to ≤ size;
 // semantic → adjacent similar sentences merged.
 const ChunkView: React.FC<{ chunks: Chunk[]; strategy: ChunkStrategy; accent: string }> = ({ chunks, strategy, accent }) => {
+  const isLight = useTheme() === 'light';
   const byDoc: { docId: number; title: string; chunks: Chunk[] }[] = [];
   const seenDoc = new Map<number, number>();
   chunks.forEach((c) => {
@@ -228,7 +236,7 @@ const ChunkView: React.FC<{ chunks: Chunk[]; strategy: ChunkStrategy; accent: st
       }}>
         {byDoc.map((doc) => (
           <div key={doc.docId} style={{
-            background: 'rgba(8,11,20,.4)', border: '1px solid var(--border)', borderRadius: 8,
+            background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.4)', border: '1px solid var(--border)', borderRadius: 8,
             padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0,
           }}>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t1)', fontWeight: 600 }}>{doc.title}</div>
@@ -256,6 +264,7 @@ type IndexMode = 'flat' | 'ivf' | 'hnsw';
 // probe). HNSW = every point wired to its 2 nearest neighbours by cosine —
 // the navigable graph a real HNSW index greedily walks at query time.
 const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> = ({ chunks, mode, accent }) => {
+  const isLight = useTheme() === 'light';
   const W = 460, H = 380, padL = 44, padR = 14, padT = 14, padB = 36;
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const pts = chunks.map((c) => project2(c.vec));
@@ -290,13 +299,13 @@ const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> 
   }
 
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       <rect x={padL} y={padT} width={plotW} height={plotH} fill="none" stroke="var(--border)" />
       {mode === 'ivf' && cellN.map((col, cx) => col.map((n, cy) => {
         const x0 = dx0 + cx * cellW, x1 = x0 + cellW, y0 = dy0 + cy * cellH, y1 = y0 + cellH;
         return (
           <rect key={`c${cx}-${cy}`} x={sx(x0)} y={sy(y1)} width={sx(x1) - sx(x0)} height={sy(y0) - sy(y1)}
-            fill={accent} opacity={n ? 0.12 + 0.45 * (n / maxN) : 0.03} stroke="rgba(120,130,170,.22)" strokeWidth={1} />
+            fill={accent} opacity={n ? 0.12 + 0.45 * (n / maxN) : 0.03} stroke={isLight ? 'rgba(50,60,90,.22)' : 'rgba(120,130,170,.22)'} strokeWidth={1} />
         );
       }))}
       {mode === 'hnsw' && edges.map(([i, j], k) => (
@@ -304,7 +313,7 @@ const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> 
           stroke={accent} strokeWidth={1.1} opacity={0.4} />
       ))}
       {pts.map((p, i) => (
-        <circle key={chunks[i].id} cx={sx(p[0])} cy={sy(p[1])} r={4.2} fill="#8f97b8" stroke="rgba(8,11,20,.75)" strokeWidth={0.8} />
+        <circle key={chunks[i].id} cx={sx(p[0])} cy={sy(p[1])} r={4.2} fill="#8f97b8" stroke={isLight ? 'rgba(255,255,255,.75)' : 'rgba(8,11,20,.75)'} strokeWidth={0.8} />
       ))}
       {mode === 'ivf' && cellN.map((col, cx) => col.map((n, cy) => n > 0 && (
         <text key={`n${cx}-${cy}`} x={sx(dx0 + (cx + 0.86) * cellW)} y={sy(dy0 + (cy + 0.86) * cellH) + 3}
@@ -320,6 +329,7 @@ const IndexView: React.FC<{ chunks: Chunk[]; mode: IndexMode; accent: string }> 
 // stays the plain corpus chunk list — see the pipe useMemo's comment), so
 // `contextualize()` is called fresh here purely for display.
 const ContextualEmbedCompare: React.FC<{ chunks: Chunk[]; query: string; accent: string }> = ({ chunks, query, accent }) => {
+  const isLight = useTheme() === 'light';
   const demo = pickContextualDemo(chunks, query);
   if (!demo) return null;
   const { chunk, before, after } = demo;
@@ -329,7 +339,7 @@ const ContextualEmbedCompare: React.FC<{ chunks: Chunk[]; query: string; accent:
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 660 }}>
       <MonoLabel style={{ fontSize: 9 }}>Contextual Retrieval · before / after for chunk {chunk.id}</MonoLabel>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 260, border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', background: 'rgba(8,11,20,.4)' }}>
+        <div style={{ flex: 1, minWidth: 260, border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.4)' }}>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: 'var(--t2)', marginBottom: 4 }}>BEFORE · raw chunk</div>
           <div style={{ ...row, color: 'var(--t1)', fontSize: 11 }}>{chunk.text}</div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginTop: 6 }}>
@@ -345,7 +355,7 @@ const ContextualEmbedCompare: React.FC<{ chunks: Chunk[]; query: string; accent:
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginTop: 6 }}>
             cos(query, chunk) = <b style={{ color: accent }}>{after.toFixed(3)}</b>{' '}
-            <span style={{ color: lift > 0.0005 ? '#34d399' : 'var(--t2)' }}>({lift >= 0 ? '+' : ''}{lift.toFixed(3)})</span>
+            <span style={{ color: lift > 0.0005 ? (isLight ? 'var(--good)' : '#34d399') : 'var(--t2)' }}>({lift >= 0 ? '+' : ''}{lift.toFixed(3)})</span>
           </div>
         </div>
       </div>
@@ -358,6 +368,7 @@ const ContextualEmbedCompare: React.FC<{ chunks: Chunk[]; query: string; accent:
 // per chunk — green when a chunk moved up, red when it dropped, grey when it
 // held its rank. `before`/`after` are the same chunk set, just reordered.
 const RerankView: React.FC<{ before: Ranked[]; after: Ranked[]; accent: string }> = ({ before, after, accent }) => {
+  const isLight = useTheme() === 'light';
   const rowH = 26, padT = 24, padX = 12, colW = 220, gapW = 84;
   const W = padX * 2 + colW * 2 + gapW;
   const n = Math.max(before.length, after.length);
@@ -372,7 +383,7 @@ const RerankView: React.FC<{ before: Ranked[]; after: Ranked[]; accent: string }
       <text x={xRight} y={14} fontFamily="var(--mono)" fontSize={9.5} letterSpacing="0.03em" fill={accent}>RERANKED ORDER</text>
       {before.map((r, i) => {
         const j = afterIdx.get(r.chunk.id) ?? i;
-        const color = j < i ? '#34d399' : j > i ? '#f87171' : 'rgba(148,158,196,.45)';
+        const color = j < i ? (isLight ? 'var(--good)' : '#34d399') : j > i ? (isLight ? 'var(--bad)' : '#f87171') : (isLight ? 'rgba(50,60,90,.45)' : 'rgba(148,158,196,.45)');
         return <line key={r.chunk.id} x1={xLineL} y1={yFor(i)} x2={xLineR} y2={yFor(j)} stroke={color} strokeWidth={1.5} opacity={0.7} />;
       })}
       {before.map((r, i) => (
@@ -549,6 +560,7 @@ const GraphBuildView: React.FC = () => {
 const GraphLocalView: React.FC<{
   seeds: Entity[]; egoIds: Set<string>; ranked: Ranked[]; k: number; accent: string;
 }> = ({ seeds, egoIds, ranked, k, accent }) => {
+  const isLight = useTheme() === 'light';
   const pos = graphLayout();
   const seedIds = new Set(seeds.map((s) => s.id));
   const nodes: GNode[] = ENTITIES.map((e) => {
@@ -568,7 +580,7 @@ const GraphLocalView: React.FC<{
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
       <GraphCanvas nodes={nodes} edges={edges} width={620} height={400} radius={16} />
       {seeds.length === 0 ? (
-        <div style={{ ...row, color: '#f87171', maxWidth: 560, textAlign: 'center' }}>
+        <div style={{ ...row, color: isLight ? 'var(--bad)' : '#f87171', maxWidth: 560, textAlign: 'center' }}>
           No entity in the graph matched this query — local search has no ego-graph to anchor on, so Augment/Generate get nothing and the pipeline refuses below.
         </div>
       ) : (
@@ -606,6 +618,7 @@ const GraphLocalView: React.FC<{
 const GraphGlobalView: React.FC<{
   ranked: { id: number; label: string; summary: string; score: number }[]; accent: string;
 }> = ({ ranked, accent }) => {
+  const isLight = useTheme() === 'light';
   const max = Math.max(0.001, ...ranked.map((c) => c.score));
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 9, width: '100%', maxWidth: 560 }}>
@@ -614,14 +627,14 @@ const GraphGlobalView: React.FC<{
         <div key={c.id} style={{
           display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 12px', borderRadius: 8,
           border: `1px solid ${i === 0 ? accent : 'var(--border)'}`,
-          background: i === 0 ? 'rgba(167,139,250,.08)' : 'rgba(8,11,20,.35)',
+          background: i === 0 ? 'rgba(167,139,250,.08)' : (isLight ? 'var(--bg2)' : 'rgba(8,11,20,.35)'),
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: COMMUNITY_COLORS[c.id], display: 'inline-block', flexShrink: 0 }} />
             <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: i === 0 ? accent : 'var(--t0)', fontWeight: i === 0 ? 700 : 400 }}>#{i + 1} {c.label}</span>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', marginLeft: 'auto' }}>{c.score.toFixed(3)}</span>
           </div>
-          <div style={{ height: 5, borderRadius: 3, background: 'rgba(148,158,196,.15)' }}>
+          <div style={{ height: 5, borderRadius: 3, background: isLight ? 'rgba(50,60,90,.15)' : 'rgba(148,158,196,.15)' }}>
             <div style={{ height: '100%', borderRadius: 3, width: `${(c.score / max) * 100}%`, background: i === 0 ? accent : 'var(--t2)' }} />
           </div>
           {i === 0 && <div style={{ ...row, color: 'var(--t1)', marginTop: 2 }}>{c.summary}</div>}
@@ -639,6 +652,7 @@ const GraphGlobalView: React.FC<{
 // tree, it flatly scores every node), so edges stay a neutral structural
 // grey — only the nodes themselves carry the retrieval signal.
 const TreeView: React.FC<{ tree: TreeNode[]; hits: { id: string; score: number }[]; accent: string }> = ({ tree, hits, accent }) => {
+  const isLight = useTheme() === 'light';
   const leaves = tree.filter((n) => n.level === 0);
   const mids = tree.filter((n) => n.level === 1);
   const root = tree.find((n) => n.level === 2);
@@ -655,34 +669,35 @@ const TreeView: React.FC<{ tree: TreeNode[]; hits: { id: string; score: number }
     return [m.id, xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : W / 2] as const;
   }));
   const rootX = W / 2, rLeaf = 11, rMid = 17, rRoot = 21;
-  const fill = (id: string) => (hitScore.has(id) ? accent : 'rgba(148,158,196,.4)');
+  const fill = (id: string) => (hitScore.has(id) ? accent : (isLight ? 'rgba(50,60,90,.4)' : 'rgba(148,158,196,.4)'));
   const glow = (id: string) => (hitScore.has(id) ? { filter: `drop-shadow(0 0 7px ${accent})` } : undefined);
+  const nodeStroke = isLight ? 'rgba(255,255,255,.6)' : 'rgba(8,11,20,.6)';
 
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)' }}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', maxWidth: '100%', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)' }}>
       {root && mids.map((m) => (
-        <line key={`rm-${m.id}`} x1={rootX} y1={yRoot + rRoot} x2={midX.get(m.id)!} y2={yMid - rMid} stroke="rgba(120,130,170,.3)" strokeWidth={1.3} />
+        <line key={`rm-${m.id}`} x1={rootX} y1={yRoot + rRoot} x2={midX.get(m.id)!} y2={yMid - rMid} stroke={isLight ? 'rgba(50,60,90,.3)' : 'rgba(120,130,170,.3)'} strokeWidth={1.3} />
       ))}
       {mids.flatMap((m) => m.childIds.map((cid) => {
         const lx = leafX.get(cid); if (lx == null) return null;
-        return <line key={`ml-${m.id}-${cid}`} x1={midX.get(m.id)!} y1={yMid + rMid} x2={lx} y2={yLeaf - rLeaf} stroke="rgba(120,130,170,.18)" strokeWidth={1} />;
+        return <line key={`ml-${m.id}-${cid}`} x1={midX.get(m.id)!} y1={yMid + rMid} x2={lx} y2={yLeaf - rLeaf} stroke={isLight ? 'rgba(50,60,90,.18)' : 'rgba(120,130,170,.18)'} strokeWidth={1} />;
       }))}
       {leaves.map((n) => (
         <g key={n.id}>
-          <circle cx={leafX.get(n.id)!} cy={yLeaf} r={rLeaf} fill={fill(n.id)} stroke="rgba(8,11,20,.6)" strokeWidth={1.2} style={glow(n.id)} />
+          <circle cx={leafX.get(n.id)!} cy={yLeaf} r={rLeaf} fill={fill(n.id)} stroke={nodeStroke} strokeWidth={1.2} style={glow(n.id)} />
           <text x={leafX.get(n.id)!} y={yLeaf + rLeaf + 11} textAnchor="middle" fontSize={7.5} fontFamily="var(--mono)" fill={hitScore.has(n.id) ? accent : 'var(--t2)'}>{n.id}</text>
         </g>
       ))}
       {mids.map((m) => (
         <g key={m.id}>
-          <circle cx={midX.get(m.id)!} cy={yMid} r={rMid} fill={fill(m.id)} stroke="rgba(8,11,20,.6)" strokeWidth={1.4} style={glow(m.id)} />
+          <circle cx={midX.get(m.id)!} cy={yMid} r={rMid} fill={fill(m.id)} stroke={nodeStroke} strokeWidth={1.4} style={glow(m.id)} />
           <text x={midX.get(m.id)!} y={yMid + 3} textAnchor="middle" fontSize={9} fontWeight={700} fontFamily="var(--mono)" fill={hitScore.has(m.id) ? '#0b0e18' : 'var(--t0)'}>{m.id}</text>
           <text x={midX.get(m.id)!} y={yMid + rMid + 13} textAnchor="middle" fontSize={9} fontFamily="var(--mono)" fill={hitScore.has(m.id) ? accent : 'var(--t2)'}>{truncate(m.label, 18)}{hitScore.has(m.id) ? ` · ${hitScore.get(m.id)!.toFixed(3)}` : ''}</text>
         </g>
       ))}
       {root && (
         <g>
-          <circle cx={rootX} cy={yRoot} r={rRoot} fill={fill(root.id)} stroke="rgba(8,11,20,.6)" strokeWidth={1.6} style={glow(root.id)} />
+          <circle cx={rootX} cy={yRoot} r={rRoot} fill={fill(root.id)} stroke={nodeStroke} strokeWidth={1.6} style={glow(root.id)} />
           <text x={rootX} y={yRoot + 4} textAnchor="middle" fontSize={9.5} fontWeight={700} fontFamily="var(--mono)" fill={hitScore.has(root.id) ? '#0b0e18' : 'var(--t0)'}>root</text>
           <text x={rootX} y={yRoot - rRoot - 8} textAnchor="middle" fontSize={9.5} fontFamily="var(--mono)" fill={hitScore.has(root.id) ? accent : 'var(--t2)'}>{root.label}{hitScore.has(root.id) ? ` · ${hitScore.get(root.id)!.toFixed(3)}` : ''}</text>
         </g>
@@ -700,6 +715,7 @@ const StageDetail: React.FC<{
   graphMode: 'local' | 'global'; onGraphMode: (m: 'local' | 'global') => void;
   hasContextual: boolean;
 }> = ({ stage, pipe, params, query, indexMode, onIndexMode, onRetrieval, rerankActive, graphMode, onGraphMode, hasContextual }) => {
+  const isLight = useTheme() === 'light';
   switch (stage.kind) {
     case 'route': {
       const route = pipe.route ?? routeQuery(query);
@@ -718,7 +734,7 @@ const StageDetail: React.FC<{
               <div key={o.id} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '7px 11px', borderRadius: 7,
                 border: `1px solid ${o.id === route ? ACCENT : 'var(--border)'}`,
-                background: o.id === route ? 'rgba(167,139,250,.1)' : 'rgba(8,11,20,.35)',
+                background: o.id === route ? 'rgba(167,139,250,.1)' : (isLight ? 'var(--bg2)' : 'rgba(8,11,20,.35)'),
               }}>
                 <span style={{
                   fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700, letterSpacing: '.03em', flexShrink: 0,
@@ -1026,15 +1042,15 @@ const StageDetail: React.FC<{
             {tags.map(({ chunk, relevant }) => (
               <div key={chunk.id} style={{
                 display: 'flex', alignItems: 'center', gap: 9, padding: '6px 10px', borderRadius: 7,
-                border: `1px solid ${relevant ? '#34d399' : 'var(--border)'}`,
+                border: `1px solid ${relevant ? (isLight ? 'var(--good)' : '#34d399') : 'var(--border)'}`,
                 background: relevant ? 'rgba(52,211,153,.06)' : 'rgba(148,158,196,.05)',
                 opacity: relevant ? 1 : 0.55,
               }}>
                 <span style={{
                   flexShrink: 0, fontFamily: 'var(--mono)', fontSize: 9.5, fontWeight: 700, letterSpacing: '.03em',
                   padding: '2px 8px', borderRadius: 999,
-                  color: relevant ? '#34d399' : '#8f97b8',
-                  border: `1px solid ${relevant ? '#34d399' : 'var(--border)'}`,
+                  color: relevant ? (isLight ? 'var(--good)' : '#34d399') : '#8f97b8',
+                  border: `1px solid ${relevant ? (isLight ? 'var(--good)' : '#34d399') : 'var(--border)'}`,
                 }}>{relevant ? 'Relevant' : 'Irrelevant'}</span>
                 <span style={{
                   ...row, color: relevant ? 'var(--t0)' : 'var(--t2)',
@@ -1071,7 +1087,7 @@ const StageDetail: React.FC<{
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {steps.map((s, i) => {
                 const isLast = i === steps.length - 1;
-                const color = s.covered ? '#34d399' : isLast ? '#f87171' : '#fbbf24';
+                const color = s.covered ? (isLight ? 'var(--good)' : '#34d399') : isLast ? (isLight ? 'var(--bad)' : '#f87171') : '#fbbf24';
                 return (
                   <div key={s.iter} style={{
                     display: 'flex', flexDirection: 'column', gap: 5, padding: '8px 11px', borderRadius: 8,
@@ -1111,8 +1127,8 @@ const StageDetail: React.FC<{
           <span style={{
             alignSelf: 'flex-start', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
             padding: '3px 10px', borderRadius: 5, letterSpacing: '.04em',
-            color: supported ? '#34d399' : '#f87171',
-            border: `1px solid ${supported ? '#34d399' : '#f87171'}`,
+            color: supported ? (isLight ? 'var(--good)' : '#34d399') : (isLight ? 'var(--bad)' : '#f87171'),
+            border: `1px solid ${supported ? (isLight ? 'var(--good)' : '#34d399') : (isLight ? 'var(--bad)' : '#f87171')}`,
             background: supported ? 'rgba(52,211,153,.08)' : 'rgba(248,113,113,.08)',
           }}>
             {supported ? 'SUPPORTED' : 'UNSUPPORTED'}
@@ -1133,7 +1149,7 @@ const StageDetail: React.FC<{
       // desync the meter from the actual grade).
       const gradeConfidence = pipe.ranked[0] ? cosine(embedText(query), pipe.ranked[0].chunk.vec) : 0;
       const hi = GRADE_HI, lo = GRADE_LO;
-      const gradeColor = grade === 'correct' ? '#34d399' : grade === 'ambiguous' ? '#fbbf24' : '#f87171';
+      const gradeColor = grade === 'correct' ? (isLight ? 'var(--good)' : '#34d399') : grade === 'ambiguous' ? '#fbbf24' : (isLight ? 'var(--bad)' : '#f87171');
       const branch = grade === 'correct' ? 'correct → use index' : grade === 'ambiguous' ? 'ambiguous → index + web' : 'incorrect → web search';
       const meterMax = Math.max(1, gradeConfidence * 1.15, hi * 1.4);
       const pct = (v: number) => Math.min(100, Math.max(0, (v / meterMax) * 100));
@@ -1142,7 +1158,7 @@ const StageDetail: React.FC<{
         <Panel title={`Grade · retrieval confidence for "${query}"`} note={stage.note}>
           <div>
             <MonoLabel style={{ marginBottom: 8 }}>query↔chunk cosine vs thresholds (lo {lo} / hi {hi})</MonoLabel>
-            <div style={{ position: 'relative', height: 26, background: 'rgba(8,11,20,.5)', border: '1px solid var(--border)', borderRadius: 6 }}>
+            <div style={{ position: 'relative', height: 26, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.5)', border: '1px solid var(--border)', borderRadius: 6 }}>
               <div style={{ position: 'absolute', left: `${pct(gradeConfidence)}%`, top: 0, bottom: 0, width: 0, borderLeft: `3px solid ${gradeColor}`, transition: 'left .2s ease' }} />
               <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct(gradeConfidence)}%`, background: gradeColor, opacity: 0.28, borderRadius: '6px 0 0 6px' }} />
               <div style={{ position: 'absolute', left: `${pct(lo)}%`, top: 0, bottom: 0, width: 1, background: 'var(--t2)', opacity: 0.6 }} />
@@ -1270,7 +1286,7 @@ const StageDetail: React.FC<{
             <RerankView before={before} after={after} accent={ACCENT} />
           </div>
           <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', lineHeight: 1.6 }}>
-            A slower, higher-quality cross-encoder (dense similarity + lexical overlap) re-scores just these fast first-stage candidates — <span style={{ color: '#34d399' }}>green</span> connectors moved up, <span style={{ color: '#f87171' }}>red</span> moved down.
+            A slower, higher-quality cross-encoder (dense similarity + lexical overlap) re-scores just these fast first-stage candidates — <span style={{ color: isLight ? 'var(--good)' : '#34d399' }}>green</span> connectors moved up, <span style={{ color: isLight ? 'var(--bad)' : '#f87171' }}>red</span> moved down.
           </div>
         </Panel>
       );
@@ -1290,7 +1306,7 @@ const StageDetail: React.FC<{
               {pool.map((r, i) => (
                 <div key={r.chunk.id} title={`${r.chunk.id} — ${i < params.budget ? 'packed' : 'dropped'}`} style={{
                   flex: 1, height: 7, borderRadius: 3,
-                  background: i < params.budget ? ACCENT : 'rgba(148,158,196,.25)',
+                  background: i < params.budget ? ACCENT : (isLight ? 'rgba(50,60,90,.25)' : 'rgba(148,158,196,.25)'),
                 }} />
               ))}
             </div>
@@ -1303,13 +1319,13 @@ const StageDetail: React.FC<{
             ))}
             {dropped.map((r) => (
               <div key={r.chunk.id} style={{ border: '1px solid var(--border)', borderRadius: 7, padding: '6px 10px', opacity: 0.4 }}>
-                <div style={row}>[{r.chunk.id}] {truncate(r.chunk.text, 92)} <span style={{ color: '#f87171' }}>· dropped (over budget)</span></div>
+                <div style={row}>[{r.chunk.id}] {truncate(r.chunk.text, 92)} <span style={{ color: isLight ? 'var(--bad)' : '#f87171' }}>· dropped (over budget)</span></div>
               </div>
             ))}
           </div>
           <div style={{
             fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)', whiteSpace: 'pre-wrap', lineHeight: 1.65,
-            background: 'rgba(8,11,20,.4)', border: '1px solid var(--border)', borderRadius: 7, padding: '9px 11px',
+            background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.4)', border: '1px solid var(--border)', borderRadius: 7, padding: '9px 11px',
           }}>
 {`System: Answer only from context.
 Context:
@@ -1326,8 +1342,8 @@ Question: ${query}`}
           <span style={{
             alignSelf: 'flex-start', fontFamily: 'var(--mono)', fontSize: 10.5, fontWeight: 700,
             padding: '3px 10px', borderRadius: 5, letterSpacing: '.04em',
-            color: grounded ? '#34d399' : '#f87171',
-            border: `1px solid ${grounded ? '#34d399' : '#f87171'}`,
+            color: grounded ? (isLight ? 'var(--good)' : '#34d399') : (isLight ? 'var(--bad)' : '#f87171'),
+            border: `1px solid ${grounded ? (isLight ? 'var(--good)' : '#34d399') : (isLight ? 'var(--bad)' : '#f87171')}`,
             background: grounded ? 'rgba(52,211,153,.08)' : 'rgba(248,113,113,.08)',
           }}>
             GROUNDED {grounded ? 'YES' : 'NO'}
@@ -1343,7 +1359,7 @@ Question: ${query}`}
               ))}
             </div>
           ) : (
-            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: '#f87171', lineHeight: 1.5 }}>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: isLight ? 'var(--bad)' : '#f87171', lineHeight: 1.5 }}>
               No candidate chunk cleared the grounding threshold (similarity score + lexical overlap with the query) — the pipeline refuses rather than hallucinate an ungrounded answer.
             </div>
           )}
@@ -1768,6 +1784,7 @@ function introFor(stage: Stage, variant: Variant, query: string, pipe: Pipe): st
 }
 
 const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [variantId, setVariantId] = useState('naive');
   const [queryIdx, setQueryIdx] = useState(0);
   const [params, setParams] = useState<RagParams>(DEFAULT_PARAMS);
@@ -2128,7 +2145,7 @@ const RagLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         { label: 'VARIANT', value: variant.name, color: ACCENT },
         { label: 'STAGE', value: `${stageIdx + 1}/${stages.length}` },
         { label: 'RETRIEVAL', value: pipe.graphMode ?? params.retrieval },
-        { label: 'GROUNDED', value: pipe.gen.grounded ? 'yes' : 'no', color: pipe.gen.grounded ? '#34d399' : '#f87171' },
+        { label: 'GROUNDED', value: pipe.gen.grounded ? 'yes' : 'no', color: pipe.gen.grounded ? (isLight ? 'var(--good)' : '#34d399') : (isLight ? 'var(--bad)' : '#f87171') },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, ragPython(variantId, params))}
       grid={grid}

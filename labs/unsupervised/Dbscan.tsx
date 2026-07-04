@@ -11,6 +11,7 @@ import { makeBlobs, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { UPt, dist2, optics, opticsExtract } from './shared';
 import { dbscanPython } from './python';
 import ReachabilityPlot from './ReachabilityPlot';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#f472b6';
 const CENTERS = [{ x: 0.28, y: 0.3 }, { x: 0.72, y: 0.32 }, { x: 0.5, y: 0.72 }];
@@ -58,6 +59,7 @@ const PRESETS: Preset[] = [
 ];
 
 const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [count, setCount] = useState(120);
   const [eps, setEps] = useState(0.07);
   const [minPts, setMinPts] = useState(4);
@@ -186,7 +188,7 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   });
   const curIdx = mode === 'optics' && ord ? (cursor < ord.order.length ? ord.order[cursor] : -1) : (cursor < points.length ? cursor : -1);
   const cur = curIdx >= 0 ? points[curIdx] : null;
-  const markers: ScatterMarker[] = cur ? [{ x: cur.x, y: cur.y, color: '#fff', r: 6 }] : [];
+  const markers: ScatterMarker[] = cur ? [{ x: cur.x, y: cur.y, color: isLight ? 'var(--t0)' : '#fff', r: 6 }] : [];
   const circles: ScatterCircle[] = cur ? [{ x: cur.x, y: cur.y, r: eps, color: ACCENT }] : [];
 
   return (

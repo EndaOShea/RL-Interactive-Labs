@@ -10,6 +10,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { clamp01, randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { decisionTreePython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fbbf24';
 const CENTERS = [{ x: 0.28, y: 0.3 }, { x: 0.72, y: 0.3 }, { x: 0.28, y: 0.72 }, { x: 0.72, y: 0.72 }];
@@ -64,7 +65,7 @@ function newestSplits(n: TNode, targetDepth: number, depth = 0, acc: { feat: 0 |
   return acc;
 }
 
-function layoutTree(root: TNode, newDepth: number) {
+function layoutTree(root: TNode, newDepth: number, isLight: boolean) {
   const raw: { id: string; depth: number; node: TNode; x: number }[] = [];
   const edges: GEdge[] = []; let leaf = 0, maxD = 0, idc = 0;
   const rec = (node: TNode, depth: number, parent: string | null): { id: string; x: number } => {
@@ -84,7 +85,7 @@ function layoutTree(root: TNode, newDepth: number) {
     label: m.node.leaf ? String(m.node.cls) : (m.node.feat === 0 ? 'x₁' : 'x₂') + '≤' + m.node.thr.toFixed(2),
     sub: m.node.leaf ? `n=${m.node.n}` : undefined,
     // highlight the freshly-grown level in accent
-    color: m.node.leaf ? CLASS_COLORS[m.node.cls % CLASS_COLORS.length] : (m.depth === newDepth - 1 ? ACCENT : '#2a3350'),
+    color: m.node.leaf ? CLASS_COLORS[m.node.cls % CLASS_COLORS.length] : (m.depth === newDepth - 1 ? ACCENT : (isLight ? '#e2e8f2' : '#2a3350')),
   }));
   return { nodes, edges };
 }
@@ -99,6 +100,7 @@ const PRESETS: Preset[] = [
 ];
 
 const DecisionTreeLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [perCluster, setPerCluster] = useState(22);
   const [crit, setCrit] = useState<Crit>('gini');
@@ -171,7 +173,7 @@ const DecisionTreeLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
 
   const fieldKey = `${depth}-${crit}-${minLeaf}-${version}`;
   const plotPoints: ScatterPoint[] = data.map((p) => ({ x: p.x, y: p.y, cls: p.cls }));
-  const { nodes, edges } = useMemo(() => layoutTree(tree, depth), [tree, depth]);
+  const { nodes, edges } = useMemo(() => layoutTree(tree, depth, isLight), [tree, depth, isLight]);
 
   return (
     <LabStage

@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead, ParamSlider } from './shared';
 import { samplingPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#a78bfa';
 
@@ -97,6 +98,7 @@ function computeDist(
 }
 
 const SamplingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [temp, setTemp] = useState(0.9);
   const [topk, setTopk] = useState(6);
   const [topp, setTopp] = useState(0.9);
@@ -216,7 +218,7 @@ const SamplingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => 
 
   const grid = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', width: 'min(520px, 92%)' }}>
-      <div style={{ width: '100%', background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px', minHeight: 52 }}>
+      <div style={{ width: '100%', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, padding: '12px 16px', minHeight: 52 }}>
         <MonoLabel style={{ marginBottom: 6 }}>Generated</MonoLabel>
         <div style={{ fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--t0)', lineHeight: 1.6 }}>
           {generated.map((w, i) => (

@@ -10,6 +10,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { Pt, makeTwoClass, ParamsWrap, ParamsHead } from './shared';
 import { logregPython } from './python';
 import { PresetChips, Preset } from './presets';
+import { useTheme } from '../../utils/theme';
 
 const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
 
@@ -22,6 +23,7 @@ const PRESETS: Preset<Cfg>[] = [
 ];
 
 const LogisticRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [perClass, setPerClass] = useState(40);
   const [separation, setSeparation] = useState(0.6);
   const [alpha, setAlpha] = useState(0.5);
@@ -114,9 +116,9 @@ const LogisticRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPa
     return { x1: 0, y1: (k - b) / w2, x2: 1, y2: (k - (w1 + b)) / w2, color, width: dash ? 1.6 : 2.4, dash };
   };
   const lines: ScatterLine[] = [
-    contour(0.25, 'rgba(255,255,255,.4)', true),
-    contour(0.75, 'rgba(255,255,255,.4)', true),
-    contour(0.5, '#fff', false),
+    contour(0.25, isLight ? 'rgba(18,23,42,.4)' : 'rgba(255,255,255,.4)', true),
+    contour(0.75, isLight ? 'rgba(18,23,42,.4)' : 'rgba(255,255,255,.4)', true),
+    contour(0.5, isLight ? 'var(--t0)' : '#fff', false),
   ];
 
   const classify = (x: number, y: number) => (sigmoid(w1 * x + w2 * y + b) > 0.5 ? 1 : 0);

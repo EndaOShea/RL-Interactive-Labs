@@ -9,6 +9,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { searchPython } from './python';
 import { retrieve, SEARCH_DOCS, SEARCH_QUERIES } from './shared';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#14b8a6';
 // Neutral grey for all document points — retrieval shown purely by lines + ranked list.
@@ -16,6 +17,7 @@ const ACCENT = '#14b8a6';
 const DOC_COLOR = '#6b7494';
 
 const SemanticSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [queryIdx, setQueryIdx] = useState(0);
   const [k, setK] = useState(3);
@@ -130,7 +132,7 @@ const SemanticSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
           {/* Ranked list of all docs */}
           <div style={{
             width: 500,
-            background: 'rgba(8,11,20,.55)',
+            background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)',
             border: '1px solid var(--border)',
             borderRadius: 10,
             padding: '10px 14px',

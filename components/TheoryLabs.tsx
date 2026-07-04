@@ -6,6 +6,7 @@ import StageLayout from './stage/StageLayout';
 import StageGrid, { CellSpec } from './stage/StageGrid';
 import { AlgoPill, ParamSlider, RunControls, Legend, MonoLabel, ACC, GOOD, BAD } from './stage/primitives';
 import { useNarration } from '../hooks/useNarration';
+import { useTheme } from '../utils/theme';
 
 // --- SHARED: curated preset / guided-challenge chip row ---------------------
 // Small clickable chips that live in the Parameters panel. They reuse AlgoPill
@@ -118,6 +119,7 @@ interface LabProps {
 
 // --- 1. Model-Free vs Model-Based (Universal RL Lab) ---
 export const ModelVsFreeLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   // --- Environment State ---
   const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
@@ -1139,7 +1141,7 @@ for episode in range(200):
           { color: GOOD, label: 'High' },
           { color: BAD, label: 'Low' },
           ...(algoMode === 'based' ? [{ color: ACC, label: 'Planning' }] : []),
-          ...((subAlgo === 'reinforce' || subAlgo === 'ac') ? [{ node: <span style={{ color: '#fff', fontSize: 12 }}>↑</span>, label: 'Policy' }] : []),
+          ...((subAlgo === 'reinforce' || subAlgo === 'ac') ? [{ node: <span style={{ color: isLight ? 'var(--t0)' : '#fff', fontSize: 12 }}>↑</span>, label: 'Policy' }] : []),
         ]} />
       )}
       rewardLabel="AVG REWARD"
@@ -1168,6 +1170,7 @@ for episode in range(200):
 
 // --- 2. Deterministic vs Stochastic Lab ---
 export const DetStochLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+  const isLight = useTheme() === 'light';
     const narration = useNarration();
     const [obstacles, setObstacles] = useState<number[]>(DEFAULT_OBSTACLES);
     const [startPos] = useState(START_DEFAULT);
@@ -1596,7 +1599,7 @@ for episode in range(100):
         <Legend title="POLICY" items={[
           { color: GOOD, label: 'High Q' },
           { color: BAD, label: 'Low Q' },
-          { node: <span style={{ color: '#fff', fontSize: 12 }}>↑</span>, label: policyType === 'deterministic' ? 'Greedy' : 'Softmax' },
+          { node: <span style={{ color: isLight ? 'var(--t0)' : '#fff', fontSize: 12 }}>↑</span>, label: policyType === 'deterministic' ? 'Greedy' : 'Softmax' },
         ]} />
       )}
       rewardLabel="AVG REWARD"
@@ -2157,6 +2160,7 @@ for episode in range(200):
 
 // --- 4. Explore vs Exploit Lab (Multi-Armed Bandit) ---
 export const ExploreExploitLab: React.FC<LabProps> = ({ onLogUpdate, onUpdateMetrics, onClearMetrics, aiTutor, metrics, activeModule, onSelectModule, apiPanel }) => {
+    const isLight = useTheme() === 'light';
     const narration = useNarration();
     const N_ARMS = 5;
     const TRUE_MEANS = [0.2, 0.4, 0.6, 0.85, 0.3];
@@ -2566,7 +2570,7 @@ for t in range(1, 501):
                 <div style={{ position: 'absolute', bottom: `${tsY}%`, left: '15%', right: '15%', borderTop: '2px dotted #22d3ee' }} />
               )}
               <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${h}%`, background: best ? 'var(--acc)' : 'color-mix(in srgb, var(--acc) 55%, transparent)', transition: 'height .3s ease', boxShadow: best ? '0 0 18px -4px var(--acc)' : 'none' }} />
-              <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: '#fff' }}>{arm.q.toFixed(2)}</div>
+              <div style={{ position: 'absolute', bottom: 6, left: 0, right: 0, textAlign: 'center', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, color: isLight ? 'var(--t0)' : '#fff' }}>{arm.q.toFixed(2)}</div>
             </div>
             <div style={{ fontSize: 12, color: 'var(--t1)', fontWeight: 600 }}>Arm {i + 1}</div>
           </div>

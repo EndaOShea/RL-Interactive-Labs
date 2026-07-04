@@ -11,6 +11,7 @@ import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { TS, explore, layeredLayout, SearchMode } from './ts';
 import { riverPython } from './python';
 import { StateSpace, RiverSchematic } from './viz';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fb7185';
 
@@ -56,6 +57,7 @@ const PRESETS: Preset[] = [
 ];
 
 const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [scenario, setScenario] = useState<Scenario>('wgc');
   const [mode, setMode] = useState<SearchMode>('bfs');
   const [cursor, setCursor] = useState(1);
@@ -115,9 +117,9 @@ const RiverCrossingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }
   const colorOf = (k: string, last: boolean) => {
     if (res.nodes.get(k)!.goal) return GOOD;
     if (res.nodes.get(k)!.bad) return BAD;
-    if (last) return '#fff';
+    if (last) return isLight ? 'var(--t0)' : '#fff';
     if (solFound && sol.has(k)) return '#fbbf24';
-    if (k === k0) return '#cbd5e1';
+    if (k === k0) return isLight ? 'var(--t0)' : '#cbd5e1';
     return '#38bdf8';
   };
   const nodes: GNode[] = revealed.map((k, i) => { const p = layout.get(k)!; return { id: k, x: p.x, y: p.y, label: res.nodes.get(k)!.label, color: colorOf(k, i === revealed.length - 1) }; });

@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { linearTransformPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#22d3ee';   // î (col 1)
 const J_COL = '#fbbf24';    // ĵ (col 2)
@@ -71,6 +72,7 @@ function svd2(a: number, b: number, c: number, d: number) {
 type Mode = 'eigen' | 'svd';
 
 const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [mode, setMode] = useState<Mode>('eigen');
   const [a, setA] = useState(1);
@@ -98,19 +100,19 @@ const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     const R = 2;
     for (let k = -R; k <= R; k++) {
       const [vx1, vy1] = apply(k, -R), [vx2, vy2] = apply(k, R);
-      out.push({ x1: vx1, y1: vy1, x2: vx2, y2: vy2, color: GRID, width: k === 0 ? 1.6 : 1 });
+      out.push({ x1: vx1, y1: vy1, x2: vx2, y2: vy2, color: isLight ? 'rgba(45,105,145,.28)' : GRID, width: k === 0 ? 1.6 : 1 });
       const [hx1, hy1] = apply(-R, k), [hx2, hy2] = apply(R, k);
-      out.push({ x1: hx1, y1: hy1, x2: hx2, y2: hy2, color: GRID, width: k === 0 ? 1.6 : 1 });
+      out.push({ x1: hx1, y1: hy1, x2: hx2, y2: hy2, color: isLight ? 'rgba(45,105,145,.28)' : GRID, width: k === 0 ? 1.6 : 1 });
     }
     // original unit square (faint)
     const sq = [[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]];
     for (let i = 0; i < sq.length - 1; i++) {
-      out.push({ x1: sq[i][0], y1: sq[i][1], x2: sq[i + 1][0], y2: sq[i + 1][1], color: 'rgba(160,170,200,.35)', dash: true, width: 1.2 });
+      out.push({ x1: sq[i][0], y1: sq[i][1], x2: sq[i + 1][0], y2: sq[i + 1][1], color: isLight ? 'rgba(50,60,90,.35)' : 'rgba(160,170,200,.35)', dash: true, width: 1.2 });
     }
     // transformed unit square (shows the area / det)
     const tsq = sq.map(([x, y]) => apply(x, y));
     for (let i = 0; i < tsq.length - 1; i++) {
-      out.push({ x1: tsq[i][0], y1: tsq[i][1], x2: tsq[i + 1][0], y2: tsq[i + 1][1], color: 'rgba(255,255,255,.55)', width: 1.6 });
+      out.push({ x1: tsq[i][0], y1: tsq[i][1], x2: tsq[i + 1][0], y2: tsq[i + 1][1], color: isLight ? 'rgba(18,23,42,.55)' : 'rgba(255,255,255,.55)', width: 1.6 });
     }
     // basis vectors î = first column, ĵ = second column
     out.push({ x1: 0, y1: 0, x2: ma, y2: mc, color: ACCENT, width: 3 });
@@ -136,7 +138,7 @@ const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [a, b, c, d, t, mode]);
+  }, [a, b, c, d, t, mode, isLight]);
 
   // the unit circle maps to an ellipse with axes σ₁,σ₂ along U — draw it in SVD mode
   const circlePts = useMemo(() => {
@@ -248,11 +250,11 @@ const LinearTransformLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
         ? [
           { label: 'σ₁', value: svd.s1.toFixed(2), color: SVU },
           { label: 'σ₂', value: svd.s2.toFixed(2), color: SVU },
-          { label: 'κ', value: Number.isFinite(svd.cond) ? svd.cond.toFixed(1) : '∞', color: svd.cond > 30 ? '#f87171' : undefined },
+          { label: 'κ', value: Number.isFinite(svd.cond) ? svd.cond.toFixed(1) : '∞', color: svd.cond > 30 ? (isLight ? 'var(--bad)' : '#f87171') : undefined },
           { label: 'det', value: det.toFixed(2) },
         ]
         : [
-          { label: 'det', value: det.toFixed(3), color: Math.abs(det) < 1e-3 ? '#f87171' : undefined },
+          { label: 'det', value: det.toFixed(3), color: Math.abs(det) < 1e-3 ? (isLight ? 'var(--bad)' : '#f87171') : undefined },
           { label: 'λ', value: eigLabel, color: EIG },
           { label: 'tr', value: (a + d).toFixed(2) },
         ]}

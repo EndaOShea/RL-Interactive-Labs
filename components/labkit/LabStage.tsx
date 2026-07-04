@@ -74,9 +74,9 @@ const LabStage: React.FC<LabStageProps> = (p) => {
         <LabNav category={d.category} activeLabId={d.id} accent={accent} />
 
         {/* STAGE */}
-        <section style={{ flex: 1, position: 'relative', background: 'radial-gradient(130% 100% at 35% 30%, #131b30, #080b14 72%)', overflow: 'hidden', minWidth: 0 }}>
-          <div style={{ position: 'absolute', inset: 0, backgroundImage: 'linear-gradient(rgba(120,130,170,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(120,130,170,.05) 1px,transparent 1px)', backgroundSize: '44px 44px' }} />
-          <div style={{ position: 'absolute', inset: 0, boxShadow: 'inset 0 0 220px 40px rgba(0,0,0,.55)', pointerEvents: 'none' }} />
+        <section style={{ flex: 1, position: 'relative', background: 'var(--stage-bg)', overflow: 'hidden', minWidth: 0 }}>
+          <div style={{ position: 'absolute', inset: 0, backgroundImage: 'var(--stage-grid)', backgroundSize: '44px 44px' }} />
+          <div style={{ position: 'absolute', inset: 0, boxShadow: 'var(--stage-vignette)', pointerEvents: 'none' }} />
 
           {/* centred viz */}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingLeft: p.algoDock ? 150 : 30, paddingRight: 30, paddingTop: 20, paddingBottom: 60 }}>

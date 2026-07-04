@@ -9,6 +9,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead, ParamSlider } from './shared';
 import { tokenizerPython } from './python';
 import { initBpe, applyMerge, BpeState, MergeStep } from './bpe';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#a78bfa';
 
@@ -81,6 +82,7 @@ function tokenize(text: string): Tok[] {
 }
 
 const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [mode, setMode] = useState<Mode>('greedy');
   const [text, setText] = useState('Tokenization powers transformers.');
 
@@ -214,14 +216,14 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
         <span style={{ color: ACCENT }}>{nTok} tokens</span>
         <span>{cpt.toFixed(2)} chars/token</span>
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start', minHeight: 120, padding: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignContent: 'flex-start', minHeight: 120, padding: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12 }}>
         {toks.length === 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--t2)' }}>Tokens appear here…</span>}
         {toks.map((t, i) => {
           const col = CHIP_COLORS[ids[i] % CHIP_COLORS.length];
           return (
             <span key={i} style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
               <span style={{
-                fontFamily: 'var(--mono)', fontSize: 13, color: '#fff',
+                fontFamily: 'var(--mono)', fontSize: 13, color: isLight ? 'var(--t0)' : '#fff',
                 background: `color-mix(in srgb, ${col} 26%, transparent)`,
                 border: `1px solid color-mix(in srgb, ${col} 60%, transparent)`,
                 borderRadius: 7, padding: '5px 9px', whiteSpace: 'pre',
@@ -245,7 +247,7 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
         <span style={{ color: ACCENT }}>{bpe.merges.length}/{maxMerges} merges</span>
         <span>vocab {bpe.vocab.length}</span>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, minHeight: 140 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7, padding: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12, minHeight: 140 }}>
         {[...bpe.words.entries()].map(([w, { syms, freq }]) => (
           <div key={w} style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             <span style={{ width: 64, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', textAlign: 'right' }}>×{freq}</span>
@@ -254,7 +256,7 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
               return (
                 <span key={i} style={{
                   fontFamily: 'var(--mono)', fontSize: 12.5,
-                  color: isNew ? '#fff' : 'var(--t1)',
+                  color: isNew ? (isLight ? 'var(--t0)' : '#fff') : 'var(--t1)',
                   background: isNew ? `color-mix(in srgb, ${ACCENT} 38%, transparent)` : 'var(--bg2)',
                   border: `1px solid ${isNew ? ACCENT : 'var(--border)'}`,
                   boxShadow: isNew ? `0 0 12px -2px ${ACCENT}` : 'none',
@@ -265,7 +267,7 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
           </div>
         ))}
       </div>
-      <div style={{ padding: '10px 14px', background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12 }}>
+      <div style={{ padding: '10px 14px', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 12 }}>
         <MonoLabel style={{ marginBottom: 6 }}>Learned merge rules</MonoLabel>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, minHeight: 24 }}>
           {bpe.merges.length === 0 && <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>Press Run to learn merges from the corpus…</span>}
@@ -337,7 +339,7 @@ const TokenizerLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =>
       controls={isBpe ? (
         <RunControls isPlaying={bpeSim.isPlaying} onPlay={bpeSim.toggle} onReset={() => resetBpe()} speed={bpeSim.speed} onSpeed={bpeSim.setSpeed} />
       ) : (
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', background: 'rgba(8,11,20,.8)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 16px' }}>
+        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.8)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 16px' }}>
           Static — edit the text above to retokenize
         </div>
       )}

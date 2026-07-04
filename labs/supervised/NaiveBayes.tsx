@@ -9,6 +9,7 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { makeBlobs, clamp01, ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { naiveBayesPython } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#fbbf24';
 const CENTERS = [{ x: 0.3, y: 0.32 }, { x: 0.7, y: 0.34 }, { x: 0.5, y: 0.72 }];
@@ -31,6 +32,7 @@ const PRESETS: Preset[] = [
 ];
 
 const NaiveBayesLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [perClass, setPerClass] = useState(28);
   const [spread, setSpread] = useState(0.09);
@@ -158,7 +160,7 @@ const NaiveBayesLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
   const ellipses: ScatterEllipse[] = variant === 'gaussian'
     ? model.s.map((c, k) => ({ cx: c.mx, cy: c.my, rx: Math.sqrt(c.vx) * 2, ry: Math.sqrt(c.vy) * 2, angle: 0, color: CLASS_COLORS[k % CLASS_COLORS.length] }))
     : [];
-  const markers: ScatterMarker[] = [{ x: query.x, y: query.y, color: '#fff', r: 6 }];
+  const markers: ScatterMarker[] = [{ x: query.x, y: query.y, color: isLight ? 'var(--t0)' : '#fff', r: 6 }];
   const post = posteriors(query.x, query.y);
   const pred = post.indexOf(Math.max(...post));
   const fieldKey = `${variant}-${alpha}-${version}-${perClass}`;

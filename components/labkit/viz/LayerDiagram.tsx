@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTheme } from '../../../utils/theme';
 
 // Neural-network layer diagram (SVG). Neurons are columns of nodes; edges are
 // coloured by weight sign (teal +, red −) and weighted by magnitude. Node fill
@@ -15,6 +16,7 @@ export interface LayerDiagramProps {
 const POS = '#2dd4bf', NEG = '#f87171';
 
 const LayerDiagram: React.FC<LayerDiagramProps> = ({ sizes, weights, activations, width = 440, height = 420, labels }) => {
+  const isLight = useTheme() === 'light';
   const padX = 34, padY = 28;
   const L = sizes.length;
   const colX = (l: number) => (L <= 1 ? width / 2 : padX + (l / (L - 1)) * (width - 2 * padX));
@@ -32,7 +34,7 @@ const LayerDiagram: React.FC<LayerDiagramProps> = ({ sizes, weights, activations
   };
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%' }}>
       {/* edges */}
       {weights?.map((Wl, l) => Wl.map((row, i) => row.map((w, j) => {
         const a = Math.abs(w) / maxW;

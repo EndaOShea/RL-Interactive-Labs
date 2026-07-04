@@ -14,6 +14,7 @@ import {
 import {
   ToyKind, DataPoint, Net, Arch, makeData, archFromLayers, initNet, trainEpoch, evaluate, predictProb, archSummary,
 } from './mlpTrainer';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#f43f5e';
 const MAX_EPOCHS = 250;
@@ -274,17 +275,20 @@ const ActPicker: React.FC<{ value: Activation; onChange: (a: Activation) => void
   </div>
 );
 
-const RiskList: React.FC<{ risks: { id: string; severity: string; title: string; detail: string }[] }> = ({ risks }) => (
-  <div>
-    <MonoLabel style={{ marginBottom: 7 }}>Risks</MonoLabel>
-    {risks.map((r) => (
-      <div key={r.id} style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 7, background: r.severity === 'danger' ? 'rgba(244,63,94,.10)' : 'rgba(251,191,36,.10)', border: `1px solid ${r.severity === 'danger' ? 'rgba(244,63,94,.4)' : 'rgba(251,191,36,.4)'}` }}>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: r.severity === 'danger' ? '#fca5a5' : '#fcd34d' }}>{r.severity === 'danger' ? '⛔' : '⚠'} {r.title}</div>
-        <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 3, lineHeight: 1.5 }}>{r.detail}</div>
-      </div>
-    ))}
-  </div>
-);
+const RiskList: React.FC<{ risks: { id: string; severity: string; title: string; detail: string }[] }> = ({ risks }) => {
+  const isLight = useTheme() === 'light';
+  return (
+    <div>
+      <MonoLabel style={{ marginBottom: 7 }}>Risks</MonoLabel>
+      {risks.map((r) => (
+        <div key={r.id} style={{ marginBottom: 8, padding: '8px 10px', borderRadius: 7, background: r.severity === 'danger' ? 'rgba(244,63,94,.10)' : 'rgba(251,191,36,.10)', border: `1px solid ${r.severity === 'danger' ? 'rgba(244,63,94,.4)' : 'rgba(251,191,36,.4)'}` }}>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: r.severity === 'danger' ? (isLight ? 'var(--bad)' : '#fca5a5') : (isLight ? 'var(--warn)' : '#fcd34d') }}>{r.severity === 'danger' ? '⛔' : '⚠'} {r.title}</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 3, lineHeight: 1.5 }}>{r.detail}</div>
+        </div>
+      ))}
+    </div>
+  );
+};
 
 /* ── MLP mode: live training panel (decision boundary + loss curves) ── */
 const MlpTrainPanel: React.FC<{

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useTheme } from '../../../utils/theme';
 
 // Grid board for search/pathfinding. Each cell has a discrete state with its own
 // colour; supports drag-to-paint walls. Pure/presentational — the lab owns the
@@ -31,6 +32,23 @@ const GridBoard: React.FC<GridBoardProps> = ({ cols, rows, state, label, cell = 
   const mode = useRef<'add' | 'remove'>('add');
   const W = cols * (cell + gap) + gap;
   const H = rows * (cell + gap) + gap;
+  const isLight = useTheme() === 'light';
+  // 'empty' is the board's per-cell background (majority of cells) — recede
+  // against the panel on both themes. 'current' is a max-contrast halo
+  // ('brightest mark' on dark) — flips to a dark mark on light so it stays
+  // visible instead of vanishing into the now-light panel.
+  const fillFor = (s: CellState) => {
+    if (isLight) {
+      if (s === 'empty') return 'var(--bg1)';
+      if (s === 'current') return 'var(--t0)';
+    }
+    return COLORS[s];
+  };
+  const labelFillFor = (s: CellState) => {
+    if (s === 'visited' || s === 'empty') return 'var(--t2)';
+    if (s === 'current' && isLight) return '#fff'; // current's fill flipped dark on light — flip its label light too
+    return 'rgba(8,11,20,.8)';
+  };
 
   useEffect(() => {
     const up = () => { painting.current = false; };
@@ -54,7 +72,7 @@ const GridBoard: React.FC<GridBoardProps> = ({ cols, rows, state, label, cell = 
   return (
     <svg
       width={W} height={H} viewBox={`0 0 ${W} ${H}`}
-      style={{ display: 'block', borderRadius: 14, background: 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%', maxHeight: '70vh', touchAction: 'none' }}
+      style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', maxWidth: '100%', maxHeight: '70vh', touchAction: 'none' }}
     >
       {Array.from({ length: cols * rows }, (_, idx) => {
         const r = Math.floor(idx / cols), c = idx % cols;
@@ -66,16 +84,16 @@ const GridBoard: React.FC<GridBoardProps> = ({ cols, rows, state, label, cell = 
           <g key={idx}>
             <rect
               x={x} y={y} width={cell} height={cell} rx={4}
-              fill={COLORS[s]}
-              stroke={s === 'empty' ? 'rgba(120,130,170,.10)' : s === 'wall' ? 'rgba(120,130,170,.06)' : 'rgba(8,11,20,.4)'}
+              fill={fillFor(s)}
+              stroke={s === 'empty' ? (isLight ? 'rgba(50,60,90,.14)' : 'rgba(120,130,170,.10)') : s === 'wall' ? (isLight ? 'rgba(50,60,90,.10)' : 'rgba(120,130,170,.06)') : 'rgba(8,11,20,.4)'}
               strokeWidth={1}
-              style={glow ? { filter: `drop-shadow(0 0 6px ${COLORS[s]})` } : undefined}
+              style={glow ? { filter: `drop-shadow(0 0 6px ${fillFor(s)})` } : undefined}
               onPointerDown={() => down(idx)}
               onPointerEnter={() => enter(idx)}
               cursor={onPaint ? 'pointer' : 'default'}
             />
             {lab && cell >= 22 && (
-              <text x={x + cell / 2} y={y + cell / 2 + 3} textAnchor="middle" fontSize={Math.min(10, cell / 2.6)} fontFamily="var(--mono)" fill={s === 'visited' || s === 'empty' ? 'var(--t2)' : 'rgba(8,11,20,.8)'} pointerEvents="none">{lab}</text>
+              <text x={x + cell / 2} y={y + cell / 2 + 3} textAnchor="middle" fontSize={Math.min(10, cell / 2.6)} fontFamily="var(--mono)" fill={labelFillFor(s)} pointerEvents="none">{lab}</text>
             )}
           </g>
         );

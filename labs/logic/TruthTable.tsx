@@ -9,6 +9,7 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { parseBool, evalBool, collectVars } from './boolexpr';
 import { truthTablePython, TtMode } from './python';
+import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#818cf8';
 
@@ -29,6 +30,7 @@ const MODES: { id: TtMode; label: string; hint: string }[] = [
 ];
 
 const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const [expr, setExpr] = useState('(A -> B) & (B -> C) -> (A -> C)');
   const [mode, setMode] = useState<TtMode>('classify');
   const [cursor, setCursor] = useState(0);
@@ -120,7 +122,8 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
   const cell = (on: boolean, dim = false) => ({ padding: '5px 12px', textAlign: 'center' as const, fontFamily: 'var(--mono)', fontSize: 12, color: on ? (dim ? 'var(--t1)' : '#fff') : 'var(--t2)', background: on && !dim ? GOOD : 'transparent' });
 
   // Highlight a row that is "active" under the current mode (model row / clause row).
-  const rowAccent = (out: boolean) => mode === 'models' ? (out ? GOOD : '#2a3350') : mode === 'cnf' ? (out ? '#2a3350' : BAD) : ACCENT;
+  const idleAccent = isLight ? 'var(--bg3)' : '#2a3350';
+  const rowAccent = (out: boolean) => mode === 'models' ? (out ? GOOD : idleAccent) : mode === 'cnf' ? (out ? idleAccent : BAD) : ACCENT;
 
   const board = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: 'min(540px, 90%)' }}>
@@ -137,12 +140,12 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
           {/* True/false proportion bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)' }}>{table.nTrue}/{table.rows} T</span>
-            <div style={{ flex: 1, height: 8, borderRadius: 5, background: '#2a3350', overflow: 'hidden', display: 'flex' }}>
+            <div style={{ flex: 1, height: 8, borderRadius: 5, background: isLight ? 'var(--bg3)' : '#2a3350', overflow: 'hidden', display: 'flex' }}>
               <div style={{ width: `${(table.nTrue / table.rows) * 100}%`, background: GOOD }} />
             </div>
             <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: ACCENT }}>{table.type}</span>
           </div>
-          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: 'rgba(8,11,20,.55)' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr style={{ background: 'var(--bg0)' }}>
