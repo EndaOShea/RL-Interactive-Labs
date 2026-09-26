@@ -53,4 +53,16 @@ export const LLM_LABS: LabDescriptor[] = [
     content: RAG_CONTENT,
     component: React.lazy(() => import('./Rag')),
   },
+  {
+    id: 'rag-architecture',
+    category: 'llm',
+    title: 'RAG Architecture Viewer',
+    subtitle: 'system · ingestion · query · deployment · lifecycle · validation',
+    blurb: 'Explore server-designed RAG systems, controlled failure walkthroughs, deployable alternatives and structural comparisons.',
+    icon: 'M3 4h7v6H3zM14 4h7v6h-7zM8 14h8v6H8zM10 7h4M7 10v4M17 10v4',
+    accent: ACCENT,
+    codeFile: 'visual-guidance-contract.json',
+    content: RAG_CONTENT,
+    component: React.lazy(() => import('./RagArchitecture')),
+  },
 ];

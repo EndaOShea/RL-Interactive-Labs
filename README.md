@@ -57,7 +57,10 @@ client-side** — no TF.js/ONNX and no servers.
   **Retrieval-Augmented Generation**: a stepped chunk → embed → index → retrieve → rerank → augment →
   generate pipeline with **11 variants** (Naive, Advanced, HyDE, RAG-Fusion, Self-RAG, Corrective RAG,
   GraphRAG, RAPTOR, Contextual Retrieval, ColBERT, Agentic/Adaptive) computed over a shared
-  Solar-System corpus, each variant re-sequencing the same pipeline.
+  Solar-System corpus, each variant re-sequencing the same pipeline. The separate **RAG Architecture
+  Viewer** renders server-designed system, ingestion, query, deployment, lifecycle, and validation
+  views from the RAG Decision MCP contract fixtures, with guided failure walkthroughs and comparison
+  of deployable alternatives.
 - **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
 - **Math Foundations** — gradient descent, Taylor series, linear transformations, derivatives
   (tangent slope and the secant→limit), the chain rule (composite functions as a product of local
@@ -179,6 +182,7 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 │   ├── labkit/                   # Generic twin for new areas: LabStage, LabNav, TutorDock, viz/
 │   └── ThemeToggle.tsx           # Sun/moon light-dark toggle (mounted in every nav rail)
 ├── labs/<area>/                  # Per-area labs (*.tsx) + content.ts, python.ts, registry.ts
+│   └── llm/rag-architecture/     # Reusable contract-driven RAG architecture viewer
 ├── hooks/                        # useSimLoop (play/pause/reset), useTutorState (per-area tutor)
 ├── services/
 │   ├── llmService.ts             # RL tutoring prompt (+ helper generators)
@@ -192,6 +196,8 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 ├── types.ts                      # ModuleId, SimulationUpdate, provider + reasoning types
 ├── index.css                     # Design tokens (+ light-mode :root[data-theme=light]), fonts, scrollbars
 ├── public/theme-init.js          # No-flash theme init, loaded first in <head> (CSP-safe)
+├── public/rag-guidance/          # Nine checked-in RagVisualGuidance contract fixtures
+├── scripts/validate-rag-architecture.mjs # Fixture, interaction, a11y, and responsive checks
 ├── security-headers.conf         # CSP (provider hosts + Google Fonts), shared nginx headers
 ├── nginx.conf                    # Static serve + SPA fallback
 └── vite.config.ts
@@ -202,6 +208,7 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 ```bash
 npm run dev       # dev server on :2100
 npm run build     # production build (vite/esbuild)
+npm run validate:rag-architecture # validate RAG fixtures and renderer requirements
 npm run preview   # preview the production build
 ```
 

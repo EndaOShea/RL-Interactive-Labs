@@ -1,0 +1,60 @@
+{
+  "contract": "RagVisualGuidance",
+  "visualizationSchemaVersion": "0.1",
+  "fixtures": [
+    {
+      "workloadId": "baseline-business-documents",
+      "file": "baseline-business.json",
+      "description": "Baseline business documents with a recommended and simpler alternative.",
+      "maxAlternatives": 2
+    },
+    {
+      "workloadId": "secure-fresh-audited-pdfs",
+      "file": "secure-fresh-pdf.json",
+      "description": "Permission-filtered, audited PDFs with freshness and deletion controls.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "multimodal-image-corpus",
+      "file": "multimodal.json",
+      "description": "Text and image ingestion with multimodal retrieval.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "governed-structured-aggregation",
+      "file": "structured.json",
+      "description": "Governed structured aggregation with row-level authorization.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "relationship-heavy-multi-hop",
+      "file": "graph.json",
+      "description": "Relationship-heavy, multi-hop graph retrieval.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "offline-local-low-latency",
+      "file": "offline.json",
+      "description": "Local-only, offline operation with a strict latency target.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "multilingual-corpus",
+      "file": "multilingual.json",
+      "description": "English, French, and German document retrieval.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "conversational-multi-hop",
+      "file": "conversational.json",
+      "description": "Conversational, multi-hop retrieval with bounded abstention behavior.",
+      "maxAlternatives": 1
+    },
+    {
+      "workloadId": "high-throughput-repeated-questions",
+      "file": "high-throughput.json",
+      "description": "High-throughput repeated questions with cache-aware retrieval.",
+      "maxAlternatives": 1
+    }
+  ]
+}
