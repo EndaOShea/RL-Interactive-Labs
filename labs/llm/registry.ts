@@ -1,6 +1,7 @@
 import React from 'react';
 import { LabDescriptor } from '../../catalog/types';
-import { TOKENIZER_CONTENT, SAMPLING_CONTENT, ATTENTION_CONTENT, RAG_CONTENT } from './content';
+import { TOKENIZER_CONTENT, SAMPLING_CONTENT, ATTENTION_CONTENT } from './content';
+import { RAG_CONTENT } from './ragContent';
 
 const ACCENT = '#a78bfa';
 

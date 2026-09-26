@@ -17,7 +17,7 @@ import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead, ParamSlider } from './shared';
-import { ragPython } from './python';
+import { ragPython } from './ragPython';
 // NOTE: imports from './rag/index' (not './rag') — on a case-insensitive
 // filesystem (macOS/Windows) the bare specifier './rag' collides with this
 // very file (Rag.tsx) and self-resolves instead of hitting the directory.
