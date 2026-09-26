@@ -8,22 +8,22 @@ import { useTheme } from '../../utils/theme';
 const ACCENT = '#f59e0b';
 
 /**
- * Horizontal "denoising progress" bar: shows how far through the reverse pass we
- * are and the live SNR mapped to a 0..1 fill. Forward (noising) fills red→blue
- * left-to-right; reverse (denoising) drains it. Pure SVG, no deps.
+ * Horizontal signal bar: the fill is ᾱₜ, the signal's share of xₜ's variance
+ * (xₜ = √ᾱₜ·x₀ + √(1−ᾱₜ)·ε, so for unit-variance data the signal power is ᾱₜ and
+ * the noise power 1 − ᾱₜ; SNR = 1 sits at 50%). Forward (noising) drains it,
+ * reverse (denoising) refills it. Pure markup, no deps.
  */
 export const DenoiseBar: React.FC<{
-  /** Fraction of noise currently present in the cloud, 0 (clean) .. 1 (pure noise). */
-  noiseFrac: number;
+  /** ᾱₜ ∈ [0, 1]: 1 = clean data, 0 = pure noise. */
+  abar: number;
   /** +1 forward (noising) | -1 reverse (denoising). */
   dir: 1 | -1;
   /** Optional label, e.g. "DDIM · 30 steps". */
   label?: string;
   width?: number;
-}> = ({ noiseFrac, dir, label, width = 196 }) => {
+}> = ({ abar, dir, label, width = 196 }) => {
   const isLight = useTheme() === 'light';
-  const f = Math.max(0, Math.min(1, noiseFrac));
-  const signal = 1 - f;
+  const signal = Math.max(0, Math.min(1, abar));
   return (
     <div style={{ width }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -31,7 +31,7 @@ export const DenoiseBar: React.FC<{
           {dir === 1 ? 'NOISING →' : '← DENOISING'}
         </span>
         <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: dir === 1 ? (isLight ? 'var(--bad)' : '#f87171') : (isLight ? 'var(--good)' : '#34d399') }}>
-          {(signal * 100).toFixed(0)}% signal
+          ᾱ = {(signal * 100).toFixed(0)}% signal power
         </span>
       </div>
       <div style={{ position: 'relative', height: 10, borderRadius: 6, overflow: 'hidden', background: isLight ? 'var(--bg3)' : '#1c2440', border: '1px solid var(--border)' }}>
