@@ -75,18 +75,15 @@ const EigenSvd: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   }, [loopLines, svd, eig, M]);
 
   // The image ellipse itself (semi-axes σ₁,σ₂ oriented along u₁), via ScatterPlot's
-  // data-space ellipse. rx/ry are in data units relative to plot WIDTH; with a
-  // square domain/range that matches the σ lengths.
-  const ellipses: ScatterEllipse[] = useMemo(() => {
-    const span = 2 * VIEW;
-    return [{
-      cx: 0, cy: 0,
-      rx: svd.sigma1 / span,
-      ry: svd.sigma2 / span,
-      angle: angleOf(svd.u1),
-      color: ELL_COL,
-    }];
-  }, [svd]);
+  // data-space ellipse — rx/ry are true data units (ScatterPlot maps them through
+  // both axis scales), so they are the singular values directly.
+  const ellipses: ScatterEllipse[] = useMemo(() => [{
+    cx: 0, cy: 0,
+    rx: svd.sigma1,
+    ry: svd.sigma2,
+    angle: angleOf(svd.u1),
+    color: ELL_COL,
+  }], [svd]);
 
   const eigText = eig.complex
     ? 'complex'

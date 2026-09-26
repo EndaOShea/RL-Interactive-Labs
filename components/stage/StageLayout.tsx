@@ -98,7 +98,6 @@ export const LiveMath: React.FC<{ update?: SimulationUpdate | null }> = ({ updat
           </div>
         </>
       )}
-      <div style={{ marginTop: 16 }}><Sparkline w={300} h={64} seed={(update.algorithm.length % 7) + 1} /></div>
     </div>
   );
 };

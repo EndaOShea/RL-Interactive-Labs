@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useId, useMemo, useRef } from 'react';
 import { ACC, GOOD } from '../../stage/primitives';
 import { useTheme } from '../../../utils/theme';
 
@@ -44,6 +44,7 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
 }) => {
   const ref = useRef<SVGSVGElement | null>(null);
   const isLight = useTheme() === 'light';
+  const clipId = `sp-clip-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const padL = 44, padR = 14, padT = 14, padB = 36;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
@@ -52,6 +53,22 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
 
   const sx = (x: number) => padL + ((x - dx0) / (dx1 - dx0)) * plotW;
   const sy = (y: number) => padT + (1 - (y - dy0) / (dy1 - dy0)) * plotH;
+  // Data-space shapes are mapped through BOTH axis scales. The x and y pixel-per-
+  // unit scales differ whenever the plot box is not square or the domain and range
+  // spans differ, so a data-space circle is generally a screen ellipse, and a
+  // rotated data-space ellipse must be traced point by point to stay exact.
+  const pxPerX = plotW / Math.abs(dx1 - dx0);
+  const pxPerY = plotH / Math.abs(dy1 - dy0);
+  const ellipsePath = (cx: number, cy: number, rx: number, ry: number, angle: number) => {
+    const c = Math.cos(angle), s = Math.sin(angle), N = 72;
+    let d = '';
+    for (let k = 0; k <= N; k++) {
+      const t = (2 * Math.PI * k) / N;
+      const ex = rx * Math.cos(t), ey = ry * Math.sin(t);
+      d += `${k === 0 ? 'M' : 'L'} ${sx(cx + ex * c - ey * s)} ${sy(cy + ex * s + ey * c)} `;
+    }
+    return `${d}Z`;
+  };
   const fmtTick = (v: number) => (Math.abs(v) < 1e-9 ? '0' : parseFloat(v.toFixed(2)).toString());
   const colorOf = (cls?: number) => (cls == null || cls < 0 ? 'var(--t2)' : classColors[cls % classColors.length]);
 
@@ -94,6 +111,11 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
       onClick={handleClick}
       style={{ display: 'block', borderRadius: 14, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', cursor: onAddPoint ? 'crosshair' : 'default', maxWidth: '100%' }}
     >
+      <defs>
+        <clipPath id={clipId}>
+          <rect x={padL} y={padT} width={plotW} height={plotH} />
+        </clipPath>
+      </defs>
       {/* decision field */}
       {field?.map((c, i) => (
         <rect key={i} x={c.x} y={c.y} width={c.w} height={c.h} fill={classColors[c.cls % classColors.length]} opacity={0.16} />
@@ -119,19 +141,21 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
         );
       })}
 
-      {/* lines (boundaries, axes, links) */}
-      {lines?.map((l, i) => (
-        <line
-          key={i} x1={sx(l.x1)} y1={sy(l.y1)} x2={sx(l.x2)} y2={sy(l.y2)}
-          stroke={l.color || 'var(--t0)'} strokeWidth={l.width ?? 2}
-          strokeDasharray={l.dash ? '5 5' : undefined} strokeLinecap="round"
-        />
-      ))}
+      {/* lines (boundaries, axes, links) + data-space circles, clipped to the plot box */}
+      <g clipPath={`url(#${clipId})`}>
+        {lines?.map((l, i) => (
+          <line
+            key={i} x1={sx(l.x1)} y1={sy(l.y1)} x2={sx(l.x2)} y2={sy(l.y2)}
+            stroke={l.color || 'var(--t0)'} strokeWidth={l.width ?? 2}
+            strokeDasharray={l.dash ? '5 5' : undefined} strokeLinecap="round"
+          />
+        ))}
 
-      {/* data-space circles (e.g. DBSCAN eps neighbourhood) */}
-      {circles?.map((c, i) => (
-        <circle key={`c${i}`} cx={sx(c.x)} cy={sy(c.y)} r={c.r * plotW} fill="none" stroke={c.color || 'var(--t1)'} strokeWidth={1.2} strokeDasharray="4 4" opacity={0.75} />
-      ))}
+        {/* data-space circles (e.g. DBSCAN eps neighbourhood): radius r in data units on both axes */}
+        {circles?.map((c, i) => (
+          <ellipse key={`c${i}`} cx={sx(c.x)} cy={sy(c.y)} rx={c.r * pxPerX} ry={c.r * pxPerY} fill="none" stroke={c.color || 'var(--t1)'} strokeWidth={1.2} strokeDasharray="4 4" opacity={0.75} />
+        ))}
+      </g>
 
       {/* emphasis markers (e.g. k-NN neighbourhood rings) */}
       {markers?.map((m, i) => (
@@ -152,15 +176,16 @@ const ScatterPlot: React.FC<ScatterPlotProps> = ({
         />
       ))}
 
-      {/* data-space ellipses (e.g. Gaussian covariance) */}
-      {ellipses?.map((e, i) => {
-        const cx = sx(e.cx), cy = sy(e.cy);
-        const deg = (-e.angle * 180) / Math.PI; // data-space y is up; SVG y is down
-        const col = e.color || ACC;
-        return (
-          <ellipse key={`e${i}`} cx={cx} cy={cy} rx={e.rx * plotW} ry={e.ry * plotW} transform={`rotate(${deg} ${cx} ${cy})`} fill={col} fillOpacity={0.1} stroke={col} strokeWidth={1.8} />
-        );
-      })}
+      {/* data-space ellipses (e.g. Gaussian covariance): semi-axes rx/ry in data units,
+          `angle` = rotation of the rx axis in data space (y up); traced exactly */}
+      <g clipPath={`url(#${clipId})`}>
+        {ellipses?.map((e, i) => {
+          const col = e.color || ACC;
+          return (
+            <path key={`e${i}`} d={ellipsePath(e.cx, e.cy, e.rx, e.ry, e.angle)} fill={col} fillOpacity={0.1} stroke={col} strokeWidth={1.8} />
+          );
+        })}
+      </g>
 
       {/* centroids */}
       {centroids?.map((c, i) => (
