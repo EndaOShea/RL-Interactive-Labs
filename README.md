@@ -231,3 +231,5 @@ Ideas welcome:
 - Sutton & Barto, *Reinforcement Learning: An Introduction*
 - OpenAI *Spinning Up in Deep RL*
 - DeepMind RL lecture series
+
+Model catalogue maintenance: [local sync, validation and deployment](docs/model-updates.md).

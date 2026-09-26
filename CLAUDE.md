@@ -294,3 +294,7 @@ the feature: light values live only under the `:root[data-theme="light"]` overri
 - No testing or linting framework is configured yet.
 - Removed in the redesign: the old `GridWorld.tsx` and `LifecyclePanel.tsx` components and the
   `recharts` dependency.
+
+## Model catalogue maintenance
+
+See [docs/model-updates.md](docs/model-updates.md). Model policies and payload compatibility belong here. Git pushes must not trigger CI or deployment; `.model-update.json` defines local validation and app-owned VPS rollout.
