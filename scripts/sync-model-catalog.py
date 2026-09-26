@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 
@@ -17,8 +18,31 @@ def curate(raw, policy):
         by_id = {m['model_id']: m for m in available}
         if len(by_id) != len(available):
             raise ValueError('Duplicate model IDs')
+        selection = rule.get('selection', 'explicit')
+        excluded = []
+        if selection == 'matching_catalog':
+            patterns = rule.get('include_patterns', [])
+            if not patterns:
+                raise ValueError(f'{name}: catalogue selection requires compatible model families')
+            selected_ids = []
+            for m in available:
+                model_id = m['model_id']
+                if m.get('model_type') != 'text':
+                    reason = 'not a text model'
+                elif m.get('deprecated') or m.get('status') in ('deprecated', 'retired'):
+                    reason = 'deprecated or retired'
+                elif not any(re.fullmatch(pattern, model_id) for pattern in patterns):
+                    reason = 'outside supported text request families'
+                else:
+                    selected_ids.append(model_id)
+                    continue
+                excluded.append({'id': model_id, 'reason': reason})
+        elif selection == 'explicit':
+            selected_ids = rule['models']
+        else:
+            raise ValueError(f'{name}: unknown selection policy')
         models = []
-        for model_id in rule['models']:
+        for model_id in selected_ids:
             if model_id not in by_id:
                 raise ValueError(f'{name}: approved model {model_id} disappeared; review its replacement')
             m = by_id[model_id]
@@ -48,9 +72,11 @@ def curate(raw, policy):
                 'outputCostPerMtok': m['output_cost_per_mtok'],
                 'thinking': thinking,
             })
-        if rule['default'] not in rule['models'] or not models:
+        if rule['default'] not in selected_ids or not models:
             raise ValueError(f'{name}: default must be approved')
         result['providers'][name] = {'default': rule['default'], 'models': models}
+        if selection == 'matching_catalog':
+            result['providers'][name]['excluded_models'] = excluded
     return result
 
 
@@ -75,6 +101,8 @@ def main():
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(text)
     print(f'{output.relative_to(root)}: {sum(len(p["models"]) for p in result["providers"].values())} approved models')
+    for name, provider in result['providers'].items():
+        print(f'{name}: {len(provider["models"])} selected, {len(provider.get("excluded_models", []))} excluded')
 
 
 if __name__ == '__main__':

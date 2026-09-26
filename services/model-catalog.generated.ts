@@ -7,6 +7,70 @@ export const MODEL_CATALOG = {
       "default": "gemini-3.1-flash-lite",
       "models": [
         {
+          "id": "gemini-3.8-flash",
+          "label": "Gemini 3.8 Flash",
+          "contextWindow": 1048576,
+          "inputCostPerMtok": 0.75,
+          "outputCostPerMtok": 3.75,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "thinkingLevel",
+            "levels": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Response pricing = output tokens + thinking tokens."
+          }
+        },
+        {
+          "id": "gemini-3.7-flash",
+          "label": "Gemini 3.7 Flash",
+          "contextWindow": 1048576,
+          "inputCostPerMtok": 0.75,
+          "outputCostPerMtok": 3.75,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "thinkingLevel",
+            "levels": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Response pricing = output tokens + thinking tokens."
+          }
+        },
+        {
+          "id": "gemini-3.1-pro-preview",
+          "label": "Gemini 3.1 Pro Preview",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 2.0,
+          "outputCostPerMtok": 12.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "thinkingLevel",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Response pricing = output tokens + thinking tokens."
+          }
+        },
+        {
           "id": "gemini-3.1-flash-lite",
           "label": "Gemini 3.1 Flash Lite",
           "contextWindow": 1000000,
@@ -51,11 +115,11 @@ export const MODEL_CATALOG = {
           }
         },
         {
-          "id": "gemini-3.1-pro-preview",
-          "label": "Gemini 3.1 Pro Preview",
-          "contextWindow": 1000000,
-          "inputCostPerMtok": 2.0,
-          "outputCostPerMtok": 12.0,
+          "id": "gemini-3.5-flash-lite",
+          "label": "Gemini 3.5 Flash Lite",
+          "contextWindow": 1048576,
+          "inputCostPerMtok": 0.3,
+          "outputCostPerMtok": 2.5,
           "thinking": {
             "supported": true,
             "mode": "effort_levels",
@@ -66,23 +130,24 @@ export const MODEL_CATALOG = {
               "medium",
               "high"
             ],
-            "default_level": "high",
+            "default_level": "medium",
             "supports_dynamic": false,
             "can_disable": false,
             "notes": "Response pricing = output tokens + thinking tokens."
           }
         },
         {
-          "id": "gemini-3.8-flash",
-          "label": "Gemini 3.8 Flash",
+          "id": "gemini-3.6-flash",
+          "label": "Gemini 3.6 Flash",
           "contextWindow": 1048576,
-          "inputCostPerMtok": 0.75,
-          "outputCostPerMtok": 3.75,
+          "inputCostPerMtok": 1.5,
+          "outputCostPerMtok": 7.5,
           "thinking": {
             "supported": true,
             "mode": "effort_levels",
             "parameter": "thinkingLevel",
             "levels": [
+              "minimal",
               "low",
               "medium",
               "high"
@@ -93,20 +158,202 @@ export const MODEL_CATALOG = {
             "notes": "Response pricing = output tokens + thinking tokens."
           }
         }
+      ],
+      "excluded_models": [
+        {
+          "id": "gemma-4-26b-a4b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-4-31b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-flash-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-flash-lite-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-pro-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-3.1-pro-preview-customtools",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-robotics-er-1.5-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-robotics-er-1.6-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "antigravity-preview-05-2026",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "deep-research-max-preview-04-2026",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "deep-research-preview-04-2026",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "deep-research-pro-preview-12-2025",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-3.1-flash-live-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-3-1b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-3-4b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-3-12b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-3-27b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-3n-e4b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemma-3n-e2b-it",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-omni-flash-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-robotics-er-2-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-robotics-er-2-streaming-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gemini-3.5-live-translate-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "antigravity-preview-09-2026",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "antigravity-preview-latest",
+          "reason": "outside supported text request families"
+        }
       ]
     },
     "openai": {
       "default": "gpt-4o-mini",
       "models": [
         {
-          "id": "gpt-4o-mini",
-          "label": "gpt-4o-mini",
-          "contextWindow": 128000,
-          "inputCostPerMtok": 0.15,
-          "outputCostPerMtok": 0.6,
+          "id": "gpt-6-astra",
+          "label": "gpt-6-astra",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 10.0,
+          "outputCostPerMtok": 50.0,
           "thinking": {
-            "supported": false,
-            "mode": "none"
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Always-on reasoning model. Reasoning tokens billed as output tokens. The model page does not document a way to disable reasoning, so can_disable follows the rest of the family."
+          }
+        },
+        {
+          "id": "gpt-5.6-terra",
+          "label": "gpt-5.6-terra",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 2.0,
+          "outputCostPerMtok": 12.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-6-sol",
+          "label": "gpt-6-sol",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 2.0,
+          "outputCostPerMtok": 10.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "reasoning.effort accepts none, low, medium (default), high, xhigh, max; 'none' disables reasoning. Reasoning tokens billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-6-luna",
+          "label": "gpt-6-luna",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 0.1,
+          "outputCostPerMtok": 0.5,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "reasoning.effort accepts none, low, medium (default), high, xhigh, max; 'none' disables reasoning. Reasoning tokens billed as output tokens."
           }
         },
         {
@@ -121,74 +368,19 @@ export const MODEL_CATALOG = {
           }
         },
         {
-          "id": "gpt-5.5",
-          "label": "gpt-5.5",
-          "contextWindow": 1000000,
-          "inputCostPerMtok": 5.0,
-          "outputCostPerMtok": 30.0,
+          "id": "gpt-4o-mini",
+          "label": "gpt-4o-mini",
+          "contextWindow": 128000,
+          "inputCostPerMtok": 0.15,
+          "outputCostPerMtok": 0.6,
           "thinking": {
-            "supported": true,
-            "mode": "effort_levels",
-            "parameter": "reasoning.effort",
-            "levels": [
-              "minimal",
-              "low",
-              "medium",
-              "high"
-            ],
-            "default_level": "medium",
-            "supports_dynamic": false,
-            "can_disable": true,
-            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+            "supported": false,
+            "mode": "none"
           }
         },
         {
-          "id": "gpt-5.4",
-          "label": "gpt-5.4",
-          "contextWindow": 1050000,
-          "inputCostPerMtok": 2.5,
-          "outputCostPerMtok": 15.0,
-          "thinking": {
-            "supported": true,
-            "mode": "effort_levels",
-            "parameter": "reasoning.effort",
-            "levels": [
-              "minimal",
-              "low",
-              "medium",
-              "high"
-            ],
-            "default_level": "medium",
-            "supports_dynamic": false,
-            "can_disable": true,
-            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
-          }
-        },
-        {
-          "id": "gpt-5.4-mini",
-          "label": "gpt-5.4-mini",
-          "contextWindow": 400000,
-          "inputCostPerMtok": 0.75,
-          "outputCostPerMtok": 4.5,
-          "thinking": {
-            "supported": true,
-            "mode": "effort_levels",
-            "parameter": "reasoning.effort",
-            "levels": [
-              "minimal",
-              "low",
-              "medium",
-              "high"
-            ],
-            "default_level": "medium",
-            "supports_dynamic": false,
-            "can_disable": true,
-            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
-          }
-        },
-        {
-          "id": "gpt-5.1",
-          "label": "gpt-5.1",
+          "id": "gpt-5",
+          "label": "gpt-5",
           "contextWindow": 400000,
           "inputCostPerMtok": 1.25,
           "outputCostPerMtok": 10.0,
@@ -251,6 +443,314 @@ export const MODEL_CATALOG = {
             "can_disable": true,
             "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
           }
+        },
+        {
+          "id": "gpt-5.1",
+          "label": "gpt-5.1",
+          "contextWindow": 400000,
+          "inputCostPerMtok": 1.25,
+          "outputCostPerMtok": 10.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.2",
+          "label": "gpt-5.2",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 1.75,
+          "outputCostPerMtok": 14.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.4",
+          "label": "gpt-5.4",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 2.5,
+          "outputCostPerMtok": 15.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.4-mini",
+          "label": "gpt-5.4-mini",
+          "contextWindow": 400000,
+          "inputCostPerMtok": 0.75,
+          "outputCostPerMtok": 4.5,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.4-nano",
+          "label": "gpt-5.4-nano",
+          "contextWindow": 400000,
+          "inputCostPerMtok": 0.2,
+          "outputCostPerMtok": 1.25,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.5",
+          "label": "gpt-5.5",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 5.0,
+          "outputCostPerMtok": 30.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "o3",
+          "label": "o3",
+          "contextWindow": 200000,
+          "inputCostPerMtok": 2.0,
+          "outputCostPerMtok": 8.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Always-on reasoning model. Reasoning tokens billed as output tokens."
+          }
+        },
+        {
+          "id": "o4-mini",
+          "label": "o4-mini",
+          "contextWindow": 200000,
+          "inputCostPerMtok": 1.1,
+          "outputCostPerMtok": 4.4,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Always-on reasoning model. Reasoning tokens billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.6-luna",
+          "label": "gpt-5.6-luna",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 0.2,
+          "outputCostPerMtok": 1.2,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        },
+        {
+          "id": "gpt-5.6-sol",
+          "label": "gpt-5.6-sol",
+          "contextWindow": 1050000,
+          "inputCostPerMtok": 4.0,
+          "outputCostPerMtok": 20.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "reasoning.effort",
+            "levels": [
+              "minimal",
+              "low",
+              "medium",
+              "high"
+            ],
+            "default_level": "medium",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Valid effort values are model-dependent; newer models also accept 'none' and 'xhigh'. Reasoning tokens are billed as output tokens."
+          }
+        }
+      ],
+      "excluded_models": [
+        {
+          "id": "gpt-4o-mini-search-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-4o-search-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5-chat-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5-codex",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5-pro",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5-search-api",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.1-chat-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.1-codex",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.1-codex-max",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.1-codex-mini",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.2-chat-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.2-codex",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.2-pro",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.3-chat-latest",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.3-codex",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.4-pro",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-5.5-pro",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-4o-audio-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-4o-mini-audio-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-4o-mini-realtime-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "gpt-4o-realtime-preview",
+          "reason": "outside supported text request families"
+        },
+        {
+          "id": "o3-pro",
+          "reason": "outside supported text request families"
         }
       ]
     },
@@ -258,34 +758,260 @@ export const MODEL_CATALOG = {
       "default": "claude-haiku-4-5-20251001",
       "models": [
         {
-          "id": "claude-haiku-4-5-20251001",
-          "label": "Claude Haiku 4.5",
-          "contextWindow": 200000,
-          "inputCostPerMtok": 1.0,
-          "outputCostPerMtok": 5.0,
+          "id": "claude-opus-5-5",
+          "label": "Claude Opus 5.5",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 4.0,
+          "outputCostPerMtok": 20.0,
           "thinking": {
             "supported": true,
-            "mode": "token_budget",
-            "parameter": "thinking.budget_tokens",
-            "min_budget": 1024,
-            "max_budget": 64000,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "medium",
             "supports_dynamic": false,
-            "can_disable": true,
-            "notes": "Manual extended thinking only (thinking={type:'enabled',budget_tokens}); thinking={type:'adaptive'} returns a 400 on this model. budget_tokens must be less than max_tokens (64k output ceiling). No interleaved thinking — the interleaved-thinking-2025-05-14 beta header is accepted but ignored.",
+            "can_disable": false,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive thinking is always on; thinking={type:'disabled'} returns a 400 at every effort level. Default effort is medium, one level below Opus 5. Forced tool use (tool_choice any/tool) is rejected on every request. display defaults to 'omitted'.",
             "sampling_params_allowed": {
               "temperature": {
-                "status": "forbidden",
-                "when": "thinking_enabled"
-              },
-              "top_k": {
-                "status": "forbidden",
-                "when": "thinking_enabled"
+                "status": "default_only",
+                "when": "always"
               },
               "top_p": {
-                "status": "range",
-                "when": "thinking_enabled",
-                "min": 0.95,
-                "max": 1.0
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-fable-5",
+          "label": "Claude Fable 5",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 10.0,
+          "outputCostPerMtok": 50.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive is the only mode; manual budget_tokens is rejected (400). display defaults to 'omitted'.",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_p": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-fable-5-1",
+          "label": "Claude Fable 5.1",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 10.0,
+          "outputCostPerMtok": 50.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": false,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive thinking is always on; there is no documented way to disable it. Manual budget_tokens is rejected (400).",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_p": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-opus-5",
+          "label": "Claude Opus 5",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 5.0,
+          "outputCostPerMtok": 25.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Thinking is ON by default (omitting the thinking field runs adaptive, unlike Opus 4.8/4.7). thinking={type:'disabled'} is accepted only at effort high or below — pairing it with xhigh/max returns a 400. Manual budget_tokens is rejected (400). The raw chain of thought is never returned; display defaults to 'omitted'.",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_p": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-opus-4-8",
+          "label": "Claude Opus 4.8",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 5.0,
+          "outputCostPerMtok": 25.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive is the only mode; manual budget_tokens is rejected (400). display defaults to 'omitted'.",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_p": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-opus-4-7",
+          "label": "Claude Opus 4.7",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 5.0,
+          "outputCostPerMtok": 25.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive is the only mode; manual budget_tokens is rejected (400).",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_p": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-sonnet-5",
+          "label": "Claude Sonnet 5",
+          "contextWindow": 1000000,
+          "inputCostPerMtok": 2.0,
+          "outputCostPerMtok": 10.0,
+          "thinking": {
+            "supported": true,
+            "mode": "effort_levels",
+            "parameter": "output_config.effort",
+            "levels": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "default_level": "high",
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive thinking is on by default (unlike Sonnet 4.6, where no thinking field means no thinking). Manual budget_tokens is rejected (400), same as Opus 4.8/4.7.",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_p": {
+                "status": "default_only",
+                "when": "always"
+              },
+              "top_k": {
+                "status": "default_only",
+                "when": "always"
               }
             }
           }
@@ -329,8 +1055,8 @@ export const MODEL_CATALOG = {
           }
         },
         {
-          "id": "claude-opus-4-8",
-          "label": "Claude Opus 4.8",
+          "id": "claude-opus-4-6",
+          "label": "Claude Opus 4.6",
           "contextWindow": 1000000,
           "inputCostPerMtok": 5.0,
           "outputCostPerMtok": 25.0,
@@ -342,30 +1068,65 @@ export const MODEL_CATALOG = {
               "low",
               "medium",
               "high",
-              "xhigh",
               "max"
             ],
             "default_level": "high",
             "supports_dynamic": false,
             "can_disable": true,
-            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Adaptive is the only mode; manual budget_tokens is rejected (400). display defaults to 'omitted'.",
+            "notes": "Requires thinking={type:'adaptive'}. effort set via output_config.effort. Legacy thinking={type:'enabled',budget_tokens} still works but is deprecated.",
             "sampling_params_allowed": {
               "temperature": {
-                "status": "default_only",
-                "when": "always"
-              },
-              "top_p": {
-                "status": "default_only",
-                "when": "always"
+                "status": "forbidden",
+                "when": "thinking_enabled"
               },
               "top_k": {
-                "status": "default_only",
-                "when": "always"
+                "status": "forbidden",
+                "when": "thinking_enabled"
+              },
+              "top_p": {
+                "status": "range",
+                "when": "thinking_enabled",
+                "min": 0.95,
+                "max": 1.0
+              }
+            }
+          }
+        },
+        {
+          "id": "claude-haiku-4-5-20251001",
+          "label": "Claude Haiku 4.5",
+          "contextWindow": 200000,
+          "inputCostPerMtok": 1.0,
+          "outputCostPerMtok": 5.0,
+          "thinking": {
+            "supported": true,
+            "mode": "token_budget",
+            "parameter": "thinking.budget_tokens",
+            "min_budget": 1024,
+            "max_budget": 64000,
+            "supports_dynamic": false,
+            "can_disable": true,
+            "notes": "Manual extended thinking only (thinking={type:'enabled',budget_tokens}); thinking={type:'adaptive'} returns a 400 on this model. budget_tokens must be less than max_tokens (64k output ceiling). No interleaved thinking — the interleaved-thinking-2025-05-14 beta header is accepted but ignored.",
+            "sampling_params_allowed": {
+              "temperature": {
+                "status": "forbidden",
+                "when": "thinking_enabled"
+              },
+              "top_k": {
+                "status": "forbidden",
+                "when": "thinking_enabled"
+              },
+              "top_p": {
+                "status": "range",
+                "when": "thinking_enabled",
+                "min": 0.95,
+                "max": 1.0
               }
             }
           }
         }
-      ]
+      ],
+      "excluded_models": []
     },
     "deepseek": {
       "default": "deepseek-flash",
@@ -412,7 +1173,8 @@ export const MODEL_CATALOG = {
             "notes": "Thinking toggle defaults to enabled; disable via thinking={type:'disabled'} (Anthropic/Responses format: effort 'none'). Effort compat: minimal->low, medium/xhigh->high, ultra->max. Complex agent requests (Claude Code, OpenCode) auto-set max. Anthropic-format equivalent: output_config.effort. Chain-of-thought returned in reasoning_content."
           }
         }
-      ]
+      ],
+      "excluded_models": []
     }
   }
 } as const;

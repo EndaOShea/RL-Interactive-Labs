@@ -5,33 +5,21 @@
     "google": {
       "source": "google",
       "default": "gemini-3.1-flash-lite",
-      "models": [
-        "gemini-3.1-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-3.8-flash"
-      ],
       "thinking_modes": [
         "effort_levels"
       ],
       "thinking_parameters": [
         "thinkingLevel"
       ],
-      "required_level": "low"
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "gemini-\\d+(?:\\.\\d+)?-(?:flash(?:-lite)?|pro)(?:-preview)?"
+      ]
     },
     "openai": {
       "source": "openai",
       "default": "gpt-4o-mini",
-      "models": [
-        "gpt-4o-mini",
-        "gpt-4o",
-        "gpt-5.5",
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-5.1",
-        "gpt-5-mini",
-        "gpt-5-nano"
-      ],
       "thinking_modes": [
         "none",
         "effort_levels"
@@ -40,16 +28,17 @@
         "reasoning_effort",
         "reasoning.effort"
       ],
-      "required_level": "low"
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "gpt-4o(?:-mini)?",
+        "gpt-(?:[5-9]|[1-9]\\d+)(?:\\.\\d+)?(?:-(?:astra|sol|luna|terra|mini|nano))?",
+        "o[34](?:-mini)?"
+      ]
     },
     "anthropic": {
       "source": "anthropic",
       "default": "claude-haiku-4-5-20251001",
-      "models": [
-        "claude-haiku-4-5-20251001",
-        "claude-sonnet-4-6",
-        "claude-opus-4-8"
-      ],
       "thinking_modes": [
         "effort_levels",
         "token_budget"
@@ -58,22 +47,26 @@
         "output_config.effort",
         "thinking.budget_tokens"
       ],
-      "required_level": "low"
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "claude-(?:opus|sonnet|haiku|fable)-\\d+(?:-\\d+)*"
+      ]
     },
     "deepseek": {
       "source": "deepseek",
       "default": "deepseek-flash",
-      "models": [
-        "deepseek-flash",
-        "deepseek-v4-pro"
-      ],
       "thinking_modes": [
         "effort_levels"
       ],
       "thinking_parameters": [
         "reasoning_effort"
       ],
-      "required_level": "low"
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "deepseek-(?:flash|v\\d+(?:\\.\\d+)?-(?:flash|pro))"
+      ]
     }
   }
 }
