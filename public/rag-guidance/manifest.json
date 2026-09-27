@@ -1,6 +1,40 @@
 {
   "contract": "RagVisualGuidance",
   "visualizationSchemaVersion": "0.1",
+  "provenance": {
+    "generator": "rag-mcp design service (rag-decision-mcp), visualize_rag_implementation with graphs and comparisons, schema 0.1",
+    "patch": {
+      "script": "scripts/patch-rag-guidance.mjs",
+      "version": 1,
+      "description": "Deterministic, idempotent correctness patch applied to the service output (publication and deletion paths, fallbacks into the verified path, release gates, workload techniques, configurations, walkthroughs). Every patched item carries fixture-patch provenance.",
+      "appliedTo": [
+        "baseline-business.json",
+        "secure-fresh-pdf.json",
+        "multimodal.json",
+        "structured.json",
+        "graph.json",
+        "offline.json",
+        "multilingual.json",
+        "conversational.json",
+        "high-throughput.json"
+      ]
+    },
+    "note": "These fixtures are design-service output plus the patch above, not raw service output. Regeneration on 2026-09-27 (service 0.6.0) reproduced the upstream issues listed here; re-run the patch after any regeneration.",
+    "upstreamIssues": [
+      "Publication: write-indexes, ingestion-workers and reindex publish straight into the live indexes; artifact:active-index-version has no outgoing edge; retrieval never reads through the active pointer or the manifest filter.",
+      "Deletion: tombstones do not reach superseded (rollback) versions, staged versions, backups or the source store; restore/rollback do not replay tombstones.",
+      "requires edges point earlier→later in the ingestion chain but dependent→dependency elsewhere.",
+      "Ingestion failures fall back to a query-lane outcome:typed-failure; the dead-letter queue named in policy text is not a node; the parser has no edge to the failed-documents policy.",
+      "Approved degraded fallbacks terminate before generation, citation attachment and the access recheck (contradicting \"never an unverified partial answer\"); single-retriever options keep a two-retriever fallback; \"…or typed timeout\" and three declared fallbacks (citations, citation recheck, source conflict) have no edges.",
+      "Candidate counts are inconsistent (output count at retrieve/fuse, input count at rerank; an unexplained 80→12 cut at deduplication where there is no reranker); exact duplicates are collapsed after reranking.",
+      "Permission leakage is monitoring-only everywhere (even with ACLs); most workloads have no release gate; recall@k has no k; quality gates observe observers that do not measure them; slices and the chunking experiment have no edges.",
+      "Parser, normalizer, chunker and embedder configurations are empty; chunking (recursive 500/12%) and context (6000 tokens / 8 passages) are identical for every workload, including a 300 ms p95 offline target.",
+      "Workload techniques are labels without pipeline nodes: graph (no extraction/resolution/graph store/traversal), multi-hop (no loop or intermediate-evidence store), structured (chunk retrieval instead of validated read-only SQL under row-level security), conversational (no session store), cache-aware (cache never on the request path; \"semantic\" cache keyed on the exact query), multilingual (nothing multilingual), multimodal (no image records/embeddings/fusion), offline (no local model runtime).",
+      "Walkthroughs: freshness-update uses failureAction text as the expected outcome of successful steps and an invalidates edge for \"retained for rollback\"; multimodal has an order gap that highlights authorize-query at the deduplicate step; no walkthroughs for access revoked mid-request, deletion, the simpler baseline, or any workload-specific path; scenario enum lacks those scenarios.",
+      "Wording: service:retrieval-indexes claims dense, lexical and metadata indexes in single-retriever options; a single-retriever partial-source-failure says \"excluded from fusion\".",
+      "Comparisons: the newer contract (differences-only + invariantCount) and the fixture contract (unchanged entries included) differ; before/after strings are truncated with \"…\" at a character budget, leaving invalid JSON; the change list must be recomputed whenever an alternative changes."
+    ]
+  },
   "fixtures": [
     {
       "workloadId": "baseline-business-documents",

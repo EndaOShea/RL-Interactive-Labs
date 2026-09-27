@@ -59,7 +59,7 @@ export const LLM_LABS: LabDescriptor[] = [
     category: 'llm',
     title: 'RAG Architecture Viewer',
     subtitle: 'system · ingestion · query · deployment · lifecycle · validation',
-    blurb: 'Explore server-designed RAG systems, controlled failure walkthroughs, deployable alternatives and structural comparisons.',
+    blurb: 'Explore RAG systems designed by a RAG design service (its output plus a documented, validated in-repo patch): failure walkthroughs, deployable alternatives and structural comparisons.',
     icon: 'M3 4h7v6H3zM14 4h7v6h-7zM8 14h8v6H8zM10 7h4M7 10v4M17 10v4',
     accent: ACCENT,
     codeFile: 'visual-guidance-contract.json',
