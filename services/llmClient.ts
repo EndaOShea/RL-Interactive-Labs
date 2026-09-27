@@ -1,15 +1,8 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { LlmProviderId } from "../types";
-import { getProvider, getModelOption } from "./providers";
+import { getProvider, getCatalogModel } from "./providers";
 
 const ANTHROPIC_VERSION = "2023-06-01";
-const ANTHROPIC_MAX_TOKENS = 1024;
-
-// "Balanced" reasoning effort, applied to any model that advertises a thinking
-// mode (see ReasoningCapability in types.ts). Tuned for short tutoring replies.
-const GEMINI_BALANCED_BUDGET = -1;        // Gemini 2.5: dynamic — model decides
-const GEMINI_BALANCED_LEVEL = "low";      // Gemini 3: low / high only; low = balanced
-const OPENAI_BALANCED_EFFORT = "medium";  // OpenAI / DeepSeek reasoning_effort
 const ANTHROPIC_THINK_BUDGET = 2048;      // balanced thinking budget (tokens)
 // Extended thinking requires max_tokens > budget_tokens, so raise the ceiling
 // when thinking is on (it stays at ANTHROPIC_MAX_TOKENS otherwise).
@@ -36,16 +29,14 @@ export async function callLlm(
 
   const provider = getProvider(providerId);
   // Reasoning capability of the chosen model — drives balanced thinking below.
-  const reasoning = getModelOption(providerId, model)?.reasoning;
+  const info = getCatalogModel(providerId, model);
+  const thinking = info.thinking;
 
   switch (provider.style) {
     case "google": {
       const ai = new GoogleGenAI({ apiKey: key });
-      // Gemini 2.5 uses a token budget; Gemini 3 uses a thinkingLevel enum.
-      const thinkingConfig =
-        reasoning === "gemini-budget" ? { thinkingBudget: GEMINI_BALANCED_BUDGET }
-        : reasoning === "gemini-level" ? { thinkingLevel: GEMINI_BALANCED_LEVEL }
-        : undefined;
+      // Every approved Gemini model supports the SDK LOW thinking level.
+      const thinkingConfig = { thinkingLevel: ThinkingLevel.LOW };
       const res = await ai.models.generateContent({
         model,
         contents: prompt,
@@ -65,8 +56,8 @@ export async function callLlm(
         body: JSON.stringify({
           model,
           messages: [{ role: "user", content: prompt }],
-          // Reasoning models accept a balanced "medium" effort; others omit it.
-          ...(reasoning === "effort" ? { reasoning_effort: OPENAI_BALANCED_EFFORT } : {}),
+          // Low is explicitly validated in this app's catalogue policy.
+          ...(thinking.supported ? { reasoning_effort: 'low' } : {}),
         }),
       });
       if (!res.ok) throw await httpError(res);
@@ -75,7 +66,7 @@ export async function callLlm(
     }
 
     case "anthropic": {
-      const thinking = reasoning === "anthropic-budget";
+      const budgetMode = thinking.mode === "token_budget";
       const res = await fetch(provider.endpoint, {
         method: "POST",
         headers: {
@@ -87,8 +78,8 @@ export async function callLlm(
         },
         body: JSON.stringify({
           model,
-          max_tokens: thinking ? ANTHROPIC_MAX_TOKENS_THINKING : ANTHROPIC_MAX_TOKENS,
-          ...(thinking ? { thinking: { type: "enabled", budget_tokens: ANTHROPIC_THINK_BUDGET } } : {}),
+          max_tokens: ANTHROPIC_MAX_TOKENS_THINKING,
+          ...(budgetMode ? { thinking: { type: "enabled", budget_tokens: ANTHROPIC_THINK_BUDGET } } : { thinking: { type: "adaptive" }, output_config: { effort: "low" } }),
           messages: [{ role: "user", content: prompt }],
         }),
       });

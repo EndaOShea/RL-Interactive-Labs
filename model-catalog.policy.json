@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "output": "services/model-catalog.generated.ts",
+  "providers": {
+    "google": {
+      "source": "google",
+      "default": "gemini-3.1-flash-lite",
+      "thinking_modes": [
+        "effort_levels"
+      ],
+      "thinking_parameters": [
+        "thinkingLevel"
+      ],
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "gemini-\\d+(?:\\.\\d+)?-(?:flash(?:-lite)?|pro)(?:-preview)?"
+      ]
+    },
+    "openai": {
+      "source": "openai",
+      "default": "gpt-4o-mini",
+      "thinking_modes": [
+        "none",
+        "effort_levels"
+      ],
+      "thinking_parameters": [
+        "reasoning_effort",
+        "reasoning.effort"
+      ],
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "gpt-4o(?:-mini)?",
+        "gpt-(?:[5-9]|[1-9]\\d+)(?:\\.\\d+)?(?:-(?:astra|sol|luna|terra|mini|nano))?",
+        "o[34](?:-mini)?"
+      ]
+    },
+    "anthropic": {
+      "source": "anthropic",
+      "default": "claude-haiku-4-5-20251001",
+      "thinking_modes": [
+        "effort_levels",
+        "token_budget"
+      ],
+      "thinking_parameters": [
+        "output_config.effort",
+        "thinking.budget_tokens"
+      ],
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "claude-(?:opus|sonnet|haiku|fable)-\\d+(?:-\\d+)*"
+      ]
+    },
+    "deepseek": {
+      "source": "deepseek",
+      "default": "deepseek-flash",
+      "thinking_modes": [
+        "effort_levels"
+      ],
+      "thinking_parameters": [
+        "reasoning_effort"
+      ],
+      "required_level": "low",
+      "selection": "matching_catalog",
+      "include_patterns": [
+        "deepseek-(?:flash|v\\d+(?:\\.\\d+)?-(?:flash|pro))"
+      ]
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "sync": [
+    "python3",
+    "scripts/sync-model-catalog.py",
+    "--catalog",
+    "{catalog}"
+  ],
+  "generated_files": [
+    "services/model-catalog.generated.ts"
+  ],
+  "validate": [
+    [
+      "python3",
+      "scripts/test_model_sync.py"
+    ],
+    [
+      "docker",
+      "build",
+      "--target",
+      "builder",
+      "-t",
+      "model-update-check-rl-interactive-labs",
+      "."
+    ],
+    [
+      "docker",
+      "run",
+      "--rm",
+      "model-update-check-rl-interactive-labs",
+      "node",
+      "scripts/test-model-compatibility.mjs"
+    ],
+    [
+      "docker",
+      "build",
+      "-t",
+      "model-update-build-rl-interactive-labs",
+      "."
+    ]
+  ],
+  "deployment": {
+    "path": "/home/root/apps/RL-Interactive-Labs",
+    "compose_project": "rl-interactive-labs",
+    "compose_files": [
+      "docker-compose.yml"
+    ],
+    "services": [
+      "rl-interactive-labs"
+    ],
+    "health_urls": [
+      "http://127.0.0.1:2100/health"
+    ],
+    "health_timeout": 180
+  }
+}
