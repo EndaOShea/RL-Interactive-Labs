@@ -18,6 +18,28 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Case-exact resolution for relative imports. On a case-insensitive filesystem
+// (macOS) esbuild's default lookup lets `./dpll` from Dpll.tsx match Dpll.tsx
+// itself, or `./Taylor` match taylor.ts. Linux (the Docker build) is
+// case-sensitive, so emulate that: accept a candidate only if the directory
+// listing contains the exact file name.
+const RESOLVE_EXTS = ['', '.ts', '.tsx', '.mts', '.js', '.mjs', '.jsx', '.json'];
+const existsExact = (p) => {
+  try { return readdirSync(dirname(p)).includes(p.slice(dirname(p).length + 1)) && statSync(p).isFile(); } catch { return false; }
+};
+const caseExactResolver = {
+  name: 'case-exact-relative',
+  setup(b) {
+    b.onResolve({ filter: /^\.\.?\// }, (args) => {
+      const base = resolve(args.resolveDir, args.path);
+      for (const ext of RESOLVE_EXTS) if (existsExact(base + ext)) return { path: base + ext };
+      for (const ext of ['.ts', '.tsx', '.js']) if (existsExact(join(base, `index${ext}`))) return { path: join(base, `index${ext}`) };
+      return { errors: [{ text: `Cannot resolve "${args.path}" with exact case from ${args.resolveDir}` }] };
+    });
+  },
+};
+
 const argv = process.argv.slice(2);
 const opt = (name) => argv.includes(name);
 const areaArg = argv.includes('--area') ? argv[argv.indexOf('--area') + 1] : null;
@@ -151,7 +173,7 @@ try {
       const out = await build({
         entryPoints: [file], bundle: true, platform: 'node', format: 'esm', write: false,
         packages: 'external', logLevel: 'silent', jsx: 'automatic', target: 'node20',
-        loader: { '.css': 'empty' },
+        loader: { '.css': 'empty' }, plugins: [caseExactResolver],
       });
       const bundlePath = join(dir, 'module.mjs');
       writeFileSync(bundlePath, out.outputFiles[0].text);
