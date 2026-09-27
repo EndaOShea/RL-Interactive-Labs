@@ -187,11 +187,11 @@ export const CATEGORIES: CategoryMeta[] = [
 // RL deep-links land on /rl (the app's own rail switches modules), so all
 // five cards point there — mirroring the five RL labs in the catalog.
 const RL_ITEMS: CatalogItem[] = [
-  { title: 'Model Types', blurb: 'Model-free vs model-based: Q-Learning, SARSA, REINFORCE, Actor-Critic, Dyna-Q.', icon: 'M12 2 2 7l10 5 10-5-10-5Z', to: '/rl' },
-  { title: 'Deterministic vs Stochastic', blurb: 'Greedy vs softmax policies under environment slip.', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 6v8', to: '/rl' },
-  { title: 'Tabular vs Deep', blurb: 'Exact tables vs RBF generalization of value functions.', icon: 'M3 3h7v7H3zM14 14h7v7h-7z', to: '/rl' },
-  { title: 'Explore / Exploit', blurb: 'Multi-armed bandits: Greedy, ε-Greedy, Optimistic, UCB.', icon: 'M2 12h6l2-7 4 14 2-7h6', to: '/rl' },
-  { title: 'Single vs Multi-Agent', blurb: 'Joint-state Q-learning: cooperative & competitive.', icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', to: '/rl' },
+  { title: 'Model Types', blurb: 'Model-free vs model-based on a cliff walk: Q-Learning, SARSA, Expected SARSA, Double-Q, REINFORCE with baseline, Actor-Critic, Dyna-Q.', icon: 'M12 2 2 7l10 5 10-5-10-5Z', to: '/rl' },
+  { title: 'Deterministic vs Stochastic', blurb: 'Greedy vs softmax under slip, plus an aliased corridor where only a stochastic policy wins.', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 6v8', to: '/rl' },
+  { title: 'Tabular vs Function Approx', blurb: 'Exact tables vs linear function approximation with RBF features or multi-tiling tile coding.', icon: 'M3 3h7v7H3zM14 14h7v7h-7z', to: '/rl' },
+  { title: 'Explore / Exploit', blurb: 'Multi-armed bandits: Greedy, ε-Greedy, Optimistic, UCB, Thompson, Boltzmann, with cumulative regret.', icon: 'M2 12h6l2-7 4 14 2-7h6', to: '/rl' },
+  { title: 'Single vs Multi-Agent', blurb: 'Joint-state Q-learning: cooperative, competitive and congestion scenarios.', icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', to: '/rl' },
 ];
 
 const STATIC_ITEMS: Record<CategoryId, CatalogItem[]> = {

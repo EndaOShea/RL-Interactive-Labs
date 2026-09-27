@@ -18,8 +18,8 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
     {
         category: 'METHODOLOGY',
         title: 'Where is Epsilon in the Formula?',
-        description: 'You noticed Epsilon (ε) is missing from the update equation. That is because the equation is for LEARNING (updating values). Epsilon is used for BEHAVIOR (choosing actions).',
-        recommendation: 'Think of RL as a loop: 1. Use ε to choose Action. 2. Use α to update Q-Table based on result.',
+        description: 'Epsilon (ε) chooses actions (BEHAVIOR); α and γ shape the update (LEARNING). The Q-learning and SARSA update rules contain no ε at all — but Expected SARSA\'s does: its target averages Q(s′,·) under the ε-greedy policy, so there ε shapes what is learned as well as how the agent acts.',
+        recommendation: 'Think of RL as a loop: 1. Use ε to choose the action. 2. Use α to update Q from the result (for Expected SARSA, the target is itself an ε-greedy average).',
     },
     {
         category: 'METHODOLOGY',
@@ -31,7 +31,7 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
         category: 'METHODOLOGY',
         title: 'On-Policy vs. Off-Policy',
         description: 'SARSA is On-Policy: it learns from the actions actually taken (including mistakes). Q-Learning is Off-Policy: it learns from the optimal action it *could* take.',
-        recommendation: 'Use SARSA for safety (it avoids cliffs). Use Q-Learning for optimality.',
+        recommendation: 'Use SARSA (on-policy) when mistakes made while learning are costly — on this lab\'s cliff walk it keeps a row or more away from the edge while ε is large. Use Q-Learning when you want the optimal policy and exploratory mistakes are cheap.',
     },
     {
         category: 'METHODOLOGY',
@@ -92,8 +92,8 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
     {
         category: 'METHODOLOGY',
         title: 'Deterministic Policy Risks',
-        description: 'A Deterministic Policy chooses the single "best" action. If the environment has slip (stochasticity), this rigid policy might walk right next to a cliff because it assumes it will never fall.',
-        recommendation: 'Use Stochastic policies or robust reward functions to account for environmental variance.',
+        description: 'A deterministic policy is only as good as the values behind it. In a fully observable world an optimal policy can always be deterministic — values learned WITH the slip already price in the risk of falling. The danger is values learned without enough exploration, or on a noise-free simulator, which can send a greedy policy along a razor-edge path the real, slippery world punishes.',
+        recommendation: 'Train and evaluate with realistic noise and enough exploration. Reach for stochastic policies when states are ambiguous (partial observability) or an adversary could exploit predictability — not merely because the world is noisy.',
     },
     {
         category: 'VERIFICATION',
@@ -104,7 +104,7 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
     {
         category: 'ETHICS',
         title: 'Fragility & Safety',
-        description: 'Deterministic agents often exploit "razor-edge" solutions (e.g., moving exactly 1mm from an obstacle). In reality, this is unsafe. Deploying fragile deterministic policies in safety-critical systems is unethical.',
+        description: 'Agents optimized in simulation often exploit "razor-edge" solutions (e.g., moving exactly 1mm from an obstacle). In reality, this is unsafe. Deploying such fragile policies in safety-critical systems is unethical.',
         recommendation: 'Penalize high-risk states heavily, even if they are theoretically traversable.',
     },
     {
@@ -136,19 +136,19 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
     {
         category: 'METHODOLOGY',
         title: 'Generalization vs. Precision',
-        description: 'Tabular methods are precise but do not generalize (learning state A tells you nothing about state B). Deep RL generalizes (learning A updates B), which speeds up learning but can introduce errors.',
+        description: 'Tabular methods are precise but do not generalize (learning state A tells you nothing about state B). Function approximation generalizes (learning A updates B). That speeds learning where similar states really have similar values and slows it where they do not: on this lab\'s map, at the same α = 0.1 and ε schedule (30 simulated runs each), 2×2 tile coding with 4 tilings found the optimal route in fewer episodes than the table (median 13 vs 19), a wide RBF kernel (σ = 2.5) in far more (74).',
         recommendation: 'Use Tabular for small, critical logic. Use Deep RL for high-dimensional sensory inputs (vision, audio).',
     },
     {
         category: 'METHODOLOGY',
         title: 'Function Approximation',
-        description: 'In Deep RL, we don\'t store a table. We store weights of a Neural Network that *estimates* the table. This allows us to handle infinite state spaces.',
+        description: 'With function approximation we don\'t store a table; we store weights of a function that *estimates* it, which is what lets RL handle huge or continuous state spaces. This lab uses the simplest kind — a LINEAR model on fixed RBF or tile features. Deep RL uses a neural network, which also learns the features.',
         recommendation: 'Visualize the "Feature Activations" to understand what the network is actually seeing.',
     },
     {
         category: 'METHODOLOGY',
         title: 'Beyond DQN: Offline RL & Decision Transformers',
-        description: 'DQN (this lab\'s deep mode) learns online by chasing a moving target. Two modern variants relax that: offline RL (CQL, IQL) learns a strong policy from a fixed, pre-collected dataset with no new exploration, and Decision Transformers reframe RL as sequence modeling — predict the next action conditioned on a desired return-to-go.',
+        description: 'DQN (a neural-network Q-function; this lab\'s linear FA mode is its simpler precursor) learns online by chasing a moving target. Two modern variants relax that: offline RL (CQL, IQL) learns a strong policy from a fixed, pre-collected dataset with no new exploration, and Decision Transformers reframe RL as sequence modeling — predict the next action conditioned on a desired return-to-go.',
         recommendation: 'If you have logged data but can\'t safely explore (clinical, industrial, or recommender logs), use offline RL or a Decision Transformer instead of online DQN to avoid unsafe trial-and-error.',
     },
     {
@@ -204,7 +204,7 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
       {
           category: 'METHODOLOGY',
           title: 'Regret Minimization',
-          description: 'The goal of bandits is to minimize "Regret"—the difference between the total reward you actually got and the reward you WOULD have gotten if you knew the best arm from the start.',
+          description: 'The goal of bandits is to minimize "Regret"—the difference between the total reward you actually got and the reward you WOULD have gotten if you knew the best arm from the start. This lab plots the cumulative pseudo-regret Σ_t (μ* − μ of the arm pulled) live, and keeps each strategy\'s last run for comparison.',
           recommendation: 'UCB (Upper Confidence Bound) algorithms mathematically guarantee logarithmic regret bounds.',
       },
       {
@@ -291,7 +291,7 @@ export const LIFECYCLE_CONTEXTS: Record<string, any[]> = {
           category: 'ETHICS',
           title: 'Tragedy of the Commons',
           description: 'Independent agents maximizing their own reward often destroy shared resources (e.g., traffic congestion).',
-          recommendation: 'Design the Reward Function to align individual incentives with social welfare (Nash Equilibrium).',
+          recommendation: 'Design the rewards (mechanism design) so that the Nash equilibrium the self-interested agents settle into is also the socially best outcome — by default the two usually differ.',
       },
       {
           category: 'VERIFICATION',
@@ -387,8 +387,8 @@ export const MODULE_CONTENT = {
                 body: "Plain Q-Learning has two well-known weaknesses these variants fix.",
                 details: [
                     { label: "Maximization Bias", text: "Q-Learning backs up max Q(s'), and the max of noisy estimates is biased UPWARD — it over-values states it has been lucky in." },
-                    { label: "Double-Q", text: "Keeps two tables; one picks the best next action, the OTHER scores it. The estimates are decorrelated, so the optimistic bias cancels." },
-                    { label: "Expected SARSA", text: "Backs up the EXPECTED next value Σ π(a'|s')Q(s',a') instead of a single sampled action. Same target as SARSA in expectation, but much lower variance." }
+                    { label: "Double-Q", text: "Keeps two tables; one picks the best next action, the OTHER scores it. The estimates are decorrelated, so the upward bias disappears (it can err slightly low instead). The lab's bias trap (Sutton & Barto Example 6.7) shows it: Q-learning is lured into a noisy casino, Double-Q is not." },
+                    { label: "Expected SARSA", text: "Backs up the EXPECTED next value Σ π(a'|s')Q(s',a') instead of a single sampled action. Same target as SARSA in expectation, but lower variance — compare the TD-error RMS read-out of the two on the cliff walk." }
                 ]
             }
         ]
@@ -400,16 +400,16 @@ export const MODULE_CONTENT = {
                 heading: "Deterministic vs. Stochastic Policies",
                 body: "The fundamental difference lies in how the agent selects actions.",
                 details: [
-                    { label: "Deterministic π(s)=a", text: "Maps state directly to a single action. Efficient for stable, noise-free environments. (e.g. DDPG)." },
-                    { label: "Stochastic π(a|s)", text: "Maps state to a probability distribution. Necessary for exploration and noisy worlds. (e.g. PPO, SAC)." }
+                    { label: "Deterministic π(s)=a", text: "Maps state directly to a single action. In a fully observable MDP an optimal policy can always be chosen deterministic — even when the world itself is noisy. (e.g. DDPG)." },
+                    { label: "Stochastic π(a|s)", text: "Maps state to a probability distribution. Useful for exploration while learning; genuinely required when states are ambiguous (partial observability) or against adversaries — not merely because the world is noisy. (e.g. PPO, SAC)." }
                 ]
             },
             {
-                heading: "Why use Stochastic Models?",
-                body: "Stochasticity is not just a nuisance; it is often a requirement for optimal behavior.",
+                heading: "When is a Stochastic Policy Required?",
+                body: "Randomness in the POLICY is sometimes needed for optimal behaviour — but only in specific situations.",
                 details: [
-                    { label: "Exploration", text: "A stochastic policy naturally explores the environment without needing 'hacks' like Epsilon-Greedy." },
-                    { label: "Ambiguity (POMDP)", text: "If two states look identical but require different actions, a deterministic policy will fail. A stochastic one can split bets." },
+                    { label: "Exploration", text: "A stochastic policy explores by itself while learning, without an ε-greedy add-on." },
+                    { label: "Ambiguity (POMDP)", text: "If different states look identical, every deterministic policy must act the same in all of them and can fail completely. The lab's aliased corridor (Sutton & Barto Example 13.1) is such a case: the best policy goes Right with probability 2 − √2 ≈ 0.59." },
                     { label: "Adversarial", text: "In multi-agent games (poker), being deterministic makes you predictable and exploitable." }
                 ]
             },
@@ -417,8 +417,9 @@ export const MODULE_CONTENT = {
                 heading: "Environmental Stochasticity (The 'Slip')",
                 body: "Even if the agent is deterministic, the world might not be.",
                 details: [
-                    { label: "Transition Function", text: "T(s,a,s') is a probability. You might try to move 'North' but slip and move 'East'." },
-                    { label: "Impact on Learning", text: "High noise requires lower learning rates (Alpha) to average out the bad luck from the good luck." }
+                    { label: "Transition Function", text: "T(s,a,s') is a probability. In this lab the intended move happens with probability 1 − p and each of the three other moves with p/3." },
+                    { label: "Impact on Learning", text: "High noise requires lower learning rates (Alpha) to average out the bad luck from the good luck." },
+                    { label: "Impact on Value", text: "Slip lowers V* for every policy (the read-out under the grid shows it). It changes which route is best, not whether acting randomly helps." }
                 ]
             },
             {
@@ -433,7 +434,7 @@ export const MODULE_CONTENT = {
         ]
     },
     [ModuleId.TABULAR_DEEP]: {
-        title: "3. Tabular vs. Deep RL",
+        title: "3. Tabular vs. Function Approximation",
         sections: [
             {
                 heading: "Tabular RL (The 'Excel Sheet' Approach)",
@@ -441,21 +442,21 @@ export const MODULE_CONTENT = {
                 details: [{ label: "Pros", text: "Exact, Convergent, Easy to Debug" }, { label: "Cons", text: "Memory Explodes (Curse of Dimensionality), No Generalization" }]
             },
             {
-                heading: "Deep RL (Function Approximation)",
-                body: "Deep RL replaces the table with a Neural Network. It doesn't memorize; it *approximates*. This allows it to handle video games, robotics, and complex inputs by 'generalizing' similar states.",
-                details: [{ label: "Pros", text: "Handles Images/Sensors, Generalizes to new states" }, { label: "Cons", text: "Unstable, Data Hungry, Black Box" }]
+                heading: "Function Approximation (Linear → Deep)",
+                body: "Replace the table with a parameterized function that generalizes across similar states. This lab's approximate mode is LINEAR: Q is a weighted sum of fixed features (Gaussian RBF kernels or tile coding) — no neural network. Deep RL (e.g. DQN) uses a neural network that also learns the features; same idea, far more capacity — which is what handles video games, robotics and raw sensor input.",
+                details: [{ label: "Pros", text: "Generalizes to unvisited states; scales to huge state spaces" }, { label: "Cons", text: "Errors spread along with the generalization; deep versions are unstable, data hungry and opaque" }]
             },
             {
                 heading: "The Concept of Generalization",
-                body: "In Tabular RL, learning about State A tells you nothing about State B. In Deep RL, if State A and B look similar, the network updates both. This speeds up learning but can cause 'Catastrophic Forgetting' where new lessons overwrite old ones.",
+                body: "In Tabular RL, learning about State A tells you nothing about State B. With function approximation, if A and B share features, an update to A also moves B. That can speed learning, but new lessons also overwrite old ones nearby (interference — called catastrophic forgetting in deep networks).",
             },
             {
-                heading: "Feature Representations: Tile-Coding vs RBF",
+                heading: "Feature Representations: Tile Coding vs RBF",
                 body: "Before deep nets, linear function approximation over fixed features was the workhorse — and it still teaches the core trade-off cleanly.",
                 details: [
-                    { label: "Tile-Coding (CMAC)", text: "Partition the state into coarse tiles; every cell in a tile shares one weight. Updates are blocky with hard edges — cheap, fast, but no detail within a tile." },
-                    { label: "RBF Features", text: "Place Gaussian bumps over the space; an update bleeds smoothly to neighbours by distance. Soft gradients, but a wide radius blurs fine structure." },
-                    { label: "The trade-off", text: "Coarser features (big tiles / wide RBF) generalize faster but lose resolution. This is the same bias-variance dial a neural net's capacity controls." }
+                    { label: "Tile Coding (CMAC)", text: "Several overlapping tilings of coarse tiles, each shifted by a different offset. Q is the sum of one weight per tiling, so an update reaches every cell that shares a tile (fading with distance) while each cell still gets its own value. With a single tiling it degenerates to state aggregation: blocky, no detail inside a tile." },
+                    { label: "RBF Features", text: "Gaussian bumps over the space; an update bleeds smoothly to neighbours by distance. Soft gradients, but a wide radius blurs fine structure — including across walls." },
+                    { label: "The trade-off", text: "Coarser features (big tiles / wide RBF) generalize further but lose resolution. This is the same bias-variance dial a neural net's capacity controls." }
                 ]
             }
         ]
@@ -473,7 +474,7 @@ export const MODULE_CONTENT = {
                 body: "Different algorithms solve this balance in different ways.",
                 details: [
                     { label: "Epsilon-Greedy", text: "Flip a coin. If heads, explore randomly. If tails, exploit best known. Simple but inefficient." },
-                    { label: "Optimistic Init", text: "Assume everything is amazing (High Q). You will be disappointed until you find the true best. Naturally explores." },
+                    { label: "Optimistic Init", text: "Start every estimate far too high (Q₁ = 5) and learn with a constant step size α (Sutton & Barto §2.6): each pull only moves the estimate part of the way down, so every arm looks better than it is for several pulls — exploration without randomness. With plain sample averages the prior would vanish after one pull." },
                     { label: "UCB (Upper Confidence Bound)", text: "Be optimistic in the face of uncertainty. 'This arm has low average, but I haven't tried it much, so maybe it's great!'" }
                 ]
             },
@@ -481,9 +482,9 @@ export const MODULE_CONTENT = {
                 heading: "Bayesian & Softmax Strategies",
                 body: "Two more strategies trade ε-greedy's blunt randomness for value- and uncertainty-aware exploration.",
                 details: [
-                    { label: "Thompson Sampling", text: "Keep a Beta posterior over each arm's win-rate. Each step, sample one plausible rate per arm and play the best draw. Exploration shrinks automatically as posteriors tighten — probability matching with optimal regret and no tuning knob." },
-                    { label: "Boltzmann / Softmax", text: "Pick arms with probability ∝ exp(Q/τ). Explores in proportion to value, so near-tied arms get tried while clearly-bad arms are mostly skipped." },
-                    { label: "Why it matters", text: "In clinical trials or recommenders, ε-greedy keeps wasting pulls on known-bad options forever; Thompson and softmax taper exploration where it is no longer worth it." }
+                    { label: "Thompson Sampling", text: "Keep a Beta posterior over each arm's win-rate. Each step, sample one plausible rate per arm and play the best draw. Exploration shrinks automatically as posteriors tighten — probability matching with asymptotically optimal regret and no tuning knob." },
+                    { label: "Boltzmann / Softmax", text: "Pick arms with probability ∝ exp(Q/τ). Explores in proportion to value, so near-tied arms get tried more than clearly-bad ones. But at a FIXED τ exploration never shrinks: on these arms τ = 0.2 still gives the best arm only ~67% of pulls (ε = 0.1 gives ~92%), so τ has to be cooled to beat ε-greedy." },
+                    { label: "Why it matters", text: "In clinical trials or recommenders, ε-greedy keeps wasting pulls on known-bad options forever; Thompson sampling (and softmax with a cooling temperature) taper exploration where it is no longer worth it." }
                 ]
             }
         ]
@@ -506,7 +507,7 @@ export const MODULE_CONTENT = {
                 body: "Even with a shared goal, selfish maximizers can hurt the collective.",
                 details: [
                     { label: "Tragedy of the Commons", text: "When both agents rush the same resource (goal cell), they collide and both lose. The locally-greedy move is globally costly." },
-                    { label: "Implicit Coordination", text: "Without communication, the pair must learn to take turns or route around each other purely from the collision penalty — hard for independent Q-learners." },
+                    { label: "Implicit Coordination", text: "Without communication, the collision penalty is all they have to go on. In this lab the first arrival ends the episode, so they cannot take turns within one; instead the pair settles into a convention — one agent almost always goes first while the other hangs back. Stable, but lopsided." },
                     { label: "Real-world echoes", text: "Traffic merges, network congestion, and shared-compute scheduling are all congestion games where naive self-interest causes pile-ups." }
                 ]
             }
