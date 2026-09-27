@@ -2,158 +2,185 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import ScatterPlot, { CLASS_COLORS, ScatterPoint, ScatterMarker, ScatterCircle } from '../../components/labkit/viz/ScatterPlot';
+import ScatterPlot, { CLASS_COLORS, ScatterPoint, ScatterMarker, ScatterCircle, ScatterLine } from '../../components/labkit/viz/ScatterPlot';
 import { AlgoPill, ParamSlider, RunControls, Legend, MonoLabel } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { makeBlobs, ParamsWrap, ParamsHead } from '../classic-ml/shared';
-import { UPt, dist2, optics, opticsExtract } from './shared';
+import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { dbscan, dbscanStateAt, optics, extractDbscan, extractXi } from './density';
+import { densityData } from './unsupData';
+import type { DensityKind } from './unsupData';
 import { dbscanPython } from './python';
 import ReachabilityPlot from './ReachabilityPlot';
 import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#f472b6';
-const CENTERS = [{ x: 0.28, y: 0.3 }, { x: 0.72, y: 0.32 }, { x: 0.5, y: 0.72 }];
 
 type Mode = 'dbscan' | 'optics';
+type Extract = 'cut' | 'xi';
 
-const makeData = (n: number): UPt[] => {
-  const blobs = makeBlobs(CENTERS, 0.06, Math.max(4, Math.round(n * 0.28))).map((p) => ({ x: p.x, y: p.y }));
-  const noise = Array.from({ length: Math.round(n * 0.12) }, () => ({ x: Math.random() * 0.9 + 0.05, y: Math.random() * 0.9 + 0.05 }));
-  return [...blobs, ...noise];
-};
-
-function dbscan(pts: UPt[], eps: number, minPts: number) {
-  const n = pts.length;
-  const labels = new Array(n).fill(-2); // -2 unvisited, -1 noise, >=0 cluster
-  const core = new Array(n).fill(false);
-  const eps2 = eps * eps;
-  const region = (i: number) => { const o: number[] = []; for (let j = 0; j < n; j++) if (dist2(pts[i], pts[j]) <= eps2) o.push(j); return o; };
-  let cid = -1;
-  for (let i = 0; i < n; i++) {
-    if (labels[i] !== -2) continue;
-    const nb = region(i);
-    if (nb.length < minPts) { labels[i] = -1; continue; }
-    cid++; labels[i] = cid; core[i] = true;
-    const queue = nb.filter((j) => j !== i);
-    for (let q = 0; q < queue.length; q++) {
-      const j = queue[q];
-      if (labels[j] === -1) labels[j] = cid;
-      if (labels[j] !== -2) continue;
-      labels[j] = cid;
-      const nb2 = region(j);
-      if (nb2.length >= minPts) { core[j] = true; for (const k of nb2) if (labels[k] === -2 || labels[k] === -1) queue.push(k); }
-    }
-  }
-  return { labels, core, nClusters: cid + 1 };
-}
-
-// Curated presets: parameter sets + guided challenges.
-interface Preset { name: string; hint: string; mode: Mode; eps: number; minPts: number; xi: number; count: number; }
-const PRESETS: Preset[] = [
-  { name: 'Balanced', hint: 'three tidy blobs, a little noise', mode: 'dbscan', eps: 0.07, minPts: 4, xi: 0.06, count: 120 },
-  { name: 'Tight ε', hint: 'small ε shatters clusters into noise', mode: 'dbscan', eps: 0.04, minPts: 4, xi: 0.05, count: 120 },
-  { name: 'Greedy ε', hint: 'large ε merges everything into one', mode: 'dbscan', eps: 0.16, minPts: 4, xi: 0.12, count: 120 },
-  { name: 'OPTICS valleys', hint: 'reachability plot, ξ extraction', mode: 'optics', eps: 0.2, minPts: 5, xi: 0.07, count: 150 },
+const DATASETS: { id: DensityKind; label: string }[] = [
+  { id: 'blobs', label: 'Blobs + noise' },
+  { id: 'mixed', label: 'Mixed density' },
+  { id: 'moons', label: 'Two moons' },
+  { id: 'rings', label: 'Rings' },
 ];
+
+// Curated presets. Every claim in a hint was checked against 200 generated datasets.
+interface Preset {
+  name: string; hint: string; dataset: DensityKind; count: number; mode: Mode; eps: number; minPts: number;
+  extract: Extract; epsPrime: number; xi: number; minCluster: number;
+}
+const PRESETS: Preset[] = [
+  { name: 'Three blobs', hint: 'ε 0.07 finds the three blobs and flags the scatter as noise', dataset: 'blobs', count: 120, mode: 'dbscan', eps: 0.07, minPts: 4, extract: 'cut', epsPrime: 0.07, xi: 0.1, minCluster: 10 },
+  { name: 'Tight ε', hint: 'ε 0.04 shatters the blobs into fragments and noise', dataset: 'blobs', count: 120, mode: 'dbscan', eps: 0.04, minPts: 4, extract: 'cut', epsPrime: 0.04, xi: 0.1, minCluster: 10 },
+  { name: 'Greedy ε', hint: 'ε 0.25 chains every blob together through the noise', dataset: 'blobs', count: 120, mode: 'dbscan', eps: 0.25, minPts: 4, extract: 'cut', epsPrime: 0.07, xi: 0.1, minCluster: 10 },
+  { name: 'Two moons', hint: 'non-convex shapes: density chains follow each crescent', dataset: 'moons', count: 160, mode: 'dbscan', eps: 0.06, minPts: 5, extract: 'cut', epsPrime: 0.06, xi: 0.1, minCluster: 10 },
+  { name: 'Rings', hint: 'a ring inside a ring — no centroid method can split these', dataset: 'rings', count: 160, mode: 'dbscan', eps: 0.08, minPts: 5, extract: 'cut', epsPrime: 0.08, xi: 0.1, minCluster: 10 },
+  { name: 'Mixed density · DBSCAN', hint: 'ε 0.08 keeps the sparse blob but merges the tight pair; try ε 0.03', dataset: 'mixed', count: 160, mode: 'dbscan', eps: 0.08, minPts: 10, extract: 'cut', epsPrime: 0.08, xi: 0.1, minCluster: 34 },
+  { name: 'Mixed density · OPTICS ξ', hint: 'ξ-steep valleys: tight pair AND sparse blob, no single ε', dataset: 'mixed', count: 160, mode: 'optics', eps: 0.3, minPts: 10, extract: 'xi', epsPrime: 0.08, xi: 0.1, minCluster: 34 },
+  { name: 'OPTICS ε′ cut', hint: 'a flat cut at ε′ = DBSCAN at ε′, read off one ordering', dataset: 'blobs', count: 120, mode: 'optics', eps: 0.2, minPts: 4, extract: 'cut', epsPrime: 0.07, xi: 0.1, minCluster: 10 },
+];
+
+const fmt = (v: number, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : '∞');
 
 const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const isLight = useTheme() === 'light';
+  const [dataset, setDataset] = useState<DensityKind>('blobs');
+  const [seed, setSeed] = useState(1);
   const [count, setCount] = useState(120);
+  const [mode, setMode] = useState<Mode>('dbscan');
   const [eps, setEps] = useState(0.07);
   const [minPts, setMinPts] = useState(4);
-  const [mode, setMode] = useState<Mode>('dbscan');
-  const [xi, setXi] = useState(0.06);
-  const [points, setPoints] = useState<UPt[]>(() => makeData(120));
+  const [extract, setExtract] = useState<Extract>('cut');
+  const [epsPrime, setEpsPrime] = useState(0.07);
+  const [xi, setXi] = useState(0.1);
+  const [minCluster, setMinCluster] = useState(10);
   const [cursor, setCursor] = useState(0);
-  const [neighborSeries, setNeighborSeries] = useState<number[]>([]);
+  const [series, setSeries] = useState<number[]>([]);
+  const [presetName, setPresetName] = useState<string | undefined>('Three blobs');
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const narration = useNarration();
 
-  const result = useMemo(() => dbscan(points, eps, minPts), [points, eps, minPts]);
-  const ord = useMemo(() => (mode === 'optics' ? optics(points, eps, minPts) : null), [mode, points, eps, minPts]);
-  const opt = useMemo(() => (ord ? opticsExtract(ord.order, ord.reach, xi, points.length) : null), [ord, xi, points.length]);
-  const noiseCount = useMemo(
-    () => (mode === 'optics' && opt ? opt.labels.filter((l) => l === -1).length : result.labels.filter((l) => l === -1).length),
-    [mode, opt, result],
-  );
-  const nClusters = mode === 'optics' && opt ? opt.nClusters : result.nClusters;
+  const points = useMemo(() => densityData(dataset, count, seed).pts, [dataset, count, seed]);
+  const n = points.length;
+  const cutAt = Math.min(epsPrime, eps);
+  const db = useMemo(() => dbscan(points, eps, minPts), [points, eps, minPts]);
+  const op = useMemo(() => (mode === 'optics' ? optics(points, eps, minPts) : null), [mode, points, eps, minPts]);
+  const ext = useMemo(() => {
+    if (!op) return null;
+    return extract === 'cut' ? { ...extractDbscan(op, cutAt), clusters: [] as [number, number][] } : extractXi(op, minPts, xi, Math.max(2, Math.min(minCluster, n)));
+  }, [op, extract, cutAt, minPts, xi, minCluster, n]);
+  // DBSCAN at ε′, to show that the ε′ cut reproduces it
+  const dbAtCut = useMemo(() => (mode === 'optics' && extract === 'cut' ? dbscan(points, cutAt, minPts) : null), [mode, extract, points, cutAt, minPts]);
 
-  const neighborsAt = (i: number) => { const e2 = eps * eps; let c = 0; for (let j = 0; j < points.length; j++) if (dist2(points[i], points[j]) <= e2) c++; return c; };
+  const total = mode === 'optics' ? n : db.trace.length;
+  const done = cursor >= total;
 
-  // total scan length depends on mode (DBSCAN scans points; OPTICS walks its ordering)
-  const total = mode === 'optics' && ord ? ord.order.length : points.length;
+  /* ---------- per-mode view state ---------- */
+  const dbState = useMemo(() => dbscanStateAt(n, db.trace, cursor), [n, db, cursor]);
+  const posOf = useMemo(() => { const m = new Array<number>(n).fill(0); op?.order.forEach((i, k) => { m[i] = k; }); return m; }, [op, n]);
+  /** OPTICS label shown for a point: the ε′ cut is a forward pass (label known once revealed); ξ needs the whole plot. */
+  const opticsShown = (i: number) => {
+    if (!op || !ext) return -2;
+    if (posOf[i]! >= cursor) return -2;
+    if (extract === 'xi' && !done) return -2;
+    return ext.labels[i]!;
+  };
 
+  const visibleLabels = mode === 'optics' ? points.map((_, i) => opticsShown(i)) : dbState.labels;
+  const liveClusters = new Set(visibleLabels.filter((l) => l >= 0)).size;
+  const liveNoise = visibleLabels.filter((l) => l === -1).length;
+  const finalClusters = mode === 'optics' ? (ext?.nClusters ?? 0) : db.nClusters;
+  const finalNoise = mode === 'optics' ? (ext?.labels.filter((l) => l === -1).length ?? 0) : db.labels.filter((l) => l === -1).length;
+
+  /* ---------- stepping ---------- */
   const stepDbscan = () => {
-    const i = cursor;
-    const nbc = neighborsAt(i);
-    const lab = result.labels[i];
-    const kind = result.core[i] ? 'core' : lab >= 0 ? 'border' : 'noise';
-    setCursor(i + 1);
-    setNeighborSeries((s) => [...s, nbc].slice(-60));
+    const e = db.trace[cursor];
+    if (!e) { sim.pause(); return; }
+    setCursor(cursor + 1);
+    setSeries((s) => [...s, e.count].slice(-80));
     narration.narratePhase(
-      `run:dbscan:${minPts}`,
-      `The challenge here: pull dense blobs out of this scatter, of any shape, without being told how many clusters there are, and tell scattered outliers apart from real groups. DBSCAN solves it by density: a point is a core point when at least minPts neighbours fall inside the radius epsilon, clusters grow by chaining core points together, and lonely points are left as noise. Watch the dashed epsilon ball sweep each point and trace clusters of any shape on its own. This is the method behind anomaly and fraud detection, spatial analysis of GPS and sensor data, and image segmentation.`,
+      `run:dbscan:${dataset}:${minPts}`,
+      `The challenge here: pull the dense groups out of this scatter, whatever their shape, without being told how many there are, and leave scattered outliers as noise. DBSCAN does it by density: a point is a core point when at least minPts points, counting itself, lie within radius epsilon. The scan visits points in turn; when it meets an unclustered core point it seeds a new cluster, then grows it through a queue of epsilon-neighbours, chaining from core point to core point, while non-core points it reaches become border points. Watch the dashed epsilon ball and the link to the core point that reached each new point. This is the method behind anomaly and fraud detection, spatial analysis of GPS and sensor data, and image segmentation.`,
     );
-    if (i + 1 >= total) {
+    if (cursor + 1 >= total) {
       narration.narratePhase(
-        `done:dbscan`,
-        `The scan settled into ${result.nClusters} clusters with ${result.labels.filter((l) => l === -1).length} points left as noise. With no number of clusters given up front, the choice of epsilon and minPts alone decided the density that counts as a cluster.`,
+        `done:dbscan:${dataset}`,
+        `The scan is complete: ${db.nClusters} cluster${db.nClusters === 1 ? '' : 's'} and ${finalNoise} noise point${finalNoise === 1 ? '' : 's'}. Nobody chose the number of clusters; epsilon and minPts alone set the density that counts as a cluster.`,
       );
     }
+    const kind = e.kind;
+    const via = e.from >= 0 ? ` — reached from core point ${e.from}` : e.seed ? ' — seeds a new cluster' : ' — visited by the outer scan';
     setLastLog({
       algorithm: 'DBSCAN · Density Clustering',
-      stepDescription: `Point ${i + 1}/${points.length} — ${nbc} points within ε`,
+      stepDescription: `Decision ${cursor + 1}/${total}: point ${e.i}${via}`,
       formula: '|N_ε(p)| ≥ minPts  ⇒  core point',
-      variables: { 'point': i + 1, '|N_ε|': nbc, 'minPts': minPts, 'ε': eps },
-      result: `${kind.toUpperCase()}${lab >= 0 ? ` · cluster ${lab}` : ''}`,
+      variables: { 'point': e.i, '|N_ε|': e.count, 'minPts': minPts, 'ε': eps, 'cluster': e.cluster },
+      result: `${kind.toUpperCase()}${e.cluster >= 0 ? ` · cluster ${e.cluster}` : ''}${e.relabel ? ' (was noise)' : ''}`,
       mathDetails: {
         params: [
           { label: 'ε', info: `${eps.toFixed(3)}. Neighbourhood radius — larger ε merges clusters, smaller ε fragments them.` },
-          { label: 'minPts', info: `${minPts}. Density threshold for a core point; raise it to treat sparse regions as noise.` },
-          { label: '|N_ε|', info: `${nbc}. Points within ε of this one (incl. itself).` },
+          { label: 'minPts', info: `${minPts}. Points needed within ε, counting the point itself, for a core point.` },
+          { label: '|N_ε|', info: `${e.count}. Points within ε of point ${e.i}, itself included — ${e.count >= minPts ? `≥ ${minPts}, so it is a core point` : `< ${minPts}, so it is not a core point`}.` },
+          { label: 'reached by', info: e.from >= 0 ? `Core point ${e.from}: point ${e.i} lies in its ε-ball, so it joins cluster ${e.cluster}.` : e.seed ? `Nobody — an unclustered core point, so it starts cluster ${e.cluster}.` : 'Nobody yet — no core point reaches it, so it is noise unless a later cluster does.' },
         ],
-        implication: kind === 'core' ? 'Dense enough to seed/extend a cluster.' : kind === 'border' ? 'Reachable from a core point — joins its cluster.' : 'Too isolated — labelled noise (no cluster).',
+        implication: kind === 'core'
+          ? (e.seed ? 'A new cluster starts here; its ε-neighbours join the queue.' : 'Dense too: its ε-neighbours join the queue, so the cluster keeps chaining outward.')
+          : kind === 'border' ? 'Within ε of a core point but not dense itself — a border point, it does not expand the cluster.'
+            : 'Too isolated and not reached by any cluster (yet) — labelled noise.',
       },
     });
   };
 
   const stepOptics = () => {
-    if (!ord || !opt) { sim.pause(); return; }
+    if (!op || !ext) { sim.pause(); return; }
     const k = cursor;
-    const i = ord.order[k];
-    const r = ord.reach[k];
-    const nbc = neighborsAt(i);
-    const lab = opt.labels[i];
+    const i = op.order[k];
+    if (i == null) { sim.pause(); return; }
+    const r = op.reach[k]!;
+    const cd = op.coreDist[i]!;
+    const pr = op.pred[i]!;
     setCursor(k + 1);
-    setNeighborSeries((s) => [...s, nbc].slice(-60));
-    const rTxt = Number.isFinite(r) ? r.toFixed(3) : '∞';
+    if (Number.isFinite(r)) setSeries((s) => [...s, r].slice(-80));
     narration.narratePhase(
-      `run:optics:${minPts}`,
-      `The challenge here: cluster data whose groups have very different densities, where any single epsilon would either merge the loose ones or shatter the tight ones. OPTICS solves it without fixing epsilon: it visits points in a reachability ordering and records each point's reachability distance, the cost to reach it from the already-processed frontier. Read the plot below the scatter as a landscape, deep valleys are dense clusters and tall peaks are the boundaries between them. This ordering powers exploratory data analysis, geospatial and astronomy clustering, and customer or behaviour segmentation where density varies.`,
+      `run:optics:${dataset}:${extract}`,
+      `OPTICS does not commit to one epsilon. It visits the points in a reachability ordering: each step takes the unvisited point that is cheapest to reach from what has been visited, where reaching point p from point o costs the larger of o's core distance and the distance from o to p. Plot those costs in order and dense groups become valleys, while the jumps between groups are peaks. ${extract === 'cut'
+        ? 'A flat cut at epsilon prime turns every valley below it into a cluster, which reproduces DBSCAN at epsilon prime from this one ordering.'
+        : 'The xi-steep method marks a valley wherever the plot drops and rises by at least a fraction xi, so shallow valleys, which are sparse clusters, and deep ones, which are dense clusters, are both extracted from the same ordering.'} This ordering powers exploratory analysis of geospatial, astronomical and customer data where density varies.`,
     );
     if (k + 1 >= total) {
       narration.narratePhase(
-        `done:optics`,
-        `The reachability plot is complete, and a flat cut at height xi carves out ${opt.nClusters} valleys as clusters. From a single run you can read off many DBSCAN-like results at different densities, without ever committing to one epsilon.`,
+        `done:optics:${dataset}:${extract}`,
+        extract === 'cut'
+          ? `The ordering is complete. The flat cut at epsilon prime ${cutAt.toFixed(2)} gives ${ext.nClusters} clusters and ${finalNoise} noise points; DBSCAN run at the same radius gives ${dbAtCut?.nClusters ?? ext.nClusters}.`
+          : `The ordering is complete, and xi-steep extraction found ${ext.nClusters} clusters with ${finalNoise} points left unassigned. Each valley was cut at its own depth.`,
       );
     }
+    const dFromPred = pr >= 0 ? Math.hypot(points[i]!.x - points[pr]!.x, points[i]!.y - points[pr]!.y) : NaN;
+    const cdPred = pr >= 0 ? op.coreDist[pr]! : NaN;
     setLastLog({
-      algorithm: 'OPTICS · Reachability Ordering',
-      stepDescription: `Ordering ${k + 1}/${total} — reachability-distance ${rTxt}`,
-      formula: 'reach(p,o) = max( core-dist(o), ‖p−o‖ )',
-      variables: { 'pos': k + 1, 'reach': Number.isFinite(r) ? +r.toFixed(3) : '∞', 'ξ': xi, 'minPts': minPts },
-      result: !Number.isFinite(r) || r > xi ? 'peak · boundary/noise' : `valley · cluster ${lab}`,
+      algorithm: `OPTICS · Reachability Ordering${extract === 'cut' ? ' · ε′ cut' : ' · ξ-steep'}`,
+      stepDescription: `Position ${k + 1}/${total}: point ${i}${pr >= 0 ? `, reached from point ${pr}` : ' starts a new component (nothing processed reaches it)'}`,
+      formula: 'reach(p, o) = max( core-dist(o), ‖p − o‖ )',
+      variables: pr >= 0
+        ? { 'p': i, 'o': pr, 'core(o)': +cdPred.toFixed(4), '‖p−o‖': +dFromPred.toFixed(4), 'reach': +r.toFixed(4), 'core(p)': Number.isFinite(cd) ? +cd.toFixed(4) : '∞' }
+        : { 'p': i, 'reach': '∞', 'core(p)': Number.isFinite(cd) ? +cd.toFixed(4) : '∞' },
+      result: extract === 'cut'
+        ? (r > cutAt ? (cd <= cutAt ? `reach > ε′, core ≤ ε′ → starts cluster ${ext.labels[i]}` : 'reach > ε′, core > ε′ → noise') : `reach ≤ ε′ → joins cluster ${ext.labels[i]}`)
+        : `reach ${fmt(r, 4)} (ξ extraction runs once the ordering is complete)`,
       mathDetails: {
         params: [
-          { label: 'core-dist', info: 'Distance to the minPts-th nearest neighbour — how dense it is locally.' },
-          { label: 'reach-dist', info: `${rTxt}. The cost to reach this point from the processed frontier; small = inside a dense valley.` },
-          { label: 'ξ (extract)', info: `${xi.toFixed(3)}. Flat cut on the reachability plot: bars below ξ form clusters, peaks split them.` },
+          { label: 'core-dist(p)', info: `${fmt(cd, 4)}. Distance to the ${minPts}-th nearest point, counting p itself; ∞ when fewer than ${minPts} points lie within the search radius ε = ${eps.toFixed(2)}.` },
+          { label: 'reach-dist', info: pr >= 0 ? `max(${cdPred.toFixed(4)}, ${dFromPred.toFixed(4)}) = ${r.toFixed(4)} — the cheapest way into p from the points already visited.` : '∞ — no visited core point has p within ε, so a new valley begins.' },
+          extract === 'cut'
+            ? { label: 'ε′ cut', info: `${cutAt.toFixed(3)}. reach > ε′ opens a new cluster if core-dist ≤ ε′ (else noise); reach ≤ ε′ joins the current one — ExtractDBSCAN.` }
+            : { label: 'ξ', info: `${xi.toFixed(2)}. A steep point drops or rises by at least a fraction ξ; clusters are valleys between a steep-down and a steep-up area (≥ ${minCluster} points).` },
         ],
-        implication: !Number.isFinite(r) || r > xi
-          ? 'A peak above ξ ends one valley and starts the next — a cluster boundary.'
-          : 'Inside a reachability valley — part of a dense cluster, no single ε needed.',
+        implication: Number.isFinite(r) && r <= (extract === 'cut' ? cutAt : Infinity)
+          ? 'Inside a reachability valley — part of a dense region.'
+          : 'A peak: the jump from the region visited so far to a new one.',
       },
     });
   };
@@ -162,34 +189,61 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
     if (cursor >= total) { sim.pause(); return; }
     if (mode === 'optics') stepOptics(); else stepDbscan();
   };
-
   const sim = useSimLoop(step, { initialSpeed: 150 });
 
-  const regen = (n = count) => { narration.cancel(); setPoints(makeData(n)); setCursor(0); setNeighborSeries([]); setLastLog(null); };
-  const reset = () => { narration.cancel(); sim.stop(); setCursor(0); setNeighborSeries([]); setLastLog(null); };
-
+  const restartScan = () => { narration.cancel(); sim.stop(); setCursor(0); setSeries([]); setLastLog(null); };
+  const regen = () => { setSeed((s) => s + 1); restartScan(); };
   const applyPreset = (p: Preset) => {
-    narration.cancel(); sim.stop();
-    setMode(p.mode); setEps(p.eps); setMinPts(p.minPts); setXi(p.xi); setCount(p.count);
-    setPoints(makeData(p.count)); setCursor(0); setNeighborSeries([]); setLastLog(null);
+    setDataset(p.dataset); setCount(p.count); setMode(p.mode); setEps(p.eps); setMinPts(p.minPts);
+    setExtract(p.extract); setEpsPrime(p.epsPrime); setXi(p.xi); setMinCluster(p.minCluster); setSeed(1);
+    setPresetName(p.name); restartScan();
+    narration.narratePhase(`preset:${p.name}`, `${p.name}: ${p.hint}.`);
   };
+  const edit = (fn: () => void) => { fn(); setPresetName(undefined); restartScan(); };
 
-  // colours: in OPTICS mode use the extracted labels; otherwise DBSCAN labels.
-  const labelOf = (i: number) => (mode === 'optics' && opt ? opt.labels[i] : result.labels[i]);
-  const revealedUpTo = mode === 'optics' && ord
-    ? new Set(ord.order.slice(0, cursor))
-    : null;
-  const isRevealed = (i: number) => (revealedUpTo ? revealedUpTo.has(i) : i < cursor);
-
+  /* ---------- scatter layers ---------- */
+  const isCoreShown = (i: number) => (mode === 'optics'
+    ? (op ? (extract === 'cut' ? op.coreDist[i]! <= cutAt : Number.isFinite(op.coreDist[i]!)) : false)
+    : dbState.core[i]!);
   const plotPoints: ScatterPoint[] = points.map((p, i) => {
-    const revealed = isRevealed(i);
-    const lab = labelOf(i);
-    return { x: p.x, y: p.y, cls: revealed && lab >= 0 ? lab : undefined, faint: !revealed, size: result.core[i] ? 5.5 : 4 };
+    const lab = visibleLabels[i]!;
+    const seen = mode === 'optics' ? posOf[i]! < cursor : lab !== -2;
+    return { x: p.x, y: p.y, cls: lab >= 0 ? lab : undefined, faint: !seen, size: seen ? (isCoreShown(i) ? 5.6 : lab === -1 ? 3.4 : 4.2) : 3.6 };
   });
-  const curIdx = mode === 'optics' && ord ? (cursor < ord.order.length ? ord.order[cursor] : -1) : (cursor < points.length ? cursor : -1);
-  const cur = curIdx >= 0 ? points[curIdx] : null;
-  const markers: ScatterMarker[] = cur ? [{ x: cur.x, y: cur.y, color: isLight ? 'var(--t0)' : '#fff', r: 6 }] : [];
-  const circles: ScatterCircle[] = cur ? [{ x: cur.x, y: cur.y, r: eps, color: ACCENT }] : [];
+
+  const markers: ScatterMarker[] = [];
+  const circles: ScatterCircle[] = [];
+  const lines: ScatterLine[] = [];
+  let curIdx = -1;
+  if (mode === 'dbscan') {
+    const e = cursor > 0 ? db.trace[cursor - 1] : undefined;
+    if (e) {
+      curIdx = e.i;
+      circles.push({ x: points[e.i]!.x, y: points[e.i]!.y, r: eps, color: ACCENT });
+      if (e.from >= 0) lines.push({ x1: points[e.from]!.x, y1: points[e.from]!.y, x2: points[e.i]!.x, y2: points[e.i]!.y, color: ACCENT, width: 1.6 });
+    }
+  } else if (op && cursor > 0) {
+    const i = op.order[cursor - 1]!;
+    curIdx = i;
+    const cd = op.coreDist[i]!;
+    if (Number.isFinite(cd)) circles.push({ x: points[i]!.x, y: points[i]!.y, r: cd, color: ACCENT });
+    const pr = op.pred[i]!;
+    if (pr >= 0) lines.push({ x1: points[pr]!.x, y1: points[pr]!.y, x2: points[i]!.x, y2: points[i]!.y, color: ACCENT, width: 1.6 });
+  }
+  if (curIdx >= 0) markers.push({ x: points[curIdx]!.x, y: points[curIdx]!.y, color: isLight ? 'var(--t0)' : '#fff', r: 6 });
+
+  const curEvent = mode === 'dbscan' && cursor > 0 ? db.trace[cursor - 1] : undefined;
+  const rewardValue = mode === 'dbscan'
+    ? (curEvent ? curEvent.count : '—')
+    : (op && cursor > 0 ? fmt(op.reach[cursor - 1]!) : '—');
+
+  const plotLabels = op ? op.order.map((i) => opticsShown(i)) : [];
+  const dbCutSame = dbAtCut ? dbAtCut.nClusters === (ext?.nClusters ?? -1) : false;
+  const insight = mode === 'optics'
+    ? (extract === 'cut'
+      ? `OPTICS ordered all ${n} points once (search radius ε = ${eps.toFixed(2)}). The flat cut ε′ = ${cutAt.toFixed(3)} extracts ${finalClusters} clusters and ${finalNoise} noise points; DBSCAN run directly at ε = ${cutAt.toFixed(3)} finds ${dbAtCut?.nClusters ?? '—'} clusters${dbCutSame ? ' — the same clusters' : ''} (ExtractDBSCAN can leave a few border points as noise). Moving the cut re-reads the same ordering at another density — it is still one density level at a time.`
+      : `ξ-steep extraction on one ordering: ${done ? `${finalClusters} clusters and ${finalNoise} unassigned points` : 'runs when the ordering is complete'}. Each cluster is a valley bounded by drops and rises of at least ξ = ${xi.toFixed(2)}, so a deep valley (dense cluster) and a shallow one (sparse cluster) are both found — which no single ε can do when the gap between two dense clusters is denser than a sparse cluster (the mixed-density preset).`)
+    : `ε = ${eps.toFixed(3)}, minPts = ${minPts} → ${db.nClusters} clusters, ${db.labels.filter((l) => l === -1).length} noise. DBSCAN follows density, so it finds non-convex shapes (moons, rings) and labels outliers as noise without being told the number of clusters — but one ε means one density level for the whole dataset.`;
 
   return (
     <LabStage
@@ -197,13 +251,18 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       running={sim.isPlaying}
       narration={narration}
       stats={[
-        { label: 'MODE', value: mode.toUpperCase(), color: ACCENT },
+        { label: 'MODE', value: mode === 'optics' ? `OPTICS·${extract === 'cut' ? 'ε′' : 'ξ'}` : 'DBSCAN', color: ACCENT },
         { label: 'ε', value: eps.toFixed(3) },
         { label: 'minPts', value: minPts },
-        { label: 'CLUSTERS', value: nClusters, color: ACCENT },
-        { label: 'NOISE', value: noiseCount },
+        { label: 'SCAN', value: `${Math.min(cursor, total)}/${total}` },
+        { label: 'CLUSTERS', value: mode === 'optics' && extract === 'xi' && !done ? '—' : liveClusters, color: ACCENT },
+        { label: 'NOISE', value: mode === 'optics' && extract === 'xi' && !done ? '—' : liveNoise },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, dbscanPython(eps, minPts, mode))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, dbscanPython({
+        dataset, seed, points: points.map((p) => [p.x, p.y]), mode, eps, minPts, extract, epsPrime: cutAt, xi,
+        minCluster: Math.max(2, Math.min(minCluster, n)),
+        labels: mode === 'optics' ? (ext?.labels ?? []) : db.labels,
+      }))}
       grid={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, alignItems: 'center' }}>
           <ScatterPlot
@@ -211,35 +270,38 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             points={plotPoints}
             markers={markers}
             circles={circles}
+            lines={lines}
             xLabel="x₁" yLabel="x₂"
           />
-          {mode === 'optics' && ord && opt && (
+          {mode === 'optics' && op && (
             <ReachabilityPlot
-              reach={ord.reach}
-              labels={ord.order.map((i) => opt.labels[i])}
+              reach={op.reach}
+              labels={plotLabels}
               revealed={cursor}
-              threshold={xi}
-              width={460} height={130}
+              threshold={extract === 'cut' ? cutAt : undefined}
+              thresholdLabel={extract === 'cut' ? `ε′ ${cutAt.toFixed(3)}` : undefined}
+              ranges={extract === 'xi' && done ? ext?.clusters : undefined}
+              width={460} height={140}
               accent={ACCENT}
             />
           )}
         </div>
       )}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={() => regen()} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={restartScan} onNewMap={regen} speed={sim.speed} onSpeed={sim.setSpeed} />}
       legend={(
         <Legend title={mode === 'optics' ? 'OPTICS' : 'DBSCAN'} items={[
           { color: CLASS_COLORS[0], label: 'Cluster' },
           { color: 'var(--t2)', label: 'Noise' },
-          { node: <span style={{ width: 11, height: 11, borderRadius: '50%', border: `1px dashed ${ACCENT}`, display: 'inline-block' }} />, label: 'ε ball' },
+          { node: <span style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--t1)', display: 'inline-block' }} />, label: mode === 'optics' ? (extract === 'cut' ? 'core at ε′' : 'core at ε') : 'core (big) / border' },
+          { node: <span style={{ width: 11, height: 11, borderRadius: '50%', border: `1px dashed ${ACCENT}`, display: 'inline-block' }} />, label: mode === 'optics' ? 'core-distance' : 'ε ball' },
+          { node: <span style={{ width: 12, height: 2, background: ACCENT, display: 'inline-block' }} />, label: mode === 'optics' ? 'reached from' : 'reached from core' },
         ]} />
       )}
-      rewardLabel="ε-NEIGHBOURS"
-      rewardValue={cur ? neighborsAt(curIdx) : '—'}
-      rewardSeries={neighborSeries}
+      rewardLabel={mode === 'optics' ? 'REACH-DIST' : 'ε-NEIGHBOURS'}
+      rewardValue={rewardValue}
+      rewardSeries={series}
       lastLog={lastLog}
-      contextInsight={mode === 'optics'
-        ? `OPTICS orders points by reachability instead of fixing one ε. Valleys in the reachability plot are clusters; the ξ=${xi.toFixed(3)} cut extracts ${nClusters} of them with ${noiseCount} noise — this copes with clusters of different densities, which a single-ε DBSCAN cannot.`
-        : `ε=${eps.toFixed(3)}, minPts=${minPts} → ${nClusters} clusters, ${noiseCount} noise. Unlike k-means, DBSCAN finds arbitrary shapes and labels outliers as noise — and you never specify the number of clusters.`}
+      contextInsight={insight}
       params={(
         <ParamsWrap>
           <ParamsHead title="Density Clustering" hint="DBSCAN / OPTICS — no k needed." />
@@ -247,25 +309,48 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             <MonoLabel style={{ marginBottom: 9 }}>Algorithm</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {(['dbscan', 'optics'] as Mode[]).map((m) => (
-                <AlgoPill key={m} active={mode === m} accent={ACCENT} onClick={() => { setMode(m); reset(); }}>
+                <AlgoPill key={m} active={mode === m} accent={ACCENT} onClick={() => edit(() => setMode(m))}>
                   {m === 'dbscan' ? 'DBSCAN (single ε)' : 'OPTICS (reachability)'}
                 </AlgoPill>
               ))}
             </div>
           </div>
-          <ParamSlider name="ε · radius" value={eps.toFixed(3)} min={0.03} max={0.2} step={0.005} current={eps} onChange={(v) => { setEps(v); reset(); }} hint={mode === 'optics' ? 'max search radius' : 'neighbourhood radius'} />
-          <ParamSlider name="minPts" value={String(minPts)} min={2} max={10} step={1} current={minPts} onChange={(v) => { setMinPts(v); reset(); }} hint="core-point density threshold" />
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Dataset</MonoLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+              {DATASETS.map((d) => (
+                <AlgoPill key={d.id} active={dataset === d.id} accent={ACCENT} onClick={() => edit(() => setDataset(d.id))}>{d.label}</AlgoPill>
+              ))}
+            </div>
+          </div>
+          <ParamSlider name={mode === 'optics' ? 'ε · max search radius' : 'ε · radius'} value={eps.toFixed(3)} min={0.02} max={0.3} step={0.005} current={eps} onChange={(v) => edit(() => setEps(v))} hint={mode === 'optics' ? 'core-dist / reach are ∞ beyond it' : 'neighbourhood radius'} />
+          <ParamSlider name="minPts" value={String(minPts)} min={2} max={12} step={1} current={minPts} onChange={(v) => edit(() => setMinPts(v))} hint="points within ε (incl. itself) for a core point" />
           {mode === 'optics' && (
-            <ParamSlider name="ξ · extract" value={xi.toFixed(3)} min={0.02} max={0.16} step={0.005} current={xi} onChange={(v) => { setXi(v); reset(); }} hint="reachability cut height" />
+            <div>
+              <MonoLabel style={{ marginBottom: 9 }}>Cluster extraction</MonoLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <AlgoPill active={extract === 'cut'} accent={ACCENT} onClick={() => edit(() => setExtract('cut'))}>ε′ cut (= DBSCAN at ε′)</AlgoPill>
+                <AlgoPill active={extract === 'xi'} accent={ACCENT} onClick={() => edit(() => setExtract('xi'))}>ξ-steep valleys</AlgoPill>
+              </div>
+            </div>
           )}
-          <ParamSlider name="Points" value={String(count)} min={60} max={220} step={20} current={count} onChange={(v) => { setCount(v); regen(v); }} hint="dataset size (incl. noise)" />
+          {mode === 'optics' && extract === 'cut' && (
+            <ParamSlider name="ε′ · cut height" value={cutAt.toFixed(3)} min={0.01} max={eps} step={0.005} current={cutAt} onChange={(v) => edit(() => setEpsPrime(v))} hint="flat cut on the reachability plot (≤ ε)" />
+          )}
+          {mode === 'optics' && extract === 'xi' && (
+            <>
+              <ParamSlider name="ξ · steepness" value={xi.toFixed(2)} min={0.01} max={0.3} step={0.01} current={xi} onChange={(v) => edit(() => setXi(v))} hint="min relative drop / rise at a valley wall" />
+              <ParamSlider name="Min cluster size" value={String(minCluster)} min={2} max={60} step={1} current={minCluster} onChange={(v) => edit(() => setMinCluster(v))} hint="smaller valleys are ignored" />
+            </>
+          )}
+          <ParamSlider name="Points" value={String(count)} min={60} max={220} step={20} current={count} onChange={(v) => edit(() => setCount(v))} hint="dataset size (incl. noise)" />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={10} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint="scan interval" />
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Presets &amp; challenges</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {PRESETS.map((p) => (
-                <AlgoPill key={p.name} accent={ACCENT} onClick={() => applyPreset(p)}>
-                  {p.name} · <span style={{ color: 'var(--t2)' }}>{p.hint}</span>
+                <AlgoPill key={p.name} active={presetName === p.name} accent={ACCENT} onClick={() => applyPreset(p)}>
+                  {p.name} · <span style={{ color: presetName === p.name ? '#fff' : 'var(--t2)' }}>{p.hint}</span>
                 </AlgoPill>
               ))}
             </div>
@@ -273,7 +358,11 @@ const DbscanLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: mode === 'optics' ? 'OPTICS' : 'DBSCAN', mode, eps, minPts, xi, clusters: nClusters, noise: noiseCount }}
+      currentParams={{
+        algorithm: mode === 'optics' ? 'OPTICS' : 'DBSCAN', dataset, seed, eps, minPts,
+        ...(mode === 'optics' ? { extraction: extract === 'cut' ? `eps' cut ${cutAt}` : `xi ${xi}, min cluster ${minCluster}` } : {}),
+        clusters: finalClusters, noise: finalNoise,
+      }}
       apiPanel={apiPanel}
     />
   );

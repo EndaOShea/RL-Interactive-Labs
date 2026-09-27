@@ -47,6 +47,7 @@ coverage/
 *.tmp
 *.temp
 .cache/
+.claude/tmp/
 
 # superpowers brainstorm visual companion
 .superpowers/

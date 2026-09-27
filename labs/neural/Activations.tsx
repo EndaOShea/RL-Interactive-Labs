@@ -9,28 +9,29 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { activationsPython } from './python';
+import { gelu, dGelu, LEAKY_ALPHA } from './mlp';
 
 const ACCENT = '#2dd4bf';
 const DERIV = '#fbbf24';
 type Fn = 'sigmoid' | 'tanh' | 'relu' | 'leaky' | 'gelu' | 'silu' | 'elu';
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
-const gelu = (x: number) => 0.5 * x * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (x + 0.044715 * x ** 3)));
 const F: Record<Fn, (x: number) => number> = {
   sigmoid,
   tanh: (x) => Math.tanh(x),
   relu: (x) => Math.max(0, x),
-  leaky: (x) => (x > 0 ? x : 0.1 * x),
+  leaky: (x) => (x > 0 ? x : LEAKY_ALPHA * x),
   gelu,
   silu: (x) => x * sigmoid(x),
   elu: (x) => (x > 0 ? x : Math.exp(x) - 1),
 };
+// Every derivative is analytic (GELU's is the exact derivative of its tanh approximation).
 const D: Record<Fn, (x: number) => number> = {
   sigmoid: (x) => { const s = sigmoid(x); return s * (1 - s); },
   tanh: (x) => 1 - Math.tanh(x) ** 2,
   relu: (x) => (x > 0 ? 1 : 0),
-  leaky: (x) => (x > 0 ? 1 : 0.1),
-  gelu: (x) => (gelu(x + 1e-3) - gelu(x - 1e-3)) / 2e-3,
+  leaky: (x) => (x > 0 ? 1 : LEAKY_ALPHA),
+  gelu: dGelu,
   silu: (x) => { const s = sigmoid(x); return s + x * s * (1 - s); },
   elu: (x) => (x > 0 ? 1 : Math.exp(x)),
 };
@@ -38,14 +39,24 @@ const NOTE: Record<Fn, string> = {
   sigmoid: 'Squashes to (0,1); saturates at both ends → vanishing gradients in deep nets.',
   tanh: 'Zero-centred (−1,1); still saturates but trains better than sigmoid.',
   relu: 'max(0,x): cheap, non-saturating for x>0, but "dead" units for x<0 (zero gradient).',
-  leaky: 'Leaky ReLU keeps a small slope for x<0, avoiding dead units.',
-  gelu: 'Smooth, used in Transformers; gates inputs by their value.',
+  leaky: `Leaky ReLU keeps a small slope for x<0 (${LEAKY_ALPHA} here; 0.01 is also common), avoiding dead units.`,
+  gelu: 'GELU = x·Φ(x), weighting x by the standard-normal CDF; smooth, used in Transformers. Drawn with the standard tanh approximation.',
   silu: 'SiLU / Swish = x·σ(x): smooth, non-monotonic, self-gated (EfficientNet).',
   elu: 'ELU: smooth negative tail (eˣ−1) pushes mean activations toward zero.',
 };
+// What the curve's SHAPE does to the gradient — one accurate line per function.
+const SHAPE: Record<Fn, string> = {
+  sigmoid: 'Saturating: both tails flatten, so f′ → 0 for large |x| (its largest slope is 0.25, at x = 0).',
+  tanh: 'Saturating: both tails flatten, so f′ → 0 for large |x| (its largest slope is 1, at x = 0).',
+  relu: 'Piecewise linear: f′ = 1 for x > 0 but exactly 0 for x < 0 — a dead zone with no gradient at all.',
+  leaky: `Piecewise linear: f′ = 1 for x > 0 and ${LEAKY_ALPHA} for x < 0 — never flat, so the gradient never dies.`,
+  gelu: 'Self-gated: x times a soft gate, so the curve dips to ≈ −0.17 at x ≈ −0.75 before rising; f′ is smooth, slightly negative left of that dip, and fades to 0 far to the left.',
+  silu: 'Self-gated: x·σ(x) dips to ≈ −0.28 at x ≈ −1.28 before rising; f′ is smooth, slightly negative left of that dip, and fades to 0 far to the left.',
+  elu: 'f′ = 1 for x > 0 and eˣ for x < 0 — smooth and never exactly 0, though it fades toward 0 far to the left.',
+};
 const LABEL: Record<Fn, string> = {
-  sigmoid: 'σ(x)=1/(1+e⁻ˣ)', tanh: 'f(x)=tanh(x)', relu: 'f(x)=max(0,x)', leaky: 'f(x)=x>0?x:0.1x',
-  gelu: 'GELU(x)=x·Φ(x)', silu: 'SiLU(x)=x·σ(x)', elu: 'ELU(x)=x>0?x:eˣ−1',
+  sigmoid: 'σ(x)=1/(1+e⁻ˣ)', tanh: 'f(x)=tanh(x)', relu: 'f(x)=max(0,x)', leaky: `f(x)=x>0?x:${LEAKY_ALPHA}x`,
+  gelu: 'GELU(x) ≈ ½x(1+tanh(√(2/π)(x+0.044715x³)))  (tanh approx. of x·Φ(x))', silu: 'SiLU(x)=x·σ(x)', elu: 'ELU(x)=x>0?x:eˣ−1',
 };
 const ALL: Fn[] = ['sigmoid', 'tanh', 'relu', 'leaky', 'gelu', 'silu', 'elu'];
 const PALETTE = ['#2dd4bf', '#38bdf8', '#fbbf24', '#f87171', '#a78bfa', '#34d399', '#fb7185'];
@@ -102,12 +113,12 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
           : fn === 'relu'
             ? 'ReLU is just the maximum of zero and x. For positive inputs its gradient is exactly one, so nothing shrinks and deep nets train well, which is why it became the default. The catch is the flat left half, where the gradient is zero and a neuron can get stuck dead.'
             : fn === 'leaky'
-              ? 'Leaky ReLU keeps a small slope for negative inputs instead of going completely flat, so its gradient never drops fully to zero. That small leak keeps neurons alive that plain ReLU would let die.'
+              ? `Leaky ReLU keeps a small slope, ${LEAKY_ALPHA} here, for negative inputs instead of going completely flat, so its gradient never drops to zero. That small leak keeps neurons alive that plain ReLU would let die.`
               : fn === 'elu'
                 ? 'ELU behaves like ReLU for positive inputs but has a smooth negative tail that bends down to minus one, pulling the average activation toward zero and keeping a gradient alive on the negative side.'
                 : fn === 'silu'
                   ? 'SiLU, also called Swish, multiplies the input by its own sigmoid gate. The result dips slightly below zero before rising, a smooth self-gated curve whose gradient stays useful, used in networks like EfficientNet.'
-                  : 'GELU is a smooth, self-gated curve that weights each input by the chance it is positive. It is the activation inside Transformers, giving a softer, more trainable landscape than a hard ReLU corner.';
+                  : 'GELU is a smooth, self-gated curve that multiplies each input x by Phi of x, the probability that a standard normal value falls below x; this lab draws it with the usual tanh approximation. It is the activation inside Transformers, giving a softer, more trainable landscape than a hard ReLU corner.';
       narration.narratePhase(`run:${fn}`,
         `The challenge here: understand exactly how the ${fn} activation shapes an input and, just as importantly, how big a gradient it hands back for learning. This non-linearity is applied at each neuron, and without it stacking layers would collapse to one plain linear map. ${teach} As the run sweeps the marker across x, watch the gold gradient curve, since that is exactly the signal backpropagation multiplies on the way back. The choice of activation directly affects whether real deep networks for vision, speech and language train at all.`);
     }
@@ -116,12 +127,12 @@ const ActivationsLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       stepDescription: 'Evaluate the activation and its gradient',
       formula: LABEL[fn],
       variables: { 'x': +nx.toFixed(2), 'f(x)': +F[fn](nx).toFixed(3), "f'(x)": +grad.toFixed(3) },
-      result: `f'(${nx.toFixed(1)}) = ${grad.toFixed(3)}`,
+      result: `f'(${nx.toFixed(2)}) = ${grad.toFixed(3)}`,
       mathDetails: {
         params: [
           { label: 'gradient', info: "f'(x) (gold) is what backprop multiplies by — near-zero regions stall learning." },
           { label: fn, info: NOTE[fn] },
-          { label: 'self-gated', info: (fn === 'silu' || fn === 'gelu') ? 'SiLU/GELU multiply the input by a soft gate, so the curve dips below 0 then rises — smoother optimisation landscape.' : 'Piecewise/saturating activations have flat regions where the gradient dies.' },
+          { label: 'shape', info: SHAPE[fn] },
         ],
         implication: !healthy ? 'Gradient ≈ 0 here — a neuron stuck in this region learns very slowly.' : 'Healthy gradient — weights feeding this neuron update well.',
       },

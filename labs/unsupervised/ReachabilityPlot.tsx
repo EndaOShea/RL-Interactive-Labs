@@ -4,41 +4,41 @@ import { useTheme } from '../../utils/theme';
 
 // Area-local OPTICS reachability plot: a bar per point in the reachability
 // ordering, height = reachability distance. Valleys = clusters; tall bars are
-// the cluster boundaries / noise. Mirrors the Cinematic-Stage palette and is
-// purely presentational (the DBSCAN/OPTICS lab owns the ordering + labels).
+// the cluster boundaries / noise; an undefined (∞) reachability — the first
+// point of each density-connected component — is drawn full height with a
+// hatch cap. Purely presentational (the DBSCAN/OPTICS lab owns the ordering + labels).
 
 export interface ReachabilityPlotProps {
-  /** Reachability distance per ordered point (Infinity → undefined → drawn full-height/noise). */
+  /** Reachability distance per ordered point (Infinity = undefined). */
   reach: number[];
-  /** Cluster label per ordered point (-1 = noise). */
+  /** Cluster label per ordered point (-1 = noise, -2 = not extracted yet). */
   labels: number[];
   /** How many ordered points have been revealed so far (for the animated sweep). */
   revealed?: number;
-  /** Extraction threshold ξ drawn as a horizontal line (data units = same as reach). */
+  /** A horizontal cut (same units as reach) — the ε′ of ExtractDBSCAN. */
   threshold?: number;
+  thresholdLabel?: string;
+  /** Extracted ξ-clusters as [start, end] ordering positions, drawn as brackets under the bars. */
+  ranges?: [number, number][];
   width?: number;
   height?: number;
   accent?: string;
 }
 
 const ReachabilityPlot: React.FC<ReachabilityPlotProps> = ({
-  reach, labels, revealed, threshold, width = 440, height = 150, accent = '#f472b6',
+  reach, labels, revealed, threshold, thresholdLabel, ranges, width = 440, height = 150, accent = '#f472b6',
 }) => {
   const isLight = useTheme() === 'light';
-  const padL = 30, padR = 10, padT = 12, padB = 18;
+  const padL = 30, padR = 10, padT = 12, padB = ranges && ranges.length ? 26 : 18;
   const plotW = width - padL - padR;
   const plotH = height - padT - padB;
   const n = Math.max(1, reach.length);
   const finite = reach.filter((r) => Number.isFinite(r));
-  const maxR = Math.max(1e-6, ...finite, threshold ?? 0);
+  const maxR = Math.max(1e-6, ...finite, threshold ?? 0) * 1.08;
   const bw = plotW / n;
   const rev = revealed == null ? n : revealed;
-  const sy = (r: number) => plotT(r);
-  function plotT(r: number) {
-    const clamped = Number.isFinite(r) ? Math.min(r, maxR) : maxR;
-    return (clamped / maxR) * plotH;
-  }
-  const thY = threshold != null ? padT + plotH - plotT(threshold) : null;
+  const barH = (r: number) => ((Number.isFinite(r) ? Math.min(r, maxR) : maxR) / maxR) * plotH;
+  const thY = threshold != null ? padT + plotH - barH(threshold) : null;
 
   return (
     <svg
@@ -51,25 +51,38 @@ const ReachabilityPlot: React.FC<ReachabilityPlotProps> = ({
       ))}
 
       {reach.map((r, i) => {
-        const h = sy(r);
+        const h = barH(r);
         const isRev = i < rev;
-        const lab = labels[i];
-        const col = lab >= 0 ? CLASS_COLORS[lab % CLASS_COLORS.length] : 'var(--t2)';
+        const lab = labels[i] ?? -2;
+        const col = lab >= 0 ? CLASS_COLORS[lab % CLASS_COLORS.length] : lab === -1 ? 'var(--t2)' : 'var(--t1)';
         return (
-          <rect
-            key={i}
-            x={padL + i * bw} y={padT + plotH - h}
-            width={Math.max(0.6, bw - 0.5)} height={h}
-            fill={col} opacity={isRev ? 0.9 : 0.18}
-          />
+          <g key={i}>
+            <rect
+              x={padL + i * bw} y={padT + plotH - h}
+              width={Math.max(0.6, bw - 0.5)} height={h}
+              fill={col} opacity={isRev ? (Number.isFinite(r) ? 0.9 : 0.35) : 0.14}
+            />
+            {!Number.isFinite(r) && isRev && (
+              <rect x={padL + i * bw} y={padT} width={Math.max(0.6, bw - 0.5)} height={3} fill={col} opacity={0.9} />
+            )}
+          </g>
         );
       })}
 
       {thY != null && (
-        <line x1={padL} y1={thY} x2={padL + plotW} y2={thY} stroke={accent} strokeWidth={1.4} strokeDasharray="5 4" opacity={0.85} />
+        <g>
+          <line x1={padL} y1={thY} x2={padL + plotW} y2={thY} stroke={accent} strokeWidth={1.4} strokeDasharray="5 4" opacity={0.85} />
+          {thresholdLabel && <text x={padL + plotW - 3} y={thY - 3} textAnchor="end" fill={accent} fontSize="9" fontFamily="var(--mono)">{thresholdLabel}</text>}
+        </g>
       )}
 
-      <text x={padL + plotW / 2} y={height - 5} textAnchor="middle" fill="var(--t2)" fontSize="9.5" fontFamily="var(--mono)">reachability ordering →</text>
+      {ranges?.map(([s, e], k) => {
+        const x1 = padL + s * bw, x2 = padL + (e + 1) * bw;
+        const y = padT + plotH + 4 + (k % 2) * 3;
+        return <line key={k} x1={x1 + 0.5} y1={y} x2={x2 - 0.5} y2={y} stroke="var(--t1)" strokeWidth={1.4} opacity={0.7} />;
+      })}
+
+      <text x={padL + plotW / 2} y={height - 4} textAnchor="middle" fill="var(--t2)" fontSize="9.5" fontFamily="var(--mono)">reachability ordering →</text>
       <text x={11} y={padT + plotH / 2} textAnchor="middle" fill="var(--t2)" fontSize="9.5" fontFamily="var(--mono)" transform={`rotate(-90 11 ${padT + plotH / 2})`}>reach-dist</text>
     </svg>
   );

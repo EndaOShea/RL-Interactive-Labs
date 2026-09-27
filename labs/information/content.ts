@@ -18,9 +18,9 @@ export const ENTROPY_CONTENT: LabContent = {
     },
     {
       heading: 'Maximum & minimum entropy',
-      body: 'Entropy is maximised by the uniform distribution — when every outcome is equally likely there is nothing to predict, and H = log N (log of the number of outcomes). It falls as the distribution concentrates, reaching exactly 0 when one outcome has probability 1 (a certain source carries no information). Loading the die, or pushing a coin toward heads, always lowers H below its uniform ceiling.',
+      body: 'Entropy is maximised by the uniform distribution — when every outcome is equally likely there is nothing to predict, and H = log N, where N counts the possible outcomes (those with p > 0: a face that can never come up adds no uncertainty, so a fair coin has H = H_max = 1 bit even when drawn on a six-slot "die"). It falls as the distribution concentrates, reaching exactly 0 when one outcome has probability 1 (a certain source carries no information). Loading the die, or pushing a coin toward heads, always lowers H below its uniform ceiling.',
       details: [
-        { label: 'uniform = max', text: 'H = log N for N equally-likely outcomes; the most uncertain, least compressible source.' },
+        { label: 'uniform = max', text: 'H = log N for N equally-likely outcomes; the most uncertain, least compressible source. The lab\'s H_max and efficiency H/H_max use the N outcomes with p > 0.' },
         { label: 'certainty = 0', text: 'If one p=1 and the rest 0, every draw is known in advance, so H = 0 and no bits are needed.' },
         { label: 'fair coin = 1 bit', text: 'Two equiprobable outcomes give exactly 1 bit — the canonical unit of information.' },
       ],
@@ -58,7 +58,8 @@ export const KL_CONTENT: LabContent = {
       details: [
         { label: 'KL = H(p,q) − H(p)', text: 'Cross-entropy minus entropy: the avoidable bits. Training drives this to 0 even though H(p) cannot be reduced.' },
         { label: 'KL ≥ 0', text: 'Gibbs\' inequality: q can never beat the true distribution\'s own code. Equality iff q = p everywhere.' },
-        { label: 'forward vs reverse', text: 'Forward (p‖q) spreads q to cover all of p; reverse (q‖p), used in variational inference, picks a single mode.' },
+        { label: 'forward vs reverse', text: 'Forward (p‖q) spreads q to cover all of p; reverse (q‖p), used in variational inference, picks a single mode. In the asymmetry demo (flat p, q piled on A) forward KL is 3.05 bits but reverse only 2.01.' },
+        { label: 'the log-0 trap', text: 'If q(x) = 0 for an outcome with p(x) > 0, then H(p,q) = KL(p‖q) = ∞: that outcome would need an infinitely long codeword. Drag a q-weight to 0 to see it; KL(q‖p) stays finite.' },
       ],
     },
     {
@@ -83,8 +84,9 @@ export const SOURCE_CODING_CONTENT: LabContent = {
       heading: 'Prefix codes & Huffman',
       body: 'A prefix (instantaneous) code assigns each symbol a binary string such that no codeword is a prefix of another, so a stream decodes uniquely with no separators. Huffman\'s algorithm builds the optimal one: repeatedly merge the two least-probable nodes into a parent until a single tree remains, then read 0/1 off the edges to each leaf. Frequent symbols sit near the root and get short codes; rare symbols sit deep and get long ones.',
       details: [
-        { label: 'prefix-free', text: 'No codeword prefixes another → instantaneous decoding, and Kraft\'s inequality Σ 2^(−lᵢ) ≤ 1 holds.' },
+        { label: 'prefix-free', text: 'No codeword prefixes another → instantaneous decoding, and Kraft\'s inequality Σ 2^(−lᵢ) ≤ 1 holds — with equality for a Huffman code, whose tree is a full binary tree.' },
         { label: 'greedy merge', text: 'Combine the two smallest probabilities each step; this greedy choice is provably optimal for symbol codes.' },
+        { label: 'L = Σ merge probabilities', text: 'Each merge puts one more bit on every codeword beneath it, so it adds its parent probability to L = Σ pᵢlᵢ — the lab\'s running "L so far" reaches L exactly at the last merge.' },
         { label: 'variable length', text: 'Common symbols get fewer bits, rare ones more — the average shrinks below a fixed-length code.' },
       ],
     },
@@ -93,7 +95,7 @@ export const SOURCE_CODING_CONTENT: LabContent = {
       body: 'The average code length L = Σ pᵢ·lᵢ cannot go below the entropy H(p) — Shannon\'s source-coding theorem. Huffman is optimal among prefix codes and provably satisfies H ≤ L < H + 1: it is within one bit of the limit per symbol. The efficiency H/L tells you how close you are; it equals 1 exactly when every probability is a power of ½ (so codeword lengths −log₂ pᵢ are integers). The slack vs a fixed-length code, ⌈log₂ N⌉ bits/symbol, is the compression you gain by exploiting a skewed distribution.',
       details: [
         { label: 'L ≥ H', text: 'No uniquely-decodable code averages fewer than H bits/symbol — entropy is the fundamental compression limit.' },
-        { label: 'within 1 bit', text: 'Huffman achieves L < H + 1; the gap comes from rounding ideal lengths −log₂ pᵢ up to integers.' },
+        { label: 'within 1 bit', text: 'Huffman achieves L < H + 1; the gap comes from rounding ideal lengths −log₂ pᵢ to integers. Shannon\'s lengths ⌈−log₂ pᵢ⌉ also satisfy Kraft and land within one bit of H, but Huffman is never longer (the lab shows both).' },
         { label: 'block coding', text: 'Coding blocks of k symbols at once drives L/k → H; arithmetic coding reaches the limit without integer-length waste.' },
       ],
     },

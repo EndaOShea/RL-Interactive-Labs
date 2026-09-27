@@ -1,236 +1,215 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import ScatterPlot, { ScatterPoint } from '../../components/labkit/viz/ScatterPlot';
-import { AlgoPill, ParamSlider, RunControls, MonoLabel, GOOD, BAD } from '../../components/stage/primitives';
+import FunctionPlot, { PlotSeries } from '../../components/labkit/viz/FunctionPlot';
+import { AlgoPill, ParamSlider, RunControls, MonoLabel, Legend, GOOD, BAD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { clamp01, randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { dropoutPython } from './python';
+import { createDropoutRun, stepDropoutRun, probAt, DROPOUT_DEFAULTS } from './dropoutSim';
+import type { DropoutConfig, DropoutRun, Arm, Metrics } from './dropoutSim';
 
 const ACCENT = '#f43f5e';
-const MAX_EPOCHS = 150;
-const H = 48;            // fixed random hidden ReLU features
-const LR = 0.5;          // readout learning rate
+const EPOCHS_PER_TICK = 2;
+const GAP_BAD = 0.15;          // chip: a train–val accuracy gap of 15 points or more is flagged
+const GRID = 40;               // boundary-length measurement grid (GRID × GRID cells)
 
-// XOR-style 4 clusters, deliberately NOISY so a flexible model can overfit and a
-// jagged boundary forms with no dropout. Classes [0,1,1,0] make it non-linear.
-const CENTERS = [{ x: 0.3, y: 0.32 }, { x: 0.7, y: 0.32 }, { x: 0.3, y: 0.7 }, { x: 0.7, y: 0.7 }];
-const CLS = [0, 1, 1, 0];
+/** Number of adjacent cell pairs on a GRID×GRID lattice whose predicted class differs — a boundary-length proxy. */
+function boundaryEdges(arm: Arm): number {
+  const cls: number[] = [];
+  for (let j = 0; j < GRID; j++) for (let i = 0; i < GRID; i++) cls.push(probAt(arm.net, (i + 0.5) / GRID, (j + 0.5) / GRID) >= 0.5 ? 1 : 0);
+  let e = 0;
+  for (let j = 0; j < GRID; j++) for (let i = 0; i < GRID; i++) {
+    const c = cls[j * GRID + i];
+    if (i + 1 < GRID && cls[j * GRID + i + 1] !== c) e++;
+    if (j + 1 < GRID && cls[(j + 1) * GRID + i] !== c) e++;
+  }
+  return e;
+}
 
-interface DPt { x: number; y: number; y01: number; train: boolean; }
-const makeData = (perCluster: number): DPt[] =>
-  CENTERS.flatMap((c, ci) =>
-    Array.from({ length: perCluster }, () => ({
-      x: clamp01(c.x + randn() * 0.11),
-      y: clamp01(c.y + randn() * 0.11),
-      y01: CLS[ci],
-      train: Math.random() < 0.6,   // ~60% train / 40% validation
-    })),
-  );
-
-// Fixed random hidden layer: h_j(x,y) = max(0, a_j·x + b_j·y + c_j).
-interface Feat { a: number; b: number; c: number; }
-const makeFeatures = (): Feat[] =>
-  Array.from({ length: H }, () => ({ a: randn() * 2.5, b: randn() * 2.5, c: randn() }));
-
-const hidden = (feats: Feat[], x: number, y: number): number[] =>
-  feats.map((f) => Math.max(0, f.a * x + f.b * y + f.c));
-
-const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
+const fmtPct = (v: number) => `${(v * 100).toFixed(0)}%`;
+const last = (a: Arm): Metrics => a.history[a.history.length - 1]!;
 
 const DropoutLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
-  const [perCluster, setPerCluster] = useState(28);
-  const [dropoutRate, setDropoutRate] = useState(0.3);   // p ∈ [0, 0.6]
-  const [data, setData] = useState<DPt[]>(() => makeData(28));
-
-  // Fixed random features (regenerated only on "New data"); trainable readout.
-  const featsRef = useRef<Feat[]>(makeFeatures());
-  const [weights, setWeights] = useState<number[]>(() => new Array(H).fill(0));
-  const [bias, setBias] = useState(0);
+  const [perCluster, setPerCluster] = useState(DROPOUT_DEFAULTS.perCluster);
+  const [dropoutRate, setDropoutRate] = useState(0.3);
+  const [seed, setSeed] = useState(DROPOUT_DEFAULTS.seed);
   const [epoch, setEpoch] = useState(0);
-  const [valSeries, setValSeries] = useState<number[]>([]);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const [version, setVersion] = useState(0);
+  const runRef = useRef<DropoutRun | null>(null);
 
-  // EVAL probability — all features, NO dropout mask (inference behaviour).
-  const probAt = (w: number[], b: number, x: number, y: number): number => {
-    const h = hidden(featsRef.current, x, y);
-    let z = b;
-    for (let j = 0; j < H; j++) z += w[j] * h[j];
-    return sigmoid(z);
+  const cfg: DropoutConfig = useMemo(() => ({
+    perCluster, noise: DROPOUT_DEFAULTS.noise, hidden: DROPOUT_DEFAULTS.hidden, lr: DROPOUT_DEFAULTS.lr, seed,
+  }), [perCluster, seed]);
+
+  // Rebuild both arms (same data, same initial weights) whenever the setup changes.
+  useEffect(() => {
+    runRef.current = createDropoutRun(cfg, dropoutRate);
+    setEpoch(0);
+    setLastLog(null);
+    setVersion((v) => v + 1);
+  }, [cfg, dropoutRate]);
+
+  const run = runRef.current;
+
+  const summary = (r: DropoutRun): string => {
+    const a = last(r.plain), b = last(r.drop);
+    const gapA = a.trainAcc - a.valAcc, gapB = b.trainAcc - b.valAcc;
+    const minA = Math.min(...r.plain.history.map((h) => h.valLoss));
+    const argA = r.plain.history.findIndex((h) => h.valLoss === minA);
+    const eA = boundaryEdges(r.plain), eB = boundaryEdges(r.drop);
+    const loss = b.valLoss < a.valLoss
+      ? `Validation loss ends at ${a.valLoss.toFixed(2)} without dropout versus ${b.valLoss.toFixed(2)} with p = ${r.drop.p}.`
+      : `This time dropout did not lower the validation loss (${a.valLoss.toFixed(2)} without, ${b.valLoss.toFixed(2)} with p = ${r.drop.p}).`;
+    const rise = a.valLoss - minA > 0.05
+      ? ` The no-dropout net's validation loss bottomed out at ${minA.toFixed(2)} around epoch ${argA} and has climbed since, while its training loss kept falling to ${a.trainLoss.toFixed(2)} — it is memorising the training points.`
+      : '';
+    const gap = gapB < gapA
+      ? ` The train–validation accuracy gap is ${fmtPct(gapA)} without dropout and ${fmtPct(gapB)} with it.`
+      : ` The accuracy gap did not shrink on this data (${fmtPct(gapA)} without, ${fmtPct(gapB)} with) — with only ${r.data.Nva} validation points, accuracy is a noisy measure; the loss is the steadier signal.`;
+    const edges = ` The no-dropout decision boundary is ${eA > eB ? `longer and more contorted (${eA} vs ${eB} boundary cells on a ${GRID}×${GRID} grid)` : `not longer this time (${eA} vs ${eB} boundary cells)`}.`;
+    return `${loss}${rise}${gap}${edges}`;
   };
-
-  const accuracy = (w: number[], b: number, train: boolean): number => {
-    const pts = data.filter((p) => p.train === train);
-    if (!pts.length) return 0;
-    let ok = 0;
-    for (const p of pts) if ((probAt(w, b, p.x, p.y) >= 0.5 ? 1 : 0) === p.y01) ok++;
-    return ok / pts.length;
-  };
-
-  const metrics = useMemo(() => {
-    const tr = accuracy(weights, bias, true);
-    const va = accuracy(weights, bias, false);
-    return { tr, va, gap: tr - va };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weights, bias, data, version]);
 
   const step = () => {
-    if (epoch >= MAX_EPOCHS) { sim.pause(); narrateDone(); return; }
-    const feats = featsRef.current;
-    const keep = 1 - dropoutRate;
-    const w = weights.slice();
-    let b = bias;
-    const train = data.filter((p) => p.train);
-
-    // One epoch of logistic-loss gradient descent over the training split, with
-    // inverted dropout applied to the hidden features on each forward pass.
-    for (const p of train) {
-      const h = hidden(feats, p.x, p.y);
-      // Per-example Bernoulli(keep) mask / keep (inverted dropout). p=0 → identity.
-      const hd = h.map((hj) => (dropoutRate > 0 && Math.random() >= keep ? 0 : hj / keep));
-      let z = b;
-      for (let j = 0; j < H; j++) z += w[j] * hd[j];
-      const err = sigmoid(z) - p.y01;        // ∂(logistic loss)/∂z
-      for (let j = 0; j < H; j++) w[j] -= LR * err * hd[j] / train.length;
-      b -= LR * err / train.length;
-    }
-
-    setWeights(w);
-    setBias(b);
-    const e = epoch + 1;
-    setEpoch(e);
-
-    const tr = accuracy(w, b, true);
-    const va = accuracy(w, b, false);
-    const gap = tr - va;
-    setValSeries((s) => [...s, va].slice(-60));
+    const r = runRef.current;
+    if (!r) return;
+    if (r.epoch >= DROPOUT_DEFAULTS.maxEpochs) { sim.pause(); return; }
+    for (let k = 0; k < EPOCHS_PER_TICK && r.epoch < DROPOUT_DEFAULTS.maxEpochs; k++) stepDropoutRun(r);
+    setEpoch(r.epoch);
+    const a = last(r.plain), b = last(r.drop);
 
     narration.narratePhase(
-      `run:${dropoutRate > 0 ? 'dropout' : 'plain'}`,
-      dropoutRate > 0
-        ? `The challenge here: fit this noisy, non-linear data without memorising the noise — without the boundary contorting around individual points. Dropout randomly zeroes hidden units on every training step, so the readout can't rely on any single feature. That is like averaging a huge ensemble of thinned sub-networks, and it pushes the decision boundary smoother. At test time dropout is switched off and all units are used. Dropout is a staple regulariser in deep nets for vision, speech and language.`
-        : `The challenge here: fit this noisy, non-linear data without memorising the noise — without the boundary contorting around individual points. With dropout at zero the network trains every unit on every step, so it is free to memorise individual noisy points and the boundary becomes jagged, overfitting the training set. Watch the gap between training and validation accuracy: turn dropout up and that gap should shrink. Dropout is a staple regulariser in deep nets for vision, speech and language.`,
+      `run:${r.drop.p}`,
+      `The challenge here: fit noisy, overlapping data without memorising the noise. Two copies of the same 2-64-64-1 network, with the same starting weights, train on the same points: the left one plainly, the right one with dropout at rate ${r.drop.p} — every training step zeroes each hidden unit with that probability and scales the survivors up by one over one minus p, so no unit can rely on particular partners. At evaluation dropout is off and every unit is used. Watch the loss curves: solid lines are validation loss, dashed are training loss.`,
     );
+    if (r.epoch >= DROPOUT_DEFAULTS.maxEpochs) {
+      sim.pause();
+      narration.narratePhase(`done:${r.drop.p}`, `Training is complete after ${r.epoch} epochs. ${summary(r)}`);
+    }
 
     setLastLog({
       algorithm: 'Dropout',
-      stepDescription: `Epoch ${e}: forward pass with per-unit Bernoulli mask (p=${dropoutRate}), logistic-loss gradient step on the readout`,
-      formula: 'hᵢ ← hᵢ · Bernoulli(1−p)/(1−p)   (train only)',
-      variables: { epoch: e, p: dropoutRate, 'train acc': +tr.toFixed(3), 'val acc': +va.toFixed(3), gap: +gap.toFixed(3) },
-      result: `train ${(tr * 100).toFixed(0)}% · val ${(va * 100).toFixed(0)}% · gap ${(gap * 100).toFixed(0)}%`,
+      stepDescription: `Epoch ${r.epoch}: one full-batch Adam step for each net; the right net samples a fresh Bernoulli mask per hidden unit and example (p = ${r.drop.p})`,
+      formula: 'train: h = ReLU(Wx + b) ⊙ m,  m ∈ {0, 1/(1−p)};   eval: h = ReLU(Wx + b)',
+      variables: {
+        epoch: r.epoch, p: r.drop.p,
+        'val loss p=0': +a.valLoss.toFixed(3), [`val loss p=${r.drop.p}`]: +b.valLoss.toFixed(3),
+        'gap p=0': +(a.trainAcc - a.valAcc).toFixed(3), [`gap p=${r.drop.p}`]: +(b.trainAcc - b.valAcc).toFixed(3),
+      },
+      result: `p=0: train ${fmtPct(a.trainAcc)} · val ${fmtPct(a.valAcc)} · val loss ${a.valLoss.toFixed(3)}  |  p=${r.drop.p}: train ${fmtPct(b.trainAcc)} · val ${fmtPct(b.valAcc)} · val loss ${b.valLoss.toFixed(3)}`,
       mathDetails: {
         params: [
-          { label: 'dropout rate p', info: `${dropoutRate}. Each hidden unit is kept with probability 1−p and zeroed otherwise, then surviving units are scaled by 1/(1−p) so the expected activation is unchanged (inverted dropout).` },
-          { label: 'ensemble view', info: 'Every training step samples a different thinned sub-network. Over many steps the readout learns weights that work across all of them — effectively averaging an exponential ensemble of networks, which regularises.' },
-          { label: 'eval / inference', info: 'At evaluation (the decision field and validation accuracy here) dropout is disabled: all units are active and unscaled, giving the deterministic average prediction.' },
-          { label: 'train–val gap', info: `${(gap * 100).toFixed(0)}%. A large gap signals overfitting. Increasing p shrinks the gap by stopping the network from depending on individual noisy points.` },
+          { label: 'inverted dropout', info: `During training each hidden unit is kept with probability 1−p = ${(1 - r.drop.p).toFixed(2)} and zeroed otherwise; survivors are scaled by 1/(1−p) so the expected activation is unchanged. At evaluation (decision fields, accuracies, losses shown) nothing is dropped or rescaled.` },
+          { label: 'setup', info: `Both nets: 2 → 64 → 64 → 1 (ReLU, sigmoid output, binary cross-entropy), identical seeded initial weights, full-batch Adam (η = ${DROPOUT_DEFAULTS.lr}). Data: 4 XOR clusters × ${perCluster} points, std ${DROPOUT_DEFAULTS.noise} (overlapping), ${r.data.Ntr} train / ${r.data.Nva} validation (seed ${seed}).` },
+          { label: 'ensemble view', info: 'Each step trains a different thinned sub-network that shares weights with the rest; the full net at evaluation behaves like an average over those sub-networks.' },
+          { label: 'train–val gap', info: `p=0: ${fmtPct(a.trainAcc - a.valAcc)} · p=${r.drop.p}: ${fmtPct(b.trainAcc - b.valAcc)} (flagged at ${GAP_BAD * 100}%). Validation loss is the steadier overfitting signal on ${r.data.Nva} validation points.` },
         ],
-        implication: dropoutRate > 0
-          ? 'Dropout active — the boundary stays smooth and the train–validation gap stays small.'
-          : 'No dropout — the boundary can wrap around individual noisy points, widening the train–validation gap.',
+        implication: b.valLoss < a.valLoss
+          ? `At epoch ${r.epoch} dropout's validation loss is lower (${b.valLoss.toFixed(3)} vs ${a.valLoss.toFixed(3)}).`
+          : `At epoch ${r.epoch} dropout's validation loss is not lower yet (${b.valLoss.toFixed(3)} vs ${a.valLoss.toFixed(3)}).`,
       },
     });
   };
 
-  const narrateDone = () => {
-    narration.narratePhase(
-      `done:${dropoutRate > 0 ? 'dropout' : 'plain'}`,
-      dropoutRate > 0
-        ? `Training has converged. With dropout on, the decision boundary stayed smooth and the gap between training and validation accuracy is small — the model generalised rather than memorised.`
-        : `Training has converged. With no dropout the boundary hugged individual noisy points and training accuracy ran ahead of validation accuracy. Raise the dropout rate and run again to close that gap.`,
-    );
-  };
+  const sim = useSimLoop(step, { initialSpeed: 40 });
 
-  const sim = useSimLoop(step, { initialSpeed: 80 });
-
+  const halt = () => { sim.stop(); narration.cancel(); };
   const resetTraining = () => {
-    sim.stop();
-    narration.cancel();
-    setWeights(new Array(H).fill(0));
-    setBias(0);
+    halt();
+    runRef.current = createDropoutRun(cfg, dropoutRate);
     setEpoch(0);
-    setValSeries([]);
     setLastLog(null);
     setVersion((v) => v + 1);
   };
 
-  const regen = (n = perCluster) => {
-    sim.stop();
-    narration.cancel();
-    featsRef.current = makeFeatures();
-    setData(makeData(n));
-    setWeights(new Array(H).fill(0));
-    setBias(0);
-    setEpoch(0);
-    setValSeries([]);
-    setLastLog(null);
-    setVersion((v) => v + 1);
-  };
-
-  const setPreset = (p: number) => { setDropoutRate(p); resetTraining(); };
-
-  const fieldKey = `${epoch}-${dropoutRate}-${version}`;
-  // Show TRAIN points (the set the model fits / can overfit).
-  const plotPoints: ScatterPoint[] = data
-    .filter((p) => p.train)
-    .map((p) => ({ x: p.x, y: p.y, cls: p.y01 }));
-
-  const gapColor = metrics.gap >= 0.18 ? BAD : 'var(--t0)';
+  // ---- visuals ------------------------------------------------------------
+  const points: ScatterPoint[] = run
+    ? [
+      ...Array.from({ length: run.data.Nva }, (_, i) => ({ x: run.data.Xva[2 * i]!, y: run.data.Xva[2 * i + 1]!, cls: run.data.Yva[i]!, faint: true })),
+      ...Array.from({ length: run.data.Ntr }, (_, i) => ({ x: run.data.Xtr[2 * i]!, y: run.data.Xtr[2 * i + 1]!, cls: run.data.Ytr[i]! })),
+    ]
+    : [];
+  const fieldKey = `${version}-${epoch}`;
+  const hist = (a: Arm | undefined, key: 'trainLoss' | 'valLoss') => (a ? a.history.map((h, i) => ({ x: i, y: h[key] })) : []);
+  const maxLoss = run ? Math.max(0.8, ...run.plain.history.map((h) => h.valLoss), ...run.drop.history.map((h) => h.valLoss)) : 1;
+  const lossTop = Math.ceil(maxLoss * 5) / 5;
+  const lossSeries: PlotSeries[] = [
+    { points: hist(run?.plain, 'trainLoss'), color: BAD, width: 1.4, dash: true },
+    { points: hist(run?.plain, 'valLoss'), color: BAD, width: 2.2 },
+    { points: hist(run?.drop, 'trainLoss'), color: GOOD, width: 1.4, dash: true },
+    { points: hist(run?.drop, 'valLoss'), color: GOOD, width: 2.2 },
+  ];
+  const a = run ? last(run.plain) : null;
+  const b = run ? last(run.drop) : null;
+  const gapA = a ? a.trainAcc - a.valAcc : 0;
+  const gapB = b ? b.trainAcc - b.valAcc : 0;
+  const caption = (txt: string, color: string) => (
+    <div style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color, margin: '0 0 4px 4px' }}>{txt}</div>
+  );
 
   return (
     <LabStage
       descriptor={descriptor}
       running={sim.isPlaying}
       stats={[
-        { label: 'EPOCH', value: epoch },
-        { label: 'TRAIN ACC', value: `${(metrics.tr * 100).toFixed(0)}%`, color: GOOD },
-        { label: 'VAL ACC', value: `${(metrics.va * 100).toFixed(0)}%` },
-        { label: 'GAP', value: `${(metrics.gap * 100).toFixed(0)}%`, color: gapColor },
+        { label: 'EPOCH', value: `${epoch}/${DROPOUT_DEFAULTS.maxEpochs}` },
+        { label: 'GAP p=0', value: a ? fmtPct(gapA) : '—', color: a && gapA >= GAP_BAD ? BAD : undefined },
+        { label: `GAP p=${dropoutRate}`, value: b ? fmtPct(gapB) : '—', color: b && gapB >= GAP_BAD ? BAD : undefined },
+        { label: 'VAL LOSS 0 | p', value: a && b ? `${a.valLoss.toFixed(2)} | ${b.valLoss.toFixed(2)}` : '—', color: a && b ? (b.valLoss < a.valLoss ? GOOD : BAD) : undefined },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, dropoutPython(dropoutRate, epoch))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, dropoutPython({ p: dropoutRate, perCluster, seed }))}
       grid={(
-        <ScatterPlot
-          width={440} height={440}
-          points={plotPoints}
-          classify={(x, y) => (probAt(weights, bias, x, y) >= 0.5 ? 1 : 0)}
-          fieldKey={fieldKey}
-          xLabel="x₁" yLabel="x₂"
-        />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div>
+              {caption(`p = 0 · no dropout · val ${a ? fmtPct(a.valAcc) : '—'}`, 'var(--bad)')}
+              <ScatterPlot width={292} height={262} points={points} fieldKey={`${fieldKey}-a`} fieldResolution={30}
+                classify={run ? (x, y) => (probAt(run.plain.net, x, y) >= 0.5 ? 1 : 0) : undefined} xLabel="x₁" yLabel="x₂" />
+            </div>
+            <div>
+              {caption(`p = ${dropoutRate} · dropout · val ${b ? fmtPct(b.valAcc) : '—'}`, 'var(--good)')}
+              <ScatterPlot width={292} height={262} points={points} fieldKey={`${fieldKey}-b`} fieldResolution={30}
+                classify={run ? (x, y) => (probAt(run.drop.net, x, y) >= 0.5 ? 1 : 0) : undefined} xLabel="x₁" yLabel="x₂" />
+            </div>
+          </div>
+          <FunctionPlot width={596} height={196} series={lossSeries} domain={[0, DROPOUT_DEFAULTS.maxEpochs]} range={[0, lossTop]} xLabel="epoch" yLabel="BCE loss" />
+        </div>
       )}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={resetTraining} onNewMap={() => regen()} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      legend={<Legend title="LOSS CURVES" items={[{ color: BAD, label: 'p = 0' }, { color: GOOD, label: `p = ${dropoutRate}` }, { color: 'var(--t2)', label: 'solid val · dashed train · faint dots = val points' }]} />}
+      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={resetTraining} onNewMap={() => { halt(); setSeed((s) => s + 1); }} speed={sim.speed} onSpeed={sim.setSpeed} />}
       narration={narration}
-      rewardLabel="VALIDATION ACC"
-      rewardValue={`${(metrics.va * 100).toFixed(0)}%`}
-      rewardSeries={valSeries}
+      rewardLabel={`VAL LOSS · p = ${dropoutRate}`}
+      rewardValue={b ? b.valLoss.toFixed(3) : '—'}
+      rewardSeries={run ? run.drop.history.map((h) => h.valLoss) : undefined}
       lastLog={lastLog}
-      contextInsight={`A small classifier with ${H} fixed random ReLU features is trained on noisy XOR-style data. Dropout randomly zeroes hidden units during training so no single feature can dominate — smoothing the boundary and shrinking the train–validation accuracy gap. At p=0 the model overfits; turn p up and the gap closes.`}
+      contextInsight={`The same 2-64-64-1 network, from the same starting weights, trained on the same noisy XOR points — left without dropout, right with inverted dropout at p = ${dropoutRate} on both hidden layers. Dots are training points (faint = validation). On the default data the no-dropout net's validation loss turns back up while its training loss keeps falling (memorisation), and its boundary grows more contorted; dropout keeps the validation loss lower. Accuracy on ${run ? run.data.Nva : 'a few dozen'} validation points is noisy — read the loss curves.`}
       params={(
         <ParamsWrap>
-          <ParamsHead title="Dropout" hint="Run = one training epoch; dropout active on train only." />
+          <ParamsHead title="Dropout" hint="Run = full-batch epochs for both nets; dropout acts during training only." />
           <div>
-            <MonoLabel style={{ marginBottom: 9 }}>Presets</MonoLabel>
+            <MonoLabel style={{ marginBottom: 9 }}>Right-hand net: dropout rate</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
-              <AlgoPill active={dropoutRate === 0} accent={ACCENT} onClick={() => setPreset(0)}>No dropout (p=0)</AlgoPill>
-              <AlgoPill active={dropoutRate === 0.3} accent={ACCENT} onClick={() => setPreset(0.3)}>Dropout 0.3</AlgoPill>
+              <AlgoPill active={dropoutRate === 0.3} accent={ACCENT} onClick={() => { halt(); setDropoutRate(0.3); }}>p = 0.3</AlgoPill>
+              <AlgoPill active={dropoutRate === 0.5} accent={ACCENT} onClick={() => { halt(); setDropoutRate(0.5); }}>p = 0.5</AlgoPill>
             </div>
             <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '8px 0 0', lineHeight: 1.5 }}>
-              {dropoutRate > 0
-                ? 'Units are randomly dropped each step → the boundary stays smooth and the train–val gap stays small.'
-                : 'Every unit trains every step → the boundary can wrap noisy points and overfit (large train–val gap).'}
+              The left net always trains with p = 0, from the same initial weights on the same data.
             </p>
           </div>
-          <ParamSlider name="Dropout rate p" value={dropoutRate.toFixed(2)} min={0} max={0.6} step={0.05} current={dropoutRate} onChange={(v) => { resetTraining(); setDropoutRate(v); }} hint="fraction of units zeroed per train step" />
-          <ParamSlider name="Points / cluster" value={String(perCluster)} min={16} max={40} step={2} current={perCluster} onChange={(v) => { setPerCluster(v); regen(v); }} hint="dataset size / noise density" />
-          <ParamSlider name="Speed" value={`${sim.speed}ms`} min={20} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint="epoch interval" />
+          <ParamSlider name="Dropout rate p" value={dropoutRate.toFixed(2)} min={0.05} max={0.6} step={0.05} current={dropoutRate} onChange={(v) => { halt(); setDropoutRate(Math.round(v * 100) / 100); }} hint="fraction of hidden units zeroed per training step" />
+          <ParamSlider name="Points / cluster" value={String(perCluster)} min={16} max={40} step={2} current={perCluster} onChange={(v) => { halt(); setPerCluster(v); }} hint="dataset size (60% train / 40% validation)" />
+          <ParamSlider name="Speed" value={`${sim.speed}ms`} min={20} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint={`interval per ${EPOCHS_PER_TICK} epochs`} />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'Dropout', dropoutRate, hiddenFeatures: H, epoch, trainAcc: +metrics.tr.toFixed(3), valAcc: +metrics.va.toFixed(3), gap: +metrics.gap.toFixed(3) }}
+      currentParams={{ algorithm: 'Dropout (side by side)', dropoutRate, network: '2-64-64-1 ReLU', seed, perCluster, epoch, noDropout: a ? { trainAcc: +a.trainAcc.toFixed(3), valAcc: +a.valAcc.toFixed(3), valLoss: +a.valLoss.toFixed(3) } : null, withDropout: b ? { trainAcc: +b.trainAcc.toFixed(3), valAcc: +b.valAcc.toFixed(3), valLoss: +b.valLoss.toFixed(3) } : null }}
       apiPanel={apiPanel}
     />
   );

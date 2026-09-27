@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
@@ -59,6 +59,8 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
   const [sel, setSel] = useState<Sel>({ layer: 2, unit: 0 });
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const [prevLoss, setPrevLoss] = useState<number | null>(null);
+  // the pass that produced the last Apply (pre-step forward/backward + the recomputed forward)
+  const beforeRef = useRef<{ fwd: ForwardResult; bwd: BackwardResult; after: ForwardResult } | null>(null);
 
   const x = INPUT_PRESETS[presetIdx].x;
 
@@ -89,31 +91,64 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     setStepN(0);
     setPrevLoss(null);
     setLastLog(null);
+    beforeRef.current = null;
   };
 
-  // ----- chain-rule log for the inspected weight ----------------------------
-  const logForInspected = (f: ForwardResult, g: BackwardResult, ph: Phase, s: Sel = sel) => {
-    // inspected weight: into selected unit `s.unit` of layer (s.layer+1),
-    // from input unit 0 of layer s.layer. Use the first incoming weight.
-    const l = s.layer;                   // weight-matrix index 0..2
-    const j = Math.min(s.unit, W[l].length - 1);
-    const i = 0;                         // first incoming connection
-    const dOut = (f.yhat - target);
-    const aIn = f.a[l][i];
-    const delta = g.delta[l + 1][j];
-    const dW = g.gW[l][j][i];
-    const zUnit = f.z[l + 1][j];
-    const dz = dactFromA(activation, f.a[l + 1][j], zUnit);
+  // ----- Math-tab logs: each shows ONLY what has been computed so far -------
+  // Forward micro-step for neuron (layer l ≥ 1, unit u): z = Σ w·a + b → a = act(z).
+  const forwardLog = (f: ForwardResult, l: number, u: number): SimulationUpdate => {
+    const row = W[l - 1]?.[u] ?? [];
+    const aIn = f.a[l - 1] ?? [];
+    const z = f.z[l]?.[u] ?? 0;
+    const a = f.a[l]?.[u] ?? 0;
+    const bias = B[l - 1]?.[u] ?? 0;
+    const slope = dactFromA(activation, a, z);
+    const isOutput = l === SIZES.length - 1;
+    const terms = row.map((w, i) => `${fmt(w, 2)}·${fmt(aIn[i] ?? 0, 2)}`).join(' + ');
+    return {
+      algorithm: 'Backpropagation · forward',
+      stepDescription: isOutput
+        ? `Forward pass complete: the output neuron gives ŷ = ${fmt(f.yhat)}, so the loss is L = ½(ŷ − y)² = ${fmt(f.loss)}.`
+        : `Forward: neuron L${l}·u${u} takes the weighted sum of layer ${l - 1}, then applies ${activation}.`,
+      formula: isOutput ? 'z = Σᵢ wᵢ·aᵢ + b ;  ŷ = act(z) ;  L = ½(ŷ − y)²' : 'z = Σᵢ wᵢ·aᵢ + b ;  a = act(z)',
+      variables: {
+        neuron: `L${l}·u${u}`, z: +fmt(z), a: +fmt(a), 'act′(z)': +fmt(slope),
+        ...(isOutput ? { y: target, L: +fmt(f.loss, 4) } : {}),
+      },
+      result: `z = ${terms} + ${fmt(bias, 2)} = ${fmt(z)}  →  a = ${activation}(z) = ${fmt(a)}`,
+      mathDetails: {
+        params: [
+          { label: 'pre-activation', info: `z = Σ wᵢ·aᵢ + b over this neuron's ${row.length} inputs = ${fmt(z)}.` },
+          { label: 'activation', info: `a = ${activation}(z) = ${fmt(a)}. Its local slope act′(z) = ${fmt(slope)} is kept for the backward pass.` },
+          { label: 'not yet', info: isOutput
+            ? 'The loss is now known, so the backward pass can start: δ and ∂L/∂w are computed next, from the output back.'
+            : 'No δ or ∂L/∂w exists yet — they need the loss, which is only known once the forward pass reaches the output.' },
+        ],
+        implication: isOutput
+          ? `ŷ = ${fmt(f.yhat)} vs target y = ${target}: the error (ŷ − y) = ${fmt(f.yhat - target)} will seed the backward pass.`
+          : 'Values flow left → right; each layer needs only the layer before it.',
+      },
+    };
+  };
 
-    setLastLog({
-      algorithm: 'Backpropagation',
-      stepDescription:
-        ph === 'forward'
-          ? `Forward pass complete. ŷ = ${fmt(f.yhat)}, loss L = ½(ŷ−y)² = ${fmt(f.loss)}. Inspecting w(L${l}→${l + 1}) into unit ${j}.`
-          : ph === 'backward'
-            ? `Backward pass: δ propagated to every neuron. Chain rule for the inspected weight below.`
-            : `Step applied: W ← W − η·∂L/∂W. Forward recomputed; loss dropped.`,
-      formula: l === W.length - 1
+  // Backward micro-step: the δ of neuron (s.layer + 1, s.unit) and the gradient of its first incoming weight.
+  const backwardLog = (f: ForwardResult, g: BackwardResult, s: Sel): SimulationUpdate => {
+    const l = s.layer;                   // weight-matrix index 0..2
+    const j = Math.min(s.unit, (W[l]?.length ?? 1) - 1);
+    const i = 0;                         // first incoming connection
+    const dOut = f.yhat - target;
+    const aIn = f.a[l]?.[i] ?? 0;
+    const delta = g.delta[l + 1]?.[j] ?? 0;
+    const dW = g.gW[l]?.[j]?.[i] ?? 0;
+    const zUnit = f.z[l + 1]?.[j] ?? 0;
+    const dz = dactFromA(activation, f.a[l + 1]?.[j] ?? 0, zUnit);
+    const isOutput = l === W.length - 1;
+    return {
+      algorithm: 'Backpropagation · backward',
+      stepDescription: isOutput
+        ? `Backward: the output δ = (ŷ − y)·act′(z) for L${l + 1}·u${j}, then the gradient of its first incoming weight.`
+        : `Backward: δ for L${l + 1}·u${j} = downstream δ pulled back through Wᵀ, gated by act′(z); then the gradient of its first incoming weight.`,
+      formula: isOutput
         ? '∂L/∂w = δ · a_in     δ = (ŷ − y) · act′(z)'
         : '∂L/∂w = δ · a_in     δ = (Wₙₑₓₜᵀ δₙₑₓₜ) ⊙ act′(z)',
       variables: {
@@ -124,47 +159,82 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
         '∂L/∂w': +fmt(dW),
         η: lr,
       },
-      result: `∂L/∂w = ${fmt(delta)} × ${fmt(aIn)} = ${fmt(dW)}   →   Δw = −η·∂L/∂w = ${fmt(-lr * dW)}`,
+      result: `∂L/∂w = ${fmt(delta)} × ${fmt(aIn)} = ${fmt(dW)}   →   planned Δw = −η·∂L/∂w = ${fmt(-lr * dW)}`,
       mathDetails: {
         params: [
           { label: 'output error', info: `(ŷ − y) = ${fmt(f.yhat)} − ${target} = ${fmt(dOut)}. This seeds the output delta δ_out = (ŷ−y)·act′(z_out).` },
           { label: 'local gradient act′(z)', info: `${fmt(dz)} for activation "${activation}" at z = ${fmt(zUnit)}. Where the activation saturates this is ~0 and the gradient stalls.` },
-          { label: 'delta δ', info: l === W.length - 1
+          { label: 'delta δ', info: isOutput
             ? `${fmt(delta)} = (ŷ−y)·act′(z) — the OUTPUT unit's δ is seeded directly by the loss derivative (ŷ−y) times act′(z_out).`
             : `${fmt(delta)} = backprop of downstream deltas through Wₙₑₓₜᵀ, times act′(z) of this unit. δ is "how much this neuron's pre-activation affects the loss".` },
           { label: 'weight gradient', info: `∂L/∂w = δ · a_in = ${fmt(delta)} × ${fmt(aIn)} = ${fmt(dW)}. a_in = ${fmt(aIn)} is the activation flowing IN along this edge.` },
-          { label: 'update', info: `With η = ${lr}: w ← w − η·∂L/∂w, i.e. Δw = ${fmt(-lr * dW)}. Repeating this for every weight is one gradient-descent step that lowers L.` },
+          { label: 'update', info: `With η = ${lr}: w ← w − η·∂L/∂w, i.e. Δw = ${fmt(-lr * dW)}. Doing this for every weight is one gradient-descent step; it lowers L only if η is small enough.` },
         ],
-        implication: ph === 'applied'
-          ? 'After the step, the recomputed forward pass shows a strictly lower loss — gradient descent worked.'
-          : 'Every number here is computed from the live forward/backward pass — change the activation, target or input and watch δ and ∂L/∂w move.',
+        implication: 'Every number here is computed from the live forward/backward pass — change the activation, target or input and watch δ and ∂L/∂w move.',
       },
-    });
+    };
+  };
+
+  // Apply: compare the loss before and after the step; it can go UP when η overshoots.
+  const appliedLog = (before: ForwardResult, after: ForwardResult, g: BackwardResult, s: Sel): SimulationUpdate => {
+    const l = s.layer;
+    const j = Math.min(s.unit, (W[l]?.length ?? 1) - 1);
+    const i = 0;
+    const dW = g.gW[l]?.[j]?.[i] ?? 0;
+    const drop = before.loss - after.loss;
+    const passed = (before.yhat - target) * (after.yhat - target) < 0;   // ŷ jumped to the other side of y
+    return {
+      algorithm: 'Backpropagation · apply',
+      stepDescription: drop > 0
+        ? `Step applied: W ← W − η·∂L/∂W. Forward recomputed — the loss dropped by ${fmt(drop, 4)}.`
+        : drop < 0
+          ? `Step applied: W ← W − η·∂L/∂W. Forward recomputed — the loss ROSE by ${fmt(-drop, 4)}: η = ${lr} is too large${passed ? ' (ŷ overshot the target)' : ''}.`
+          : 'Step applied, but the loss did not change — every gradient was zero.',
+      formula: 'W ← W − η·∂L/∂W ;  b ← b − η·∂L/∂b',
+      variables: {
+        'L before': +fmt(before.loss, 4), 'L after': +fmt(after.loss, 4),
+        'ŷ before': +fmt(before.yhat), 'ŷ after': +fmt(after.yhat), y: target, η: lr,
+        [`Δw[L${l}·u${j}·in${i}]`]: +fmt(-lr * dW, 4),
+      },
+      result: `L: ${fmt(before.loss, 4)} → ${fmt(after.loss, 4)}   (${drop >= 0 ? '−' : '+'}${fmt(Math.abs(drop), 4)})`,
+      mathDetails: {
+        params: [
+          { label: 'the step', info: `Every weight moved by −η·∂L/∂w, using the gradients of the backward pass; the inspected weight moved by ${fmt(-lr * dW, 4)}.` },
+          { label: 'why it can rise', info: 'The gradient only describes the loss locally. A step along −∇L lowers L when η is small enough; a large step can overshoot — carry ŷ past the target and beyond — and raise the loss.' },
+          { label: 'what next', info: drop > 0 ? 'Run another pass to keep descending.' : `Lower η (now ${lr}) and step again.` },
+        ],
+        implication: drop > 0
+          ? `Gradient descent worked: ŷ moved from ${fmt(before.yhat)} to ${fmt(after.yhat)} toward y = ${target}, and the loss fell.`
+          : drop < 0
+            ? `The step was too large: ŷ went from ${fmt(before.yhat)} to ${fmt(after.yhat)} with y = ${target}${passed ? ' — past the target' : ''}, so the loss went UP. Gradient descent only guarantees a decrease for a small enough η.`
+            : 'No change — the gradient was zero (e.g. every unit on the path dead).',
+      },
+    };
   };
 
   // ----- phase machine: ONE neuron per micro-step ---------------------------
   // reveal the next forward neuron (compute its z → a)
   const advanceForward = () => {
-    if (fwdCursor >= NSTEPS) return false;
     const nx = FWD_SEQ[fwdCursor];
+    if (!nx) return false;
     const s: Sel = { layer: nx.layer - 1, unit: nx.unit };   // the weight INTO this neuron
     setFwdCursor((c) => c + 1);
-    setActive({ ...nx, dir: 'fwd' });
+    setActive({ layer: nx.layer, unit: nx.unit, dir: 'fwd' });
     setSel(s);
     setPhase('forward');
-    logForInspected(fwd, bwd, 'forward', s);
+    setLastLog(forwardLog(fwd, nx.layer, nx.unit));
     return true;
   };
   // reveal the next backward neuron (compute its δ)
   const advanceBackward = () => {
-    if (bwdCursor >= NSTEPS) return false;
     const nx = BWD_SEQ[bwdCursor];
+    if (!nx) return false;
     const s: Sel = { layer: nx.layer - 1, unit: nx.unit };
     setBwdCursor((c) => c + 1);
-    setActive({ ...nx, dir: 'bwd' });
+    setActive({ layer: nx.layer, unit: nx.unit, dir: 'bwd' });
     setSel(s);
     setPhase('backward');
-    logForInspected(fwd, bwd, 'backward', s);
+    setLastLog(backwardLog(fwd, bwd, s));
     return true;
   };
   const doApply = () => {
@@ -176,8 +246,8 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
     setPhase('applied');
     setActive(null);
     const f2 = forward(next.W, next.B, x, activation, target);
-    const g2 = backward(next.W, f2, activation, target);
-    logForInspected(f2, g2, 'applied');
+    beforeRef.current = { fwd, bwd, after: f2 };
+    setLastLog(appliedLog(fwd, f2, bwd, sel));
   };
   const startCycle = () => { setFwdCursor(0); setBwdCursor(0); setActive(null); setPhase('idle'); };
 
@@ -190,9 +260,11 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
   };
   const sim = useSimLoop(stepOnce, { initialSpeed: 800 });
 
-  const restart = () => { setPhase('idle'); setFwdCursor(0); setBwdCursor(0); setActive(null); setLastLog(null); setPrevLoss(null); };
+  const restart = () => { setPhase('idle'); setFwdCursor(0); setBwdCursor(0); setActive(null); setLastLog(null); setPrevLoss(null); beforeRef.current = null; };
   const onActivation = (a: ActName) => { sim.stop(); setActivation(a); restart(); };
   const onPreset = (i: number) => { sim.stop(); setPresetIdx(i); restart(); };
+  // a new target changes the loss and every δ, so the pass in progress restarts from the first neuron
+  const onTarget = (v: number) => { sim.stop(); setTarget(v); restart(); };
 
   // ----- inspected-neuron activation-curve inset ----------------------------
   // pick a hidden neuron to draw: selected unit if it's hidden, else hidden(1,0).
@@ -204,7 +276,15 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
 
   // ----- stats --------------------------------------------------------------
   const lossDrop = prevLoss != null ? prevLoss - fwd.loss : 0;
-  const lossColor = phase === 'applied' && lossDrop > 0 ? GOOD : 'var(--t0)';
+  const lossColor = phase === 'applied' && lossDrop > 0 ? GOOD : phase === 'applied' && lossDrop < 0 ? BAD : 'var(--t0)';
+  const crossed = beforeRef.current ? (beforeRef.current.fwd.yhat - target) * (fwd.yhat - target) < 0 : false;
+  const applyText = prevLoss == null
+    ? 'Apply does one step W −= η·∂L/∂W and recomputes the loss — lower for a small enough η, higher if the step overshoots.'
+    : lossDrop > 0
+      ? `The last Apply lowered the loss from ${fmt(prevLoss)} to ${fmt(fwd.loss)}.`
+      : lossDrop < 0
+        ? `The last Apply RAISED the loss from ${fmt(prevLoss)} to ${fmt(fwd.loss)}: η = ${lr} was too large${crossed ? ', carrying ŷ past the target' : ''} — lower η.`
+        : `The last Apply left the loss at ${fmt(fwd.loss)} (zero gradient).`;
 
   const phaseLabel = phase === 'idle' ? 'IDLE'
     : phase === 'forward' ? `FWD ${fwdCursor}/${NSTEPS}`
@@ -218,10 +298,16 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
 
   // selectable-neuron click target maps SVG layer (0..3) -> weight-layer index.
   const selectNeuron = (svgLayer: number, unit: number) => {
-    if (svgLayer === 0) { setSel({ layer: 0, unit }); }       // input -> inspect its outgoing into hidden1 unit
-    else { setSel({ layer: svgLayer - 1, unit }); }           // hidden/output -> weight matrix svgLayer-1
-    // re-log against current state at current phase
-    if (phase !== 'idle') logForInspected(fwd, bwd, phase === 'applied' ? 'applied' : phase);
+    // input -> inspect its outgoing weight into hidden-1 unit; hidden/output -> weight matrix svgLayer-1
+    const s: Sel = svgLayer === 0 ? { layer: 0, unit } : { layer: svgLayer - 1, unit };
+    setSel(s);
+    // re-log for the NEW selection, showing only what the pass has computed so far
+    const l = s.layer + 1;
+    const j = Math.min(s.unit, (SIZES[l] ?? 1) - 1);
+    const done = beforeRef.current;
+    if (phase === 'applied' && done) setLastLog(appliedLog(done.fwd, done.after, done.bwd, s));
+    else if (dRevealed(l, j)) setLastLog(backwardLog(fwd, bwd, s));
+    else if (phase !== 'idle' && aRevealed(l, j)) setLastLog(forwardLog(fwd, l, j));
   };
 
   // ----- SVG network --------------------------------------------------------
@@ -372,11 +458,11 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
         </div>
       )}
       lastLog={lastLog}
-      contextInsight={`A fixed 3→4→4→1 net, stepped ONE neuron at a time so each transition is followable. Press ▶ (or play) to advance: forward lights up each neuron left→right and computes its z→a (blue); backward then lights up each neuron right→left and computes its δ (gold) by the chain rule δ=(Wₙₑₓₜᵀδₙₑₓₜ)⊙act′(z). The currently-computed neuron is highlighted (white ring) along with the edges feeding it, and the right panel + Math tab follow it. Apply does one step W−=η·∂L/∂W; loss drops from ${prevLoss != null ? fmt(prevLoss) : '—'} toward ${fmt(fwd.loss)}.`}
+      contextInsight={`A fixed 3→4→4→1 net, stepped ONE neuron at a time so each transition is followable. Press ▶ (or play) to advance: forward lights up each neuron left→right and computes its z→a (blue); backward then lights up each neuron right→left and computes its δ (gold) by the chain rule δ=(Wₙₑₓₜᵀδₙₑₓₜ)⊙act′(z). The currently-computed neuron is highlighted (white ring) along with the edges feeding it, and the right panel + Math tab follow it — δ and ∂L/∂w appear only once the backward pass reaches them. ${applyText}`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Backpropagation" hint="Forward → Backward → Apply; every value is computed live." />
-          <ParamSlider name="Auto-play speed" value={`${sim.speed}ms`} min={100} max={1000} step={50} current={sim.speed} onChange={sim.setSpeed} hint="interval per step — drag right to slow down (up to 1000ms)" />
+          <ParamSlider name="Auto-play speed" value={`${sim.speed}ms`} min={100} max={1500} step={50} current={sim.speed} onChange={sim.setSpeed} hint="interval per micro-step (Forward → Backward → Apply) — drag right to slow down" />
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Activation</MonoLabel>
             <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
@@ -405,8 +491,7 @@ const Backpropagation: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel })
           </div>
 
           <ParamSlider name="Learning rate η" value={lr.toFixed(2)} min={0.1} max={3} step={0.1} current={lr} onChange={setLr} hint="step size for W −= η·∂L/∂W" />
-          <ParamSlider name="Target y" value={target.toFixed(1)} min={0} max={1} step={0.1} current={target} onChange={(v) => { setTarget(v); setPhase('idle'); setPrevLoss(null); setLastLog(null); }} hint="desired output ŷ→y" />
-          <ParamSlider name="Auto speed" value={`${sim.speed}ms`} min={200} max={1500} step={100} current={sim.speed} onChange={sim.setSpeed} hint="auto-play cycles Forward→Backward→Apply" />
+          <ParamSlider name="Target y" value={target.toFixed(1)} min={0} max={1} step={0.1} current={target} onChange={onTarget} hint="desired output ŷ→y (restarts the pass)" />
 
           <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
             <MonoLabel style={{ marginBottom: 8 }}>Inspected neuron · L{selL + 1}·u{selJ}</MonoLabel>

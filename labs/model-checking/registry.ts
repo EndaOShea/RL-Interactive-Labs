@@ -22,7 +22,7 @@ export const MODEL_CHECKING_LABS: LabDescriptor[] = [
     category: 'model-checking',
     title: 'Reachability · River Crossing',
     subtitle: 'Safe state-space search finds the solution',
-    blurb: 'Wolf–goat–cabbage as reachability: BFS over safe states auto-discovers the crossing schedule.',
+    blurb: 'Wolf–goat–cabbage as reachability: BFS over safe states auto-discovers the crossing schedule — or, when no schedule exists, proves it by exhausting every reachable state.',
     icon: 'M4 14c2 2 4 2 6 0s4-2 6 0 4 2 4 2M5 10h14M9 10V6h6v4',
     accent: ACCENT,
     codeFile: 'river_crossing.py',

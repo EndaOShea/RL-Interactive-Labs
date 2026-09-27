@@ -7,7 +7,7 @@ import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
-import { parseBool, evalBool, collectVars } from './boolexpr';
+import { parseBool, evalBool, collectVars, formatAst } from './boolexpr';
 import { truthTablePython, TtMode } from './python';
 import { useTheme } from '../../utils/theme';
 
@@ -48,19 +48,31 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     const data = [] as { env: Record<string, boolean>; bits: boolean[]; out: boolean }[];
     for (let r = 0; r < rows; r++) {
       const bits = vars.map((_, k) => !!((r >> (vars.length - 1 - k)) & 1));
-      const env: Record<string, boolean> = {}; vars.forEach((v, k) => { env[v] = bits[k]; });
+      const env: Record<string, boolean> = {}; vars.forEach((v, k) => { env[v] = bits[k] ?? false; });
       data.push({ env, bits, out: evalBool(parsed.ast!, env) });
     }
     const nTrue = data.filter((d) => d.out).length;
     return { vars, rows, data, nTrue, type: nTrue === rows ? 'TAUTOLOGY' : nTrue === 0 ? 'CONTRADICTION' : 'SATISFIABLE' };
   }, [parsed]);
 
-  // CNF derived from the false rows (one blocking clause each).
-  const cnf = useMemo(() => {
-    if (!table) return null;
-    const clauses = table.data.filter((d) => !d.out).map((d) => '(' + table.vars.map((v) => (d.env[v] ? '¬' : '') + v).join('∨') + ')');
-    return clauses.length ? clauses.join(' ∧ ') : '⊤';
-  }, [table]);
+  // What has been evaluated so far. Idle (cursor 0) shows the whole table at once;
+  // a Run re-evaluates it row by row, and every readout (outputs, bar, TRUE, TYPE,
+  // models, CNF) is derived from the rows evaluated so far. TAUTOLOGY/CONTRADICTION
+  // can only be concluded after the last row; SATISFIABLE (contingent) is decided as
+  // soon as both a true and a false row have been seen.
+  const clauseOf = (env: Record<string, boolean>, vars: string[]) => '(' + vars.map((v) => (env[v] ? '¬' : '') + v).join('∨') + ')';
+  const shown = table ? (cursor === 0 ? table.rows : Math.min(cursor, table.rows)) : 0;
+  const partial = !!table && shown < table.rows;
+  const doneRows = table ? table.data.slice(0, shown) : [];
+  const nTrueSoFar = doneRows.filter((d) => d.out).length;
+  const nFalseSoFar = doneRows.length - nTrueSoFar;
+  const typeSoFar = !table ? '—'
+    : !partial ? table.type
+    : nTrueSoFar > 0 && nFalseSoFar > 0 ? 'SATISFIABLE' : 'UNDECIDED';
+  // Canonical CNF: one blocking clause per FALSE row evaluated so far.
+  const cnfClauses = table ? doneRows.filter((d) => !d.out).map((d) => clauseOf(d.env, table.vars)) : [];
+  const cnf = cnfClauses.length ? cnfClauses.join(' ∧ ') : '⊤';
+  const fullCnf = table ? (table.data.filter((d) => !d.out).map((d) => clauseOf(d.env, table.vars)).join(' ∧ ') || '⊤') : '';
 
   // Conceptual audio-tutor narration: one INTRO per expression+mode that voices
   // what we are doing and the live math, and one CONCLUSION interpreting the result.
@@ -69,7 +81,7 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     const base = `The challenge here: pin down exactly what this boolean formula means, with no ambiguity. A truth table answers it by listing the formula's value for every assignment of its ${n} variable${n === 1 ? '' : 's'}, which is two to the power of ${n} rows, completely defining the formula's behaviour.`;
     if (mode === 'models') return `${base} In list-models mode we collect the rows where the formula comes out true. Those true rows are its models. Watch the green rows light up as the satisfying assignments are found. Enumerating models like this underlies configuration checking, database query evaluation and formal specification work.`;
     if (mode === 'cnf') return `${base} In derive-conjunctive-normal-form mode we walk the false rows instead. Negating a false assignment gives one clause that rules out exactly that row, so anding all of them together builds a formula equivalent to the original. Watch each false row contribute a clause. This canonical form is exactly what hardware verification tools and SAT solvers consume.`;
-    return `${base} In classify mode we check whether it is a tautology, true in every row, a contradiction, true in none, or merely satisfiable, true in at least one. Watch the proportion bar fill as each row is evaluated. This same reasoning powers digital circuit design, compiler optimization and formal verification of safety-critical systems.`;
+    return `${base} In classify mode we check whether it is a tautology, true in every row, a contradiction, true in none, or merely satisfiable, true in some rows but not all. Watch the proportion bar fill as each row is evaluated: one true and one false row settle it as merely satisfiable, but a tautology or contradiction is only confirmed by the last row. This same reasoning powers digital circuit design, compiler optimization and formal verification of safety-critical systems.`;
   };
   const conclusion = () => {
     if (!table) return '';
@@ -83,6 +95,7 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
   const step = () => {
     if (!table || cursor >= table.rows) { sim.pause(); return; }
     const row = table.data[cursor];
+    if (!row) { sim.pause(); return; }
     const idx = cursor;
     setCursor(cursor + 1);
 
@@ -91,22 +104,30 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
     // CONCLUSION on the final row.
     if (cursor + 1 >= table.rows) narration.narratePhase(`done:${expr}:${mode}`, conclusion());
 
+    // Counts over rows 1..idx+1 — exactly what has been evaluated after this step.
+    const upTo = table.data.slice(0, idx + 1);
+    const t = upTo.filter((d) => d.out).length, f = upTo.length - t;
+    const last = idx + 1 >= table.rows;
+    const verdict = last ? `${table.type.toLowerCase()} — true in ${t} of ${table.rows} rows`
+      : t > 0 && f > 0 ? 'already satisfiable but not valid (a true and a false row have both appeared)'
+      : t > 0 ? 'still undecided — every row so far is true (a tautology needs all of them)'
+      : 'still undecided — every row so far is false (a contradiction needs all of them)';
     const baseImpl = mode === 'models'
-      ? `Listing models: ${table.nTrue}/${table.rows} assignments satisfy the formula so far.`
+      ? `Listing models: ${t} of the ${idx + 1} row${idx === 0 ? '' : 's'} evaluated so far satisfy the formula${last ? ` — ${t} model${t === 1 ? '' : 's'} in all.` : '.'}`
       : mode === 'cnf'
-      ? 'Each FALSE row contributes one clause that rules out exactly that assignment — together they form an equivalent CNF.'
-      : `So far this expression is ${table.type.toLowerCase()} (${table.nTrue}/${table.rows} rows true).`;
+      ? (row.out ? `A TRUE row contributes no clause (${f} clause${f === 1 ? '' : 's'} so far).` : `This FALSE row contributes clause ${f}, which rules out exactly this assignment${last ? ' — the CNF is complete.' : '.'}`)
+      : `After ${idx + 1} of ${table.rows} rows (${t} true, ${f} false): ${verdict}.`;
 
     setLastLog({
       algorithm: mode === 'cnf' ? 'CNF derivation · false rows' : mode === 'models' ? 'Model enumeration' : 'Truth Table · evaluation',
       stepDescription: `Row ${idx + 1}/${table.rows}`,
-      formula: mode === 'cnf' && !row.out ? '(' + table.vars.map((v) => (row.env[v] ? '¬' : '') + v).join('∨') + ')' : expr,
-      variables: { ...Object.fromEntries(table.vars.map((v) => [v, row.bits[table.vars.indexOf(v)] ? 'T' : 'F'])), '=': row.out ? 'T' : 'F' },
+      formula: mode === 'cnf' && !row.out ? clauseOf(row.env, table.vars) : expr,
+      variables: { ...Object.fromEntries(table.vars.map((v, k) => [v, row.bits[k] ? 'T' : 'F'])), '=': row.out ? 'T' : 'F', 'true so far': t, 'false so far': f },
       result: mode === 'cnf' ? (row.out ? 'SKIP (true)' : 'CLAUSE') : row.out ? 'TRUE' : 'FALSE',
       mathDetails: {
         params: [
           { label: 'rows', info: `2^${table.vars.length} = ${table.rows} assignments — every combination of the variables.` },
-          { label: 'type', info: 'Tautology = always true; Contradiction = never true; Satisfiable = true for ≥1 row.' },
+          { label: 'type', info: 'Tautology = true in every row; Contradiction = false in every row; Satisfiable = true in some rows and false in others. Only the last row can confirm a tautology or contradiction.' },
           { label: 'models', info: 'The models of φ are exactly the rows where φ evaluates to true.' },
           { label: 'cnf', info: 'Negate each FALSE row to a clause; the conjunction is a CNF equivalent to φ (canonical POS form).' },
         ],
@@ -134,16 +155,18 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
         style={{ background: 'var(--bg2)', border: `1px solid ${parsed.error ? BAD : 'var(--border)'}`, borderRadius: 10, padding: '11px 14px', fontFamily: 'var(--mono)', fontSize: 14, color: 'var(--t0)', outline: 'none' }}
       />
       {parsed.error && <div style={{ color: BAD, fontFamily: 'var(--mono)', fontSize: 12 }}>⚠ {parsed.error} — use variables A–D and ! &amp; | ^ -&gt; &lt;-&gt;</div>}
+      {parsed.ast && <div style={{ color: 'var(--t2)', fontFamily: 'var(--mono)', fontSize: 11, wordBreak: 'break-word' }}>parsed as: <span style={{ color: 'var(--t1)' }}>{formatAst(parsed.ast)}</span></div>}
       {!parsed.error && parsed.vars.length > 4 && <div style={{ color: 'var(--t2)', fontFamily: 'var(--mono)', fontSize: 12 }}>Up to 4 variables supported ({parsed.vars.length} used).</div>}
       {table && (
         <>
-          {/* True/false proportion bar */}
+          {/* True/false proportion bar — fills as rows are evaluated (T green, F red) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)' }}>{table.nTrue}/{table.rows} T</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: 'var(--t2)' }}>{partial ? `${nTrueSoFar} T · ${nFalseSoFar} F of ${table.rows}` : `${nTrueSoFar}/${table.rows} T`}</span>
             <div style={{ flex: 1, height: 8, borderRadius: 5, background: isLight ? 'var(--bg3)' : '#2a3350', overflow: 'hidden', display: 'flex' }}>
-              <div style={{ width: `${(table.nTrue / table.rows) * 100}%`, background: GOOD }} />
+              <div style={{ width: `${(nTrueSoFar / table.rows) * 100}%`, background: GOOD }} />
+              <div style={{ width: `${(nFalseSoFar / table.rows) * 100}%`, background: `color-mix(in srgb, ${BAD} 55%, transparent)` }} />
             </div>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: ACCENT }}>{table.type}</span>
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10.5, color: ACCENT }}>{typeSoFar}</span>
           </div>
           <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%' }}>
@@ -156,18 +179,21 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
               <tbody>
                 {table.data.map((row, r) => {
                   const active = r === cursor - 1;
+                  const evaluated = r < shown;
                   return (
                     <tr key={r} style={{ background: active ? `color-mix(in srgb, ${rowAccent(row.out)} 28%, transparent)` : 'transparent', borderLeft: active ? `3px solid ${rowAccent(row.out)}` : '3px solid transparent' }}>
                       {row.bits.map((b, k) => <td key={k} style={cell(b, true)}>{b ? 'T' : 'F'}</td>)}
-                      <td style={{ ...cell(row.out), borderLeft: '1px solid var(--border)', fontWeight: 700 }}>{row.out ? 'T' : 'F'}</td>
+                      {evaluated
+                        ? <td style={{ ...cell(row.out), borderLeft: '1px solid var(--border)', fontWeight: 700 }}>{row.out ? 'T' : 'F'}</td>
+                        : <td style={{ ...cell(false), borderLeft: '1px solid var(--border)' }}>·</td>}
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
-          {mode === 'cnf' && <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.6, wordBreak: 'break-word' }}><span style={{ color: 'var(--t2)' }}>CNF ≡ </span>{cnf}</div>}
-          {mode === 'models' && <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)' }}><span style={{ color: 'var(--t2)' }}>models: </span>{table.nTrue} of {table.rows}</div>}
+          {mode === 'cnf' && <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', lineHeight: 1.6, wordBreak: 'break-word' }}><span style={{ color: 'var(--t2)' }}>CNF ≡ </span>{partial ? cnfClauses.join(' ∧ ') : cnf}{partial && <span style={{ color: 'var(--t2)' }}>{cnfClauses.length ? ' ∧ …' : '…'}</span>}</div>}
+          {mode === 'models' && <div style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)' }}><span style={{ color: 'var(--t2)' }}>models: </span>{nTrueSoFar} of {partial ? `${shown} evaluated (${table.rows} rows)` : table.rows}</div>}
         </>
       )}
     </div>
@@ -180,9 +206,9 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
       stats={[
         { label: 'VARS', value: table?.vars.length ?? '—' },
         { label: 'ROWS', value: table?.rows ?? '—' },
-        { label: 'TRUE', value: table ? `${table.nTrue}` : '—', color: GOOD },
+        { label: 'TRUE', value: table ? (partial ? `${nTrueSoFar}/${shown}` : `${nTrueSoFar}`) : '—', color: GOOD },
         { label: 'MODE', value: mode.toUpperCase() },
-        { label: 'TYPE', value: table?.type ?? '—', color: ACCENT },
+        { label: 'TYPE', value: typeSoFar, color: ACCENT },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, truthTablePython(expr, mode))}
       grid={board}
@@ -205,7 +231,7 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
       )}
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} speed={sim.speed} onSpeed={sim.setSpeed} />}
       lastLog={lastLog}
-      contextInsight={table ? `"${expr}" is ${table.type.toLowerCase()} — true in ${table.nTrue} of ${table.rows} rows.${mode === 'cnf' ? `\n\nEquivalent CNF: ${cnf}` : mode === 'models' ? `\n\n${table.nTrue} models.` : ''}\n\nA formula is valid (a tautology) iff its negation is unsatisfiable; that duality is what SAT solvers exploit.` : 'Enter a boolean formula to see its truth table.'}
+      contextInsight={table ? `"${expr}" parses as ${formatAst(parsed.ast!)} and is ${table.type.toLowerCase()} — true in ${table.nTrue} of ${table.rows} rows.${mode === 'cnf' ? `\n\nEquivalent CNF: ${fullCnf}` : mode === 'models' ? `\n\n${table.nTrue} models.` : ''}\n\nA formula is valid (a tautology) iff its negation is unsatisfiable; that duality is what SAT solvers exploit.` : 'Enter a boolean formula to see its truth table.'}
       params={(
         <ParamsWrap>
           <ParamsHead title="Boolean Logic" hint="Edit the formula, pick a mode, or take a challenge." />
@@ -221,9 +247,11 @@ const TruthTableLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) =
             <div>Operators:</div>
             <div><b style={{ color: 'var(--t1)' }}>!</b> not &nbsp; <b style={{ color: 'var(--t1)' }}>&amp;</b> and &nbsp; <b style={{ color: 'var(--t1)' }}>|</b> or</div>
             <div><b style={{ color: 'var(--t1)' }}>^</b> xor &nbsp; <b style={{ color: 'var(--t1)' }}>-&gt;</b> implies &nbsp; <b style={{ color: 'var(--t1)' }}>&lt;-&gt;</b> iff</div>
-            <div style={{ marginTop: 6 }}>Variables A–D, parentheses allowed.</div>
+            <div style={{ marginTop: 6 }}>Precedence (tightest first): <b style={{ color: 'var(--t1)' }}>! &gt; &amp; &gt; ^ &gt; | &gt; -&gt; &gt; &lt;-&gt;</b></div>
+            <div><b style={{ color: 'var(--t1)' }}>-&gt;</b> groups to the right: A -&gt; B -&gt; C = A -&gt; (B -&gt; C); the rest group left.</div>
+            <div style={{ marginTop: 6 }}>Also accepted: ~ ¬ ∧ ⊕ ∨ → ↔. Variables A–D (letters, any case), parentheses allowed.</div>
           </div>
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>{MODES.find((m) => m.id === mode)?.hint}. Run highlights each row in turn.</div>
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--t2)' }}>{MODES.find((m) => m.id === mode)?.hint}. Run re-evaluates the table row by row — outputs, the bar, TRUE and TYPE fill in as rows are evaluated; Reset shows the whole table again.</div>
         </ParamsWrap>
       )}
       tutor={tutor}

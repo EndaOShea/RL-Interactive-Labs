@@ -8,8 +8,10 @@ import { useTheme } from '../../utils/theme';
 
 export interface CellSpec {
   wall?: boolean;
+  cliff?: boolean;      // hazard cell (e.g. the cliff walk's −100 row): hatched in the bad colour
   heat?: number;        // signed intensity: + green (high value), − red (low). magnitude ~0..1
   label?: string;       // small mono value text
+  note?: string;        // short caption along the bottom edge (e.g. "S", "−100", "EXIT")
   agent?: boolean;
   agentColor?: string;
   agentB?: boolean;
@@ -22,8 +24,8 @@ export interface CellSpec {
   arrows?: { rot: number; op: number }[];
 }
 
-const Arrow: React.FC<{ rot: number; op: number }> = ({ rot, op }) => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+const Arrow: React.FC<{ rot: number; op: number; color?: string }> = ({ rot, op, color = '#fff' }) => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
     style={{ position: 'absolute', transform: `rotate(${rot}deg)`, opacity: op, zIndex: 3 }}>
     <path d="M12 19V5M5 12l7-7 7 7" />
   </svg>
@@ -72,6 +74,9 @@ const StageGrid: React.FC<{
           if (c.wall) {
             bg = wallBg;
             border = wallBorder;
+          } else if (c.cliff) {
+            bg = `repeating-linear-gradient(-45deg, color-mix(in srgb, ${BAD} 34%, ${BASE}) 0 6px, color-mix(in srgb, ${BAD} 14%, ${BASE}) 6px 12px)`;
+            border = `color-mix(in srgb, ${BAD} 55%, ${BASE})`;
           } else if (c.heat) {
             const hc = c.heat > 0 ? GOOD : BAD;
             const a = Math.min(0.62, 0.1 + Math.abs(c.heat) * 0.52);
@@ -90,6 +95,10 @@ const StageGrid: React.FC<{
               {c.label && !c.wall && (
                 <span style={{ fontFamily: 'var(--mono)', fontSize: 9.5, color: labelColor, position: 'absolute', top: 4, left: 5 }}>{c.label}</span>
               )}
+              {/* bottom caption */}
+              {c.note && !c.wall && (
+                <span style={{ fontFamily: 'var(--mono)', fontSize: 8.5, letterSpacing: '.04em', color: c.cliff ? BAD : labelColor, position: 'absolute', bottom: 3, left: 2, right: 2, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', zIndex: 3, pointerEvents: 'none' }}>{c.note}</span>
+              )}
               {/* planning flash */}
               {c.planned && <div style={{ position: 'absolute', inset: 0, borderRadius: 7, background: `color-mix(in srgb, ${ACC} 33%, transparent)`, zIndex: 1, animation: 'ledPulse .9s ease-out' }} />}
               {/* goal ring(s) */}
@@ -106,7 +115,7 @@ const StageGrid: React.FC<{
                 </div>
               )}
               {/* policy arrows */}
-              {c.arrows?.map((a, i) => <Arrow key={i} rot={a.rot} op={a.op} />)}
+              {c.arrows?.map((a, i) => <Arrow key={i} rot={a.rot} op={a.op} color={isLight ? '#2e3653' : '#fff'} />)}
               {/* agents */}
               {c.agent && <Orb color={c.agentColor || '#fff'} />}
               {c.agentB && <Orb color={c.agentBColor || BAD} />}

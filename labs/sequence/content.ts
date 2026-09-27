@@ -18,26 +18,26 @@ export const RNN_CONTENT: LabContent = {
     },
     {
       heading: 'BPTT & the vanishing / exploding gradient',
-      body: 'Training uses Backpropagation Through Time (BPTT): the loss gradient is chained backward across every timestep. The Jacobian that carries a gradient from step t back to step t−k is a PRODUCT, ∂h_t/∂h_{t−k} = Π diag(tanh′)·W_hh. Repeated multiplication by the same matrix makes that product behave like (factor)^k: if the effective factor (the spectral radius of W_hh times the average tanh′) is below 1 the gradient VANISHES exponentially, and above 1 it EXPLODES. Either way the network struggles to learn long-range dependencies — the motivation for gating and gradient clipping.',
+      body: 'Training uses Backpropagation Through Time (BPTT): the loss gradient is chained backward across every timestep. The Jacobian that carries a gradient from step t back to step t−k is a PRODUCT, ∂h_t/∂h_{t−k} = Π diag(1 − h_j²)·W_hh, one factor per step (tanh′ = 1 − h²). Its size obeys ‖J_k‖ ≤ Π max tanh′ · ‖W_hh‖₂^k, so a largest singular value ‖W_hh‖₂ ≤ 1 guarantees the gradient can only shrink; ‖W_hh‖₂ > 1 is needed for it to EXPLODE but does not guarantee it — saturated units (small tanh′) can still make it VANISH. In this lab W_hh = ρ·Q with Q orthogonal, so ρ is at once the spectral radius and ‖W_hh‖₂, and the exact product is recomputed from the stored hidden states after every step.',
       details: [
-        { label: 'Product of Jacobians', text: 'Gradient over k steps ≈ (tanh′·ρ)^k where ρ is the spectral radius of W_hh — exponential in the lag.' },
-        { label: 'Vanishing (<1)', text: 'Early timesteps receive almost no signal, so long-range dependencies are never learned.' },
-        { label: 'Exploding (>1)', text: 'The gradient blows up; training destabilises. Gradient clipping caps the norm to keep steps sane.' },
+        { label: 'Product of Jacobians', text: 'The lab plots the exact ‖∂h_t/∂h_{t−k}‖ against the lag and, dashed, the bound Π max tanh′·ρᵏ.' },
+        { label: 'Vanishing', text: 'Per-step factor ‖J_K‖^(1/K) below 0.9: early timesteps receive almost no signal, so long-range dependencies are never learned.' },
+        { label: 'Exploding', text: 'Per-step factor above 1.1: the gradient blows up and training destabilises. Gradient clipping caps the norm to keep steps sane.' },
       ],
     },
     {
       heading: 'Why this matters & how it is mitigated',
-      body: 'The vanishing-gradient problem is the recurrent version of the depth problem the ResNet lab tackles with skip connections. Here the fixes are: clip the gradient norm to tame explosions, initialise W_hh orthogonally (spectral radius ≈ 1) to delay vanishing, and — most importantly — add gating (LSTM/GRU) that gives the gradient a near-identity path through time. Attention later removes the bottleneck entirely by letting every output look directly at every input.',
+      body: 'The vanishing-gradient problem is the recurrent version of the depth problem the ResNet lab tackles with skip connections. Here the fixes are: clip the gradient norm to tame explosions, initialise W_hh orthogonally so the matrix itself neither shrinks nor stretches any direction, and — most importantly — add gating (LSTM/GRU) that gives the gradient a near-identity path through time. Orthogonal initialisation alone is not enough: at ρ = 1 the lab\'s gradient still vanishes over the sequence, because tanh′ < 1 at every step. Attention later removes the bottleneck entirely by letting every output look directly at every input.',
       details: [
         { label: 'Gradient clipping', text: 'Rescale the gradient when its norm exceeds a threshold — cheap, standard, fixes explosion.' },
-        { label: 'Orthogonal init', text: 'A spectral radius near 1 keeps the per-step factor close to 1, slowing the exponential decay.' },
+        { label: 'Orthogonal init', text: 'Every singular value of an orthogonal matrix is 1, so the only shrinkage left is tanh′; near-critical needs tanh′·ρ ≈ 1.' },
         { label: 'Gating → LSTM', text: 'A gated cell carries the gradient on a near-identity path; the next lab shows exactly how.' },
       ],
     },
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'Long-range dependencies are hard', description: 'Because the gradient is a product over time, a vanilla RNN can rarely connect an output to an input many steps earlier — the signal has decayed to nothing.', recommendation: 'Use gated cells (LSTM/GRU) or attention for tasks with long-range structure; reserve plain RNNs for short windows.' },
-    { category: 'METHODOLOGY', title: 'Stabilise BPTT', description: 'Exploding gradients (spectral radius > 1) destabilise training and can produce NaNs after a single bad step.', recommendation: 'Clip the global gradient norm, use orthogonal/identity initialisation, and truncate BPTT to a bounded window for very long sequences.' },
+    { category: 'METHODOLOGY', title: 'Stabilise BPTT', description: 'Exploding gradients (a per-step factor above 1, which needs ‖W_hh‖₂ > 1) destabilise training and can produce NaNs after a single bad step.', recommendation: 'Clip the global gradient norm, use orthogonal/identity initialisation, and truncate BPTT to a bounded window for very long sequences.' },
   ],
 };
 
@@ -54,11 +54,11 @@ export const LSTM_CONTENT: LabContent = {
     },
     {
       heading: 'The constant error carousel',
-      body: 'The reason LSTMs learn long-range dependencies is the gradient path along the cell state. Because c_t = f⊙c_{t-1} + i⊙g, the Jacobian of the carry is ∂c_t/∂c_{t-1} ≈ diag(f). When the forget gate f ≈ 1 the gradient is multiplied by ≈ 1 at every step, so it survives across many timesteps instead of decaying like the vanilla RNN — Hochreiter & Schmidhuber called this the "constant error carousel". Overlay the LSTM gradient curve on the RNN one and the difference is stark: a near-flat highway versus an exponential cliff.',
+      body: 'The reason LSTMs learn long-range dependencies is the gradient path along the cell state. Because c_t = f⊙c_{t-1} + i⊙g, the Jacobian along the carry itself is ∂c_t/∂c_{t-1} = diag(f) (further paths run through h and the gates). When the forget gate f ≈ 1 the gradient is multiplied by ≈ 1 at every step, so it survives across many timesteps instead of decaying like the vanilla RNN — Hochreiter & Schmidhuber called this the "constant error carousel". The lab multiplies the real forget gates along the carry and overlays the exact gradient of a vanilla RNN (orthogonal W_hh, ρ = 1) fed the same input: with f near 1 the carry path stays near 1, but with f ≈ 0.73 (bias +1) it falls below even that RNN.',
       details: [
-        { label: '∂c_t/∂c_{t−1} ≈ diag(f)', text: 'The carry is additive, so the gradient factor per step is the forget gate, not a dense matrix.' },
-        { label: 'f ≈ 1 → flat gradient', text: 'A near-1 forget gate gives a factor ≈ 1^k — the gradient highway that beats vanishing.' },
-        { label: 'Forget-gate bias', text: 'Initialising the forget bias high (≈ +1 to +2) opens the carousel from the start and speeds learning.' },
+        { label: '∂c_t/∂c_{t−1} = diag(f)', text: 'Along the carry the gradient factor per step is the forget gate itself, not a dense matrix; over k steps it is Π diag(f).' },
+        { label: 'f ≈ 1 → flat gradient', text: 'A near-1 forget gate gives a factor ≈ 1 per step — the gradient highway that beats vanishing.' },
+        { label: 'Forget-gate bias', text: 'A positive forget bias (commonly +1) starts f above ½ so the carousel starts partly open; training then pushes f toward 1 where memory is needed. In this untrained lab the bias is the only control: +3 gives a mean f ≈ 0.95, +4 ≈ 0.98.' },
       ],
     },
     {
@@ -72,7 +72,7 @@ export const LSTM_CONTENT: LabContent = {
     },
   ],
   lifecycle: [
-    { category: 'CONCEPT', title: 'Gates are the memory controller', description: 'Long-range retention depends on the forget gate staying open; if it learns to close too eagerly, the cell still forgets.', recommendation: 'Initialise the forget-gate bias positive so the carousel starts open, and monitor mean gate activations during training.' },
+    { category: 'CONCEPT', title: 'Gates are the memory controller', description: 'Long-range retention depends on the forget gate staying open; if it learns to close too eagerly, the cell still forgets.', recommendation: 'Initialise the forget-gate bias positive (commonly +1) so the carousel starts partly open, and monitor mean gate activations during training.' },
     { category: 'DEPLOYMENT', title: 'Cost vs Transformers', description: 'LSTMs process tokens strictly sequentially, so they cannot parallelise across time the way attention can — a throughput limit on long sequences.', recommendation: 'Use LSTMs/GRUs for streaming or low-latency settings and small data; prefer attention-based models when sequences are long and compute allows.' },
   ],
 };
@@ -81,7 +81,7 @@ export const SEQ2SEQ_CONTENT: LabContent = {
   sections: [
     {
       heading: 'Encoder → context vector → decoder',
-      body: 'A sequence-to-sequence model maps one sequence to another (translation, summarisation, dialogue). An encoder RNN reads the whole input and compresses it into a single fixed-width CONTEXT VECTOR — its final hidden state. A decoder RNN is then initialised from that vector and generates the output one token at a time. The entire meaning of the input must therefore pass through one fixed-size vector, no matter how long the input is.',
+      body: 'A sequence-to-sequence model maps one sequence to another (translation, summarisation, dialogue). An encoder RNN reads the whole input and compresses it into a single fixed-width CONTEXT VECTOR — its final hidden state. A decoder RNN is then initialised from that vector and generates the output one token at a time. The entire meaning of the input must therefore pass through one fixed-size vector, no matter how long the input is. To measure exactly what that vector holds, this lab replaces the decoder with a linear readout per output position.',
       details: [
         { label: 'Encoder', text: 'Reads the input left-to-right and folds it into its last hidden state — the context vector.' },
         { label: 'Context vector', text: 'A single fixed-width summary; the only thing the decoder sees of the input.' },
@@ -90,16 +90,16 @@ export const SEQ2SEQ_CONTENT: LabContent = {
     },
     {
       heading: 'The information bottleneck',
-      body: 'A fixed d-dimensional vector has finite capacity — on the order of d·(bits per dimension) bits. The input demands roughly L·log2(V) bits for length L over a vocabulary of size V. As the input grows for a fixed context dimension, demand outstrips capacity and information must be dropped. Crucially the context vector is the encoder\'s LAST state, so the EARLY tokens — seen first and overwritten most — fade fastest: per-position reconstruction accuracy decays at the start of long inputs. This lab is an ANALYTIC illustration of that capacity-versus-demand trade-off, not a trained network.',
+      body: 'A fixed d-dimensional vector must hold all L tokens. For a LINEAR readout of one-hot tokens over a vocabulary of V, each token needs roughly V − 1 independent directions, so d dimensions leave room for only a few tokens and the rest interfere. Crucially the context vector is the encoder\'s LAST state, so the EARLY tokens — whose trace is multiplied by diag(1 − h²)·W_hh at every later step — fade first. This lab measures it: a seeded, untrained encoder (V = 4), and a ridge linear probe per position fitted on 300 random sequences and scored on 200 held-out ones. At d = 4 the probe recovers about 1.7 tokens\' worth from a 12-token input; at d = 12, about 3.7 of 18.',
       details: [
-        { label: 'Capacity ≈ d·bits/dim', text: 'A wider context vector holds more, but capacity is fixed once chosen — it cannot grow with the input.' },
-        { label: 'Demand ≈ L·log2(V)', text: 'Longer inputs and larger vocabularies carry more bits; eventually they exceed any fixed capacity.' },
-        { label: 'Early tokens fade', text: 'Because the summary is the final hidden state, the start of a long sequence is forgotten first.' },
+        { label: 'Linear room ≈ d/(V−1) tokens', text: 'A wider context holds more, but its width is fixed once chosen — it cannot grow with the input.' },
+        { label: 'Demand grows with L', text: 'Every extra token needs its own directions; eventually the input exceeds any fixed width.' },
+        { label: 'Early tokens fade', text: 'Because the summary is the final hidden state, ‖∂h_L/∂x_p‖ shrinks with distance from the end and the start is forgotten first.' },
       ],
     },
     {
       heading: 'Attention removes the bottleneck',
-      body: 'The fix that reshaped the field: instead of squeezing everything through one vector, ATTENTION lets the decoder read ALL the encoder hidden states and, at each output step, form a weighted combination focused on the relevant input positions. There is no single bottleneck, so long inputs no longer lose their start, and alignment becomes learnable. This is the direct conceptual bridge to the platform\'s LLM / Attention lab — and ultimately to the Transformer, which is attention without any recurrence at all.',
+      body: 'The fix that reshaped the field: instead of squeezing everything through one vector, ATTENTION lets the decoder read ALL the encoder hidden states and, at each output step, form a weighted combination focused on the relevant input positions. There is no single bottleneck, so long inputs no longer lose their start, and alignment becomes learnable. The lab\'s dashed curve reads each position from its own state h_p — attention with the ideal alignment — and fits the same probe. This is the direct conceptual bridge to the platform\'s LLM / Attention lab — and ultimately to the Transformer, which is attention without any recurrence at all.',
       details: [
         { label: 'Read all states', text: 'The decoder attends over every encoder position, not just the final summary — no fixed bottleneck.' },
         { label: 'Learned alignment', text: 'Attention weights show which input tokens drive each output token; long-range links are direct, not chained.' },
@@ -109,6 +109,6 @@ export const SEQ2SEQ_CONTENT: LabContent = {
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'One vector cannot hold everything', description: 'A fixed-width context vector is a hard capacity limit; translation quality of vanilla seq2seq drops sharply as input length grows.', recommendation: 'Use attention (or a Transformer) so the decoder accesses all encoder states; reserve plain encoder-decoder vectors for short inputs.' },
-    { category: 'VERIFICATION', title: 'This is an analytic illustration', description: 'The fidelity curves here come from a capacity-vs-demand model, not from training a real seq2seq network, so treat them as intuition for the bottleneck rather than measured accuracy.', recommendation: 'To see real numbers, train an encoder-decoder with and without attention and compare BLEU/accuracy as input length increases.' },
+    { category: 'VERIFICATION', title: 'What this lab measures', description: 'The curves are measured held-out accuracies of a linear probe on an untrained, seeded encoder. A trained encoder packs information better and a non-linear decoder can read more, so the numbers show what the vector linearly retains, not a trained seq2seq model\'s accuracy.', recommendation: 'To see trained numbers, train an encoder-decoder with and without attention and compare BLEU/accuracy as input length increases.' },
   ],
 };

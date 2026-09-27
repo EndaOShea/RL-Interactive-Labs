@@ -7,7 +7,7 @@
 An interactive platform for learning machine learning **by doing** — live, client-side
 simulations with real-time math and multi-provider AI tutoring, wrapped in a full-screen
 "Cinematic Stage" UI. It began as **Policy Playground** (Reinforcement Learning) and now spans
-nineteen subject areas, each added without touching the original RL app.
+nineteen subject areas: the original RL app plus eighteen areas built on a generic lab kit.
 
 View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5NamxvW
 
@@ -16,35 +16,42 @@ View in AI Studio: https://ai.studio/apps/drive/1itPuplij-4VCc12r8eYzhZv2q5Namxv
 The platform is a small multi-page app (`react-router-dom`):
 
 - **`/` — catalog home.** A scrollable hub of every subject area and its labs.
-- **`/rl` — the original Policy Playground.** The untouched RL app, with its own five-module
-  icon rail and the full Cinematic Stage.
+- **`/rl` — the original Policy Playground.** The RL app, with its own five-module icon rail and
+  the full Cinematic Stage.
 - **`/<area>/<lab>` — a new-area lab** (e.g. `/classic-ml/knn`), rendered through the generic
   lab kit that mirrors the RL stage: a centred visualization, live-math, and a docked AI tutor.
 
 ## Subject areas
 
-Every lab is a real, in-browser simulation you can tune live. Sims are **analytic and
-client-side** — no TF.js/ONNX and no servers.
+Every lab except the RAG Architecture Viewer is a real, in-browser simulation you can tune live.
+Sims are **analytic and client-side** — no TF.js/ONNX and no servers.
 
-- **Reinforcement Learning** (`/rl`) — Model-free vs model-based (Q-Learning, SARSA, REINFORCE,
-  Actor-Critic, Dyna-Q), deterministic vs stochastic policies under slip, tabular vs deep (RBF)
-  value learning, multi-armed bandits (Greedy, ε-Greedy, Optimistic, UCB), and single vs
-  multi-agent joint-state Q-learning.
-- **Classic ML** — kNN, linear & logistic regression, k-means, PCA.
+- **Reinforcement Learning** (`/rl`) — model-free vs model-based learning (Q-Learning, SARSA,
+  Expected SARSA, Double Q-Learning, REINFORCE with baseline, Actor-Critic, Dyna-Q) on a cliff walk
+  and a maximisation-bias trap; deterministic vs stochastic policies under slip, plus an aliased
+  corridor where only a stochastic policy reaches the goal; tabular vs linear function
+  approximation (RBF kernel or multi-tiling tile coding); multi-armed bandits (Greedy, ε-Greedy,
+  Optimistic, UCB, Thompson, Boltzmann) with cumulative regret; and single vs multi-agent
+  joint-state Q-learning (cooperative, competitive, congestion).
+- **Classic ML** — kNN, linear/polynomial (ridge) & logistic regression, k-means (incl.
+  k-means++ seeding), PCA (with whitening).
 - **Search & Pathfinding** — frontier/visited/path on grids and weighted graphs (BFS, DFS,
-  Dijkstra, A*).
-- **Unsupervised Learning** — DBSCAN density clustering, GMM/EM mixtures, hierarchical
-  dendrograms.
+  Dijkstra, Greedy, A*, Weighted A*, bidirectional).
+- **Unsupervised Learning** — DBSCAN density clustering and OPTICS, GMM/EM mixtures (BIC to choose
+  K and the covariance type), hierarchical dendrograms.
 - **Supervised Learning** — decision trees, gradient boosting (XGBoost / LightGBM / CatBoost
-  tree-growth toggle), max-margin SVMs, Gaussian Naive Bayes.
-- **Logic & Reasoning** — truth tables and a DPLL SAT-solver search tree.
+  tree-growth toggle), soft-margin SVMs trained by SMO (linear / polynomial / RBF kernels),
+  Gaussian and multinomial Naive Bayes.
+- **Logic & Reasoning** — truth tables and a DPLL SAT-solver search tree (with an optional
+  CDCL-lite mode: clause learning and backjumping).
 - **Neural Networks** — a single perceptron, a backprop-trained MLP, activation functions, and a
   step-through backpropagation lab (forward values + chain-rule gradient flow, with a dead-ReLU demo).
 - **Deep Learning** — residual/skip connections (ResNet) vs vanishing gradients, batch
-  normalization, dropout, transfer learning, optimizers (SGD / Momentum / RMSProp / Adam)
-  with learning-rate schedules, and an architecture builder (compose a CNN/MLP and see live
-  parameter counts, output shapes, receptive fields, and risk flags: overfitting, linear
-  collapse, vanishing gradients).
+  normalization (train vs eval mode), dropout, transfer learning (frozen vs fine-tuned backbone),
+  optimizers (SGD / Momentum / RMSProp / Adam) with learning-rate schedules, and an architecture
+  builder (compose a CNN/MLP and see live parameter counts, MACs, output shapes, receptive fields,
+  and risk flags: linear collapse, over/underfitting, vanishing gradients, stride and
+  receptive-field problems — MLP mode also trains the composed network).
 - **Model Checking** — exhaustive reachability with safety invariants and counterexamples
   (mutual exclusion, river crossing).
 - **Image Classification** — convolution filters and CNN feature maps.
@@ -53,31 +60,46 @@ client-side** — no TF.js/ONNX and no servers.
   queen), TF-IDF document similarity, n-gram language models (add-k smoothing, perplexity,
   token-by-token generation), named-entity recognition (Viterbi sequence labeling), semantic
   search / RAG retrieval, and embedding-based text classification.
-- **Large Language Models** — tokenization, temperature/top-k/top-p sampling, self-attention, and
-  **Retrieval-Augmented Generation**: a stepped chunk → embed → index → retrieve → rerank → augment →
-  generate pipeline with **11 variants** (Naive, Advanced, HyDE, RAG-Fusion, Self-RAG, Corrective RAG,
-  GraphRAG, RAPTOR, Contextual Retrieval, ColBERT, Agentic/Adaptive) computed over a shared
-  Solar-System corpus, each variant re-sequencing the same pipeline.
-- **Diffusion Models** — the forward noising process, reverse denoising, and noise schedules.
-- **Math Foundations** — gradient descent, Taylor series, linear transformations, derivatives
-  (tangent slope and the secant→limit), the chain rule (composite functions as a product of local
-  derivatives), matrix multiplication and dot products, convex vs non-convex optimization, and
-  eigenvalues & SVD (the rotate–scale–rotate view behind PCA).
+- **Large Language Models** — byte-pair-encoding tokenization (train merges, then encode with
+  byte fallback), next-token sampling from a counted bigram model (greedy, temperature, top-k,
+  top-p, min-p, repetition penalty), multi-head self-attention (positional encodings, causal mask),
+  and **Retrieval-Augmented Generation**: a stepped chunk → embed → index → retrieve → rerank →
+  augment → generate pipeline with **11 variants** (Naive, Advanced, HyDE, RAG-Fusion, Self-RAG,
+  Corrective RAG, GraphRAG, RAPTOR, Contextual Retrieval, ColBERT, Agentic/Adaptive) computed over a
+  shared Solar-System corpus, each variant re-sequencing the same pipeline; GraphRAG's knowledge
+  graph and RAPTOR's summary tree are built from the corpus text in the browser. The separate
+  **RAG Architecture Viewer** is not a simulation: it renders nine checked-in architecture designs
+  — output of an external RAG design service, corrected by a documented in-repo patch — as system,
+  ingestion, query, deployment, lifecycle and validation views, with step-through walkthroughs
+  (normal, failure and workload-specific scenarios) and, where a design offers two architecture
+  options, a structural comparison of them.
+- **Diffusion Models** — the forward noising process and reverse sampling from fresh noise (DDPM
+  and DDIM samplers with classifier-free guidance, driven by an analytic denoiser instead of a
+  trained network), and noise schedules (linear, cosine, sigmoid, EDM, with a resolution shift).
+- **Math Foundations** — gradient descent (with momentum, RMSProp, Adam and Newton steps), Taylor
+  series (and a Padé approximant from the same coefficients), linear transformations, derivatives
+  (tangent slope, the secant→limit, and forward vs central finite-difference error down to the
+  round-off floor), the chain rule (products of local derivatives along each path, summed where
+  paths fan out), matrix multiplication (dot products, matrix·vector, composition), convex vs
+  non-convex optimization, and eigenvalues & SVD (the rotate–scale–rotate view behind PCA).
 - **Probability & Bayesian** — Bayes' theorem & base rates (with sequential Beta–Bernoulli
-  updating), the distribution zoo (PMF/PDF + sampling and the Law of Large Numbers), and MCMC
-  (Metropolis–Hastings) sampling of a multimodal target.
+  updating), the distribution zoo (eight families: PMF/PDF + sampling, the Law of Large Numbers,
+  and sums of draws for the Central Limit Theorem), and MCMC (Metropolis–Hastings) sampling of
+  mixture targets.
 - **Information Theory** — entropy & surprise, KL divergence & cross-entropy (the classification
   loss = irreducible H(p) + avoidable KL), and Huffman source coding against the entropy bound.
 - **Sequence Models** — RNN backprop-through-time (vanishing/exploding gradients), LSTM gated
   memory (the constant error carousel), and the seq2seq fixed-context bottleneck that motivated
   attention.
-- **Stochastic & Bayesian Models** — Bayesian neural networks (point vs MC-Dropout vs deep
-  ensemble vs variational, with predictive-uncertainty bands), Gaussian processes (closed-form
-  kernel regression), and hidden Markov models (forward filtering, smoothing, Viterbi).
+- **Stochastic & Bayesian Models** — Bayesian neural networks (a Bayesian output layer's exact
+  posterior vs a point estimate, mean-field variational inference, MC-Dropout and a deep ensemble,
+  with predictive-uncertainty bands), Gaussian processes (closed-form kernel regression scored by
+  the marginal likelihood), and hidden Markov models (forward filtering, smoothing, Viterbi).
 
 ## What a lab looks like
 
-Each lab fills the viewport as one cinematic stage:
+Each lab (except the RAG Architecture Viewer, a full-page viewer of its own) fills the viewport as
+one cinematic stage:
 
 - **Telemetry header** — app/lab name, a `LAB 0X` badge, the active topic, and live stat
   readouts with a `RUNNING / IDLE` status light.
@@ -113,7 +135,8 @@ the ⚙ settings toggle:
 
 ## Prerequisites
 
-- **Node.js** v18+ (for local development), or **Docker** v20.10+ (for containerized runs).
+- **Node.js** v18+ (for local development; the two RAG verification scripts need ≥ 23.6), or
+  **Docker** v20.10+ (for containerized runs).
 - An API key for your chosen LLM provider — entered in the UI, never required at build time.
   A free Google Gemini key works out of the box: https://aistudio.google.com/app/apikey
 
@@ -170,15 +193,18 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 
 ```
 ├── AppRouter.tsx                 # Routes: / (catalog), /rl (the RL app), /<area>/:labId?
-├── App.tsx                       # RL shell (frozen): module selection, metrics/chat, key state
+├── App.tsx                       # RL shell: module selection, metrics/chat, key state
 ├── catalog/
 │   ├── registry.ts               # Single source of truth: CATEGORIES, LABS, APP_NAME
 │   └── HomeCatalog.tsx           # Scrollable catalog home
 ├── components/
-│   ├── stage/                    # RL "Cinematic Stage" (frozen): StageLayout, StageGrid, …
+│   ├── TheoryLabs.tsx            # The five RL labs
+│   ├── rlPython.ts               # RL Python exports + the constants/maths they share with the labs
+│   ├── stage/                    # RL "Cinematic Stage": StageLayout, StageGrid, …
 │   ├── labkit/                   # Generic twin for new areas: LabStage, LabNav, TutorDock, viz/
 │   └── ThemeToggle.tsx           # Sun/moon light-dark toggle (mounted in every nav rail)
-├── labs/<area>/                  # Per-area labs (*.tsx) + content.ts, python.ts, registry.ts
+├── labs/<area>/                  # Per-area labs (*.tsx) + content/python/registry.ts + pure maths modules
+│   └── llm/rag-architecture/     # Reusable contract-driven RAG architecture viewer
 ├── hooks/                        # useSimLoop (play/pause/reset), useTutorState (per-area tutor)
 ├── services/
 │   ├── llmService.ts             # RL tutoring prompt (+ helper generators)
@@ -187,11 +213,14 @@ a reverse proxy, see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) and
 ├── utils/
 │   ├── apiHelpers.ts             # Rate limiting (5 RPM / 20 RPD) + retry/backoff
 │   ├── downloadCode.ts           # Runnable-Python export for new-area labs
+│   ├── pythonSamples.ts          # PYTHON_SAMPLES contract checked by scripts/check-python-exports.mjs
 │   └── theme.ts                  # Light/dark store: data-theme attr + localStorage['pp-theme']
 ├── constants.ts                  # RL defaults, MODULE_CONTENT, LIFECYCLE_CONTEXTS
 ├── types.ts                      # ModuleId, SimulationUpdate, provider + reasoning types
 ├── index.css                     # Design tokens (+ light-mode :root[data-theme=light]), fonts, scrollbars
 ├── public/theme-init.js          # No-flash theme init, loaded first in <head> (CSP-safe)
+├── public/rag-guidance/          # Nine RagVisualGuidance fixtures (design-service output + patch) + manifest
+├── scripts/                      # Verification: Python exports, RAG fixtures (+ the fixture patch)
 ├── security-headers.conf         # CSP (provider hosts + Google Fonts), shared nginx headers
 ├── nginx.conf                    # Static serve + SPA fallback
 └── vite.config.ts
@@ -205,14 +234,34 @@ npm run build     # production build (vite/esbuild)
 npm run preview   # preview the production build
 ```
 
-**Adding to the platform** — the RL app is deliberately frozen; new work is additive:
+**Verification scripts** — plain Node scripts (`npm run check:python-exports`,
+`validate:rag-architecture` and `patch:rag-guidance` are aliases for them):
+
+```bash
+node scripts/check-python-exports.mjs          # every lab's "Download Python" export (--run also executes them)
+node scripts/validate-rag-architecture.mjs     # the RAG Architecture Viewer's fixtures
+node scripts/patch-rag-guidance.mjs --check    # the fixtures are in the state the patch produces
+```
+
+- `check-python-exports` bundles each export module with the esbuild that `npm install` brings in
+  and needs `python3`. Every generated script must parse, leak no JavaScript literals and reference
+  no undefined names; `--run` also executes each script whose imports (NumPy, PyTorch, …) are
+  installed. `--area <name>` limits it to one area.
+- The two RAG scripts need **Node ≥ 23.6** (they import the viewer's TypeScript modules through
+  Node's type stripping) and nothing from `node_modules`. The validator checks the fixtures with the
+  viewer's own contract, layout, textual-description, walkthrough and comparison code — it renders
+  nothing and exercises no browser interaction.
+
+**Adding to the platform** — new areas are additive: they plug into the catalog and the generic
+lab kit without editing the RL app:
 - **Add a lab:** create `labs/<area>/X.tsx` (render `<LabStage>`), add its `LabContent` +
   Python template, then append a `LabDescriptor` to that area's `registry.ts`.
 - **Add an area:** also add a `CategoryMeta` to `catalog/registry.ts` and a route in
   `AppRouter.tsx`.
 
-Notes: TypeScript strict mode is on; there is no test/lint setup yet. The production build is
-`vite build` (esbuild) — it transpiles without a separate `tsc` type-check pass.
+Notes: TypeScript strict mode is on; there is no test framework or linter yet (only the
+verification scripts above). The production build is `vite build` (esbuild) — it transpiles
+without a separate `tsc` type-check pass.
 
 ## Contributing
 

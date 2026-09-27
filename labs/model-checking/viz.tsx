@@ -13,27 +13,28 @@ const ACCENT = '#fb7185';
 
 /* ---------------- Mutual exclusion: two process lanes ---------------- */
 
-const LANE_NAMES = ['Idle', 'Wait', 'Critical'];
-const LANE_COLORS = ['#64748b', '#38bdf8', '#fb7185'];
+// Lane colours by location code: idle grey, entry steps blue/violet, critical rose.
+const LANE_COLOR: Record<string, string> = { I: '#64748b', F: '#a78bfa', T: '#a78bfa', W: '#38bdf8', C: '#fb7185' };
 
-const ProcessLane: React.FC<{ name: string; pos: number; x: number }> = ({ name, pos, x }) => {
+const ProcessLane: React.FC<{ name: string; lanes: { code: string; title: string }[]; pos: number; x: number }> = ({ name, lanes, pos, x }) => {
   const isLight = useTheme() === 'light';
-  const cellW = 78, cellH = 26, gap = 6, top = 0;
+  const cellW = 78, cellH = 24, gap = 5, top = 0;
   return (
     <g transform={`translate(${x},0)`}>
       <text x={0} y={top - 8} fontSize={11} fontFamily="var(--mono)" fill="var(--t1)" fontWeight={600}>{name}</text>
-      {LANE_NAMES.map((ln, i) => {
+      {lanes.map((ln, i) => {
         const y = top + i * (cellH + gap);
         const here = pos === i;
+        const col = LANE_COLOR[ln.code] ?? '#38bdf8';
         return (
           <g key={i}>
             <rect x={0} y={y} width={cellW} height={cellH} rx={6}
-              fill={here ? LANE_COLORS[i] : (isLight ? 'rgba(50,60,90,.10)' : 'rgba(120,130,170,.10)')}
-              stroke={here ? LANE_COLORS[i] : 'var(--border)'} strokeWidth={here ? 1.6 : 1}
-              style={here ? { filter: `drop-shadow(0 0 6px ${LANE_COLORS[i]})` } : undefined} />
+              fill={here ? col : (isLight ? 'rgba(50,60,90,.10)' : 'rgba(120,130,170,.10)')}
+              stroke={here ? col : 'var(--border)'} strokeWidth={here ? 1.6 : 1}
+              style={here ? { filter: `drop-shadow(0 0 6px ${col})` } : undefined} />
             <text x={cellW / 2} y={y + cellH / 2 + 4} textAnchor="middle" fontSize={11}
               fontFamily="var(--disp)" fontWeight={600}
-              fill={here ? 'rgba(8,11,20,.9)' : 'var(--t2)'}>{ln}</text>
+              fill={here ? 'rgba(8,11,20,.9)' : 'var(--t2)'}>{ln.title}</text>
           </g>
         );
       })}
@@ -41,20 +42,28 @@ const ProcessLane: React.FC<{ name: string; pos: number; x: number }> = ({ name,
   );
 };
 
-export const MutexSchematic: React.FC<{ a: number; b: number; lock: boolean; unsafe: boolean }> = ({ a, b, lock, unsafe }) => {
+/** Two process lanes for the highlighted state, plus the shared variables: the lock
+ *  bit (lock protocol) or both flags and `turn` (Peterson variants). */
+export const MutexSchematic: React.FC<{
+  lanes: { code: string; title: string }[]; a: number; b: number; unsafe: boolean;
+  lock?: boolean; peterson?: { flagA: boolean; flagB: boolean; turn: number };
+}> = ({ lanes, a, b, unsafe, lock, peterson }) => {
   const isLight = useTheme() === 'light';
-  const w = 240, h = 132;
+  const w = 240, h = 48 + lanes.length * 29;
+  const vars = peterson
+    ? `flag A=${peterson.flagA ? 1 : 0}  flag B=${peterson.flagB ? 1 : 0}  turn=${peterson.turn === 0 ? 'A' : 'B'}`
+    : lock === undefined ? 'no shared lock' : lock ? '🔒 lock held' : 'lock free';
   return (
     <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: 'block' }}>
       <rect x={0} y={0} width={w} height={h} rx={12} fill={isLight ? 'var(--bg2)' : PANEL}
         stroke={unsafe ? (isLight ? 'var(--bad)' : '#f87171') : 'var(--border)'} strokeWidth={unsafe ? 1.8 : 1} />
       <g transform="translate(18,30)">
-        <ProcessLane name="Process A" pos={a} x={0} />
-        <ProcessLane name="Process B" pos={b} x={124} />
+        <ProcessLane name="Process A" lanes={lanes} pos={a} x={0} />
+        <ProcessLane name="Process B" lanes={lanes} pos={b} x={124} />
       </g>
-      <g transform={`translate(${w / 2},${h - 12})`}>
+      <g transform={`translate(${w / 2},${h - 10})`}>
         <text textAnchor="middle" fontSize={10} fontFamily="var(--mono)"
-          fill={lock ? ACCENT : 'var(--t2)'}>{lock ? '🔒 lock held' : 'lock free'}</text>
+          fill={lock || peterson ? ACCENT : 'var(--t2)'}>{vars}</text>
       </g>
     </svg>
   );

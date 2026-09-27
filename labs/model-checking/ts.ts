@@ -1,7 +1,7 @@
-// A tiny transition-system / model-checking engine: BFS reachability over a
-// state space with a safety predicate (bad) and an optional goal, recording the
-// discovery order, edges, distances and parent pointers for counterexample /
-// solution traces. Bad states are not expanded.
+// A tiny transition-system / model-checking engine: explicit-state reachability
+// over a state space with a safety predicate (bad) and an optional goal,
+// recording the visit order, edges, depths and parent pointers for
+// counterexample / solution traces. Bad states are recorded but never expanded.
 
 export interface TS<S> {
   init: S;
@@ -12,10 +12,12 @@ export interface TS<S> {
   goal?: (s: S) => boolean;
 }
 
-export interface ExploreResult {
+export interface ExploreResult<S> {
+  /** BFS: discovery order (states are marked when enqueued). DFS: visit order (marked when popped). */
   order: string[];
-  nodes: Map<string, { label: string; bad: boolean; goal: boolean }>;
+  nodes: Map<string, { label: string; bad: boolean; goal: boolean; state: S }>;
   edges: { from: string; to: string }[];
+  /** BFS: shortest distance from init. DFS: depth in the DFS tree (the length of the path it took). */
   dist: Map<string, number>;
   parent: Map<string, string>;
   badKey: string | null;
@@ -23,40 +25,60 @@ export interface ExploreResult {
   trace: (k: string) => string[];
 }
 
-/** Search strategy for the reachability walk: breadth-first (shortest traces)
- * or depth-first (dives deep first — finds longer counterexamples/solutions). */
+/** Search strategy for the reachability walk.
+ *  bfs — FIFO queue, a state is marked when first generated, so the first path to
+ *        any state is a shortest one (shortest counterexample / solution).
+ *  dfs — textbook depth-first search: LIFO stack of (state, discoverer) entries, a
+ *        state is marked when it is popped and expanded, and its parent is the
+ *        state whose expansion pushed that entry — so traces follow the actual
+ *        path the dive took, which can be much longer than the shortest one. */
 export type SearchMode = 'bfs' | 'dfs';
 
-export function explore<S>(ts: TS<S>, max = 400, mode: SearchMode = 'bfs'): ExploreResult {
+export function explore<S>(ts: TS<S>, max = 400, mode: SearchMode = 'bfs'): ExploreResult<S> {
   const order: string[] = [];
-  const nodes = new Map<string, { label: string; bad: boolean; goal: boolean }>();
+  const nodes = new Map<string, { label: string; bad: boolean; goal: boolean; state: S }>();
   const edges: { from: string; to: string }[] = [];
   const dist = new Map<string, number>();
   const parent = new Map<string, string>();
-  const seen = new Set<string>();
-  const k0 = ts.key(ts.init);
-  const info = (s: S) => ({ label: ts.label(s), bad: !!ts.bad?.(s), goal: !!ts.goal?.(s) });
+  const info = (s: S) => ({ label: ts.label(s), bad: !!ts.bad?.(s), goal: !!ts.goal?.(s), state: s });
   let badKey: string | null = null, goalKey: string | null = null;
+  const record = (k: string, s: S, d: number, par: string | null) => {
+    const n = info(s);
+    nodes.set(k, n); order.push(k); dist.set(k, d);
+    if (par !== null) parent.set(k, par);
+    if (n.bad && badKey === null) badKey = k;
+    if (n.goal && goalKey === null) goalKey = k;
+    return n;
+  };
 
-  seen.add(k0); dist.set(k0, 0); nodes.set(k0, info(ts.init)); order.push(k0);
-  if (nodes.get(k0)!.bad) badKey = k0;
-  if (nodes.get(k0)!.goal) goalKey = k0;
-
-  // BFS uses a FIFO queue (pop front); DFS uses a LIFO stack (pop back). Both
-  // record discovery order, edges, distances and parent pointers identically.
-  const frontier: S[] = [ts.init];
-  while (frontier.length > 0 && nodes.size < max) {
-    const s = mode === 'bfs' ? frontier.shift()! : frontier.pop()!;
-    const ks = ts.key(s);
-    if (nodes.get(ks)!.bad) continue; // don't expand unsafe states
-    for (const t of ts.next(s)) {
-      const kt = ts.key(t);
-      if (!seen.has(kt)) {
-        seen.add(kt); dist.set(kt, dist.get(ks)! + 1); parent.set(kt, ks); nodes.set(kt, info(t)); order.push(kt); frontier.push(t);
-        if (nodes.get(kt)!.bad && !badKey) badKey = kt;
-        if (nodes.get(kt)!.goal && !goalKey) goalKey = kt;
+  if (mode === 'bfs') {
+    const k0 = ts.key(ts.init);
+    record(k0, ts.init, 0, null);
+    const queue: S[] = [ts.init];
+    let head = 0;
+    while (head < queue.length && nodes.size < max) {
+      const s = queue[head++]!;
+      const ks = ts.key(s);
+      if (nodes.get(ks)!.bad) continue; // don't expand unsafe states
+      for (const t of ts.next(s)) {
+        const kt = ts.key(t);
+        if (!nodes.has(kt)) { record(kt, t, dist.get(ks)! + 1, ks); queue.push(t); }
+        edges.push({ from: ks, to: kt });
       }
-      edges.push({ from: ks, to: kt });
+    }
+  } else {
+    const stack: { s: S; par: string | null; d: number }[] = [{ s: ts.init, par: null, d: 0 }];
+    while (stack.length > 0 && nodes.size < max) {
+      const { s, par, d } = stack.pop()!;
+      const ks = ts.key(s);
+      if (nodes.has(ks)) continue;       // already visited via another entry
+      const n = record(ks, s, d, par);
+      if (n.bad) continue;               // don't expand unsafe states
+      for (const t of ts.next(s)) {
+        const kt = ts.key(t);
+        edges.push({ from: ks, to: kt });
+        if (!nodes.has(kt)) stack.push({ s: t, par: ks, d: d + 1 });
+      }
     }
   }
 

@@ -1,6 +1,11 @@
 // Tiny boolean-expression parser/evaluator for the Truth Table lab.
 // Operators (high→low precedence): ! (not), & (and), ^ (xor), | (or),
-// -> (implies), <-> (iff). Variables are single letters. Parentheses allowed.
+// -> (implies), <-> (iff). Unicode forms ¬ ∧ ⊕ ∨ → ↔ (and ~ for not) are
+// accepted too. &, ^, |, <-> associate to the left (all four are associative, so
+// grouping never changes the value); -> associates to the RIGHT, the standard
+// convention: A -> B -> C means A -> (B -> C). Variables are single letters
+// (case-insensitive, upper-cased). Parentheses allowed. The Python export
+// (python.ts) ships a line-for-line port of this parser.
 export type Ast =
   | { t: 'var'; name: string }
   | { t: 'not'; a: Ast }
@@ -23,7 +28,8 @@ export function parseBool(src: string): Ast {
   function andE(): Ast { let a = notE(); while (eat('&') || eat('∧')) a = { t: 'bin', op: '&', a, b: notE() }; return a; }
   function xorE(): Ast { let a = andE(); while (eat('^') || eat('⊕')) a = { t: 'bin', op: '^', a, b: andE() }; return a; }
   function orE(): Ast { let a = xorE(); while (eat('|') || eat('∨')) a = { t: 'bin', op: '|', a, b: xorE() }; return a; }
-  function impE(): Ast { let a = orE(); while (eat('->') || eat('→')) a = { t: 'bin', op: '->', a, b: orE() }; return a; }
+  // Right-associative: the right operand recurses into impE itself.
+  function impE(): Ast { const a = orE(); if (eat('->') || eat('→')) return { t: 'bin', op: '->', a, b: impE() }; return a; }
   function iff(): Ast { let a = impE(); while (eat('<->') || eat('↔')) a = { t: 'bin', op: '<->', a, b: impE() }; return a; }
 
   const r = iff(); ws();
@@ -53,4 +59,15 @@ export function collectVars(a: Ast, into = new Set<string>()): Set<string> {
   else if (a.t === 'not') collectVars(a.a, into);
   else { collectVars(a.a, into); collectVars(a.b, into); }
   return into;
+}
+
+const SYM: Record<'&' | '|' | '^' | '->' | '<->', string> = { '&': '∧', '|': '∨', '^': '⊕', '->': '→', '<->': '↔' };
+
+/** The parse made explicit: every binary operation wrapped in parentheses, e.g.
+ * "(A -> B) & (B -> C) -> (A -> C)"  ⇒  "((A → B) ∧ (B → C)) → (A → C)". */
+export function formatAst(a: Ast, top = true): string {
+  if (a.t === 'var') return a.name;
+  if (a.t === 'not') return '¬' + formatAst(a.a, false);
+  const s = `${formatAst(a.a, false)} ${SYM[a.op]} ${formatAst(a.b, false)}`;
+  return top ? s : `(${s})`;
 }

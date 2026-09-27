@@ -16,7 +16,7 @@ import ThemeToggle from '../ThemeToggle';
 const NAV: { id: ModuleId; d: string; label: string }[] = [
   { id: ModuleId.MODEL_VS_FREE, d: 'M12 2 2 7l10 5 10-5-10-5Z', label: 'Model Types' },
   { id: ModuleId.DET_STOCHASTIC, d: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 6v8', label: 'Det. vs Stoch.' },
-  { id: ModuleId.TABULAR_DEEP, d: 'M3 3h7v7H3zM14 14h7v7h-7z', label: 'Tabular vs Deep' },
+  { id: ModuleId.TABULAR_DEEP, d: 'M3 3h7v7H3zM14 14h7v7h-7z', label: 'Tabular vs Approx' },
   { id: ModuleId.EXPLORE_EXPLOIT, d: 'M2 12h6l2-7 4 14 2-7h6', label: 'Explore / Exploit' },
   { id: ModuleId.SINGLE_MULTI, d: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', label: 'Single vs Multi' },
 ];
@@ -98,7 +98,6 @@ export const LiveMath: React.FC<{ update?: SimulationUpdate | null }> = ({ updat
           </div>
         </>
       )}
-      <div style={{ marginTop: 16 }}><Sparkline w={300} h={64} seed={(update.algorithm.length % 7) + 1} /></div>
     </div>
   );
 };
@@ -237,6 +236,8 @@ const Stat: React.FC<{ k: string; v: React.ReactNode; color?: string }> = ({ k, 
 export interface StageTelemetry {
   episode?: number | string;
   reward?: number | string;
+  /** Header label for `reward` (default "REWARD"), e.g. "LAST RETURN" or "AVG REWARD". */
+  rewardKey?: string;
   epsilon?: number | string;
   steps?: number | string;
   running: boolean;
@@ -286,7 +287,7 @@ const StageLayout: React.FC<StageLayoutProps> = (p) => {
         <span style={{ fontFamily: 'var(--mono)', fontSize: 11.5, color: 'var(--t1)', letterSpacing: '.04em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.moduleSubtitle}</span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 18, flexShrink: 0 }}>
           {t.episode != null && <Stat k="EPISODE" v={t.episode} />}
-          {t.reward != null && <Stat k="REWARD" v={t.reward} color={GOOD} />}
+          {t.reward != null && <Stat k={t.rewardKey ?? 'REWARD'} v={t.reward} color={GOOD} />}
           {t.epsilon != null && <Stat k="ε" v={t.epsilon} />}
           {t.steps != null && <Stat k="STEPS" v={t.steps} />}
           <LED color={t.running ? GOOD : '#6b7494'} label={t.running ? 'RUNNING' : 'IDLE'} pulse={t.running} />

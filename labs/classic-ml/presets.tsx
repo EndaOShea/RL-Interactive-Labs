@@ -1,4 +1,3 @@
-import React from 'react';
 import { AlgoPill, MonoLabel } from '../../components/stage/primitives';
 
 // Area-local "guided challenges" — small clickable preset chips rendered in each

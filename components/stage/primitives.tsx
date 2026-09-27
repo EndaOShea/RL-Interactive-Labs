@@ -81,32 +81,42 @@ export const LED: React.FC<{ color?: string; label?: string; pulse?: boolean }> 
 );
 
 /* ---------- sparkline ---------- */
+// Draws ONLY real data: with fewer than two values there is no trend to show, so
+// it renders a flat baseline (at mid-height for a single value) instead of an
+// invented curve. `seed`/`points` are accepted for call-site compatibility but no
+// longer generate anything.
 export const Sparkline: React.FC<{ w?: number; h?: number; color?: string; seed?: number; fill?: boolean; values?: number[]; points?: number }> = ({
-  w = 200, h = 44, color = ACC, seed = 1, fill = true, values, points = 40,
+  w = 200, h = 44, color = ACC, fill = true, values,
 }) => {
   const isLight = useTheme() === 'light';
   const pts = useMemo(() => {
-    if (values && values.length > 1) {
-      const lo = Math.min(...values), hi = Math.max(...values);
+    const finite = (values ?? []).filter((v) => Number.isFinite(v));
+    if (finite.length > 1) {
+      const lo = Math.min(...finite), hi = Math.max(...finite);
       const span = hi - lo || 1;
-      return values.map((v) => (v - lo) / span);
+      return finite.map((v) => (hi > lo ? (v - lo) / span : 0.5));
     }
-    let v = 0.1; const out: number[] = [];
-    for (let i = 0; i < points; i++) {
-      v += (Math.sin(i * 0.5 + seed) * 0.04) + 0.018 + (Math.sin(i * 2.3 + seed) * 0.5) * 0.02 * (1 - i / points);
-      out.push(Math.max(0.04, Math.min(0.97, v)));
-    }
-    return out;
-  }, [seed, points, values]);
+    const level = finite.length === 1 ? 0.5 : 0.04;
+    return [level, level];
+  }, [values]);
+  const hasData = (values ?? []).some((v) => Number.isFinite(v));
 
   const n = pts.length;
   const d = pts.map((p, i) => `${(i / (n - 1)) * w},${h - p * h}`).join(' ');
   const area = `0,${h} ${d} ${w},${h}`;
+  const last = pts[pts.length - 1] ?? 0;
+  if (!hasData) {
+    return (
+      <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }} aria-label="no data yet">
+        <polyline points={d} fill="none" stroke={color} strokeWidth="1.2" strokeDasharray="3 4" opacity="0.35" />
+      </svg>
+    );
+  }
   return (
     <svg width={w} height={h} style={{ display: 'block', overflow: 'visible' }}>
-      {fill && <polygon points={area} fill={color} opacity="0.12" />}
+      {fill && n > 2 && <polygon points={area} fill={color} opacity="0.12" />}
       <polyline points={d} fill="none" stroke={color} strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={w} cy={h - pts[pts.length - 1] * h} r="2.6" fill={isLight ? color : '#fff'} stroke={color} strokeWidth="1.5" />
+      <circle cx={w} cy={h - last * h} r="2.6" fill={isLight ? color : '#fff'} stroke={color} strokeWidth="1.5" />
     </svg>
   );
 };

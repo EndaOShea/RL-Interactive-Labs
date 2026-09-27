@@ -16,7 +16,7 @@ export const BNN_CONTENT: LabContent = {
     },
     {
       heading: 'Why the band widens away from the data',
-      body: 'Near training points, every plausible function must pass close to the observations, so the sampled functions agree and the predictive band is tight. In gaps between clusters and beyond the data’s range, many very different functions fit equally well, so the samples fan out and the band balloons. This is the property a point estimate cannot express — and exactly what you want for safe extrapolation, active learning and out-of-distribution detection.',
+      body: 'Near training points, every plausible function must pass close to the observations, so the sampled functions agree and the predictive band is tight. In gaps between clusters and beyond the data’s range, many very different functions fit equally well, so the samples fan out and the band widens. This is the property a point estimate cannot express — and exactly what you want for safe extrapolation, active learning and out-of-distribution detection.',
       details: [
         { label: 'Interpolation', text: 'Where data constrains the fit, functions converge and uncertainty is small.' },
         { label: 'Extrapolation', text: 'Outside the data the posterior reverts toward the prior — wide uncertainty.' },
@@ -25,11 +25,11 @@ export const BNN_CONTENT: LabContent = {
     },
     {
       heading: 'Practical approximations',
-      body: 'The exact posterior is intractable for real networks, so practitioners approximate it. Mean-field variational inference (Bayes-by-Backprop) fits a Gaussian q(w)=N(μ,σ) by maximising the ELBO. MC-Dropout keeps dropout ON at test time and treats each masked forward pass as a posterior sample. Deep ensembles train several networks from different initialisations and use their disagreement. This lab uses a fixed random feature layer with a Bayesian linear output, so all four give the SAME well-defined predictive distribution — and you can watch dropout, ensembling and weight-sampling approximate it.',
+      body: 'The exact posterior is intractable for real networks, so practitioners approximate it. Mean-field variational inference (Bayes-by-Backprop) fits a factorised Gaussian q(w) = Π N(μᵢ, σᵢ²) by maximising the ELBO. MC-Dropout keeps dropout ON at test time and treats each masked forward pass as a sample. Deep ensembles train several networks from different initialisations and use their disagreement. This lab’s network has a fixed random feature layer and a Bayesian linear output, so its exact posterior is known in closed form and drawn as a dotted reference band — and you can see how far each approximation departs from it. Mean-field keeps the right mean but, by ignoring how the weights co-vary, under-estimates every weight’s variance and flattens the band; MC-dropout’s spread comes from the noise it injects, not from where the data are; the ensemble’s members also differ in their random features, so their spread includes uncertainty about the features themselves, which the fixed-feature posterior leaves out.',
       details: [
-        { label: 'Variational / Bayes-by-Backprop', text: 'A learned Gaussian over weights; sample weights, average predictions.' },
-        { label: 'MC-Dropout', text: 'Dropout at inference ≈ approximate Bayesian inference (Gal & Ghahramani).' },
-        { label: 'Deep ensembles', text: 'Several independently-trained nets; cheap, strong uncertainty from disagreement.' },
+        { label: 'Variational / Bayes-by-Backprop', text: 'A learned factorised Gaussian over weights. Here it is computed at its ELBO optimum (μ = m, σᵢ² = 1/Aᵢᵢ), and the KL gap to the exact posterior is shown.' },
+        { label: 'MC-Dropout', text: 'Dropout at inference as approximate Bayesian inference (Gal & Ghahramani). How good the approximation is depends on the model — here its band does not pinch at the data.' },
+        { label: 'Deep ensembles', text: 'Several independently-trained nets; their disagreement is a cheap, strong uncertainty signal.' },
       ],
     },
   ],
@@ -47,12 +47,12 @@ export const GP_CONTENT: LabContent = {
       details: [
         { label: 'Mean + kernel', text: 'A GP is fully specified by a mean function (here 0) and a covariance kernel k(x,x′).' },
         { label: 'Lengthscale ℓ', text: 'Small ℓ → wiggly functions with short-range correlation; large ℓ → smooth.' },
-        { label: 'Kernel choice', text: 'RBF is infinitely smooth, Matérn-3/2 is rougher, periodic repeats — encoding prior beliefs.' },
+        { label: 'Kernel choice', text: 'RBF is infinitely smooth, Matérn-3/2 is rougher, periodic repeats (every 0.3 here), and linear gives straight lines (its 0.02·σ_f² bias term lets the line’s height vary) — each encodes a prior belief.' },
       ],
     },
     {
       heading: 'Conditioning: the posterior in closed form',
-      body: 'Observing data conditions the Gaussian. With training inputs X, targets y and noise σ²ₙ, the posterior at test points X∗ is again Gaussian with mean K∗(K+σ²ₙI)⁻¹y and covariance K∗∗ − K∗(K+σ²ₙI)⁻¹K∗ᵀ. No optimisation is needed — just linear algebra. The predictive standard deviation collapses to the noise level at observed points and grows between and beyond them, giving the GP its signature uncertainty band.',
+      body: 'Observing data conditions the Gaussian. With training inputs X, targets y and noise σ²ₙ, the posterior at test points X∗ is again Gaussian with mean K∗(K+σ²ₙI)⁻¹y and covariance K∗∗ − K∗(K+σ²ₙI)⁻¹K∗ᵀ — computed with a Cholesky factorisation, never an explicit inverse. No optimisation is needed — just linear algebra. The posterior standard deviation shrinks to about the noise level at an isolated observation and, for kernels that decay with distance, grows between and beyond the data, giving the GP its signature uncertainty band.',
       details: [
         { label: 'Posterior mean', text: 'A smooth interpolation of the data, weighted by kernel similarity.' },
         { label: 'Posterior variance', text: 'Small near data, large in gaps — uncertainty you get for free.' },
@@ -61,10 +61,10 @@ export const GP_CONTENT: LabContent = {
     },
     {
       heading: 'Cost, kernels and the link to neural nets',
-      body: 'GPs are the gold standard for uncertainty on small data and underpin Bayesian optimisation, but inference costs O(n³) in the number of points because of the matrix inverse, so they need sparse approximations to scale. The kernel encodes every assumption — periodicity, smoothness, trends — and tuning its hyperparameters (lengthscale, variance, noise) by marginal likelihood is the GP’s version of learning. A single-layer neural network with infinitely many random features converges to a GP, the bridge to the Bayesian-NN lab.',
+      body: 'GPs are the gold standard for uncertainty on small data and underpin Bayesian optimisation, but inference costs O(n³) in the number of points because the n×n kernel matrix must be factorised, so they need sparse approximations to scale. The kernel encodes every assumption — periodicity, smoothness, trends — and tuning its hyperparameters (lengthscale, variance, noise) by marginal likelihood is the GP’s version of learning. A single-layer neural network with infinitely many random features converges to a GP, the bridge to the Bayesian-NN lab.',
       details: [
-        { label: 'O(n³) cost', text: 'The (K+σ²I)⁻¹ inverse limits exact GPs to ~thousands of points.' },
-        { label: 'Hyperparameters', text: 'ℓ, σ_f, σ_n are tuned by maximising the marginal likelihood (Occam balance).' },
+        { label: 'O(n³) cost', text: 'Factorising K+σ²I (Cholesky) costs O(n³), which limits exact GPs to ~thousands of points.' },
+        { label: 'Hyperparameters', text: 'ℓ, σ_f, σ_n are tuned by maximising the log marginal likelihood −½yᵀ(K+σ²I)⁻¹y − ½log|K+σ²I| − (n/2)log 2π (data fit vs complexity) — the lab shows it live and can fit it.' },
         { label: 'Wide-net limit', text: 'An infinitely-wide random network is a GP — uncertainty without weights.' },
       ],
     },
@@ -88,11 +88,11 @@ export const HMM_CONTENT: LabContent = {
     },
     {
       heading: 'Filtering, smoothing and the most likely path',
-      body: 'The forward algorithm computes the filtered belief P(state_t | observations up to t) by alternating a prediction step (multiply by A) with an update step (multiply by the emission likelihood) and renormalising — recursive Bayesian estimation in discrete state space. Combining a forward and a backward pass gives the smoothed posterior P(state_t | the whole sequence). Viterbi, a max-product version of the same recursion, returns the single most likely state path.',
+      body: 'The forward algorithm computes the filtered belief P(state_t | observations up to t) by alternating a prediction step (multiply by A) with an update step (multiply by the emission likelihood) and renormalising — recursive Bayesian estimation in discrete state space; the renormalising constants c_t multiply to the likelihood of the observations, log p(o₁…o_T) = Σ log c_t. Combining a forward and a backward pass gives the smoothed posterior P(state_t | the whole sequence). Viterbi, a max-product version of the same recursion, returns the single most likely state path — which need not agree, step by step, with the most likely state at each time under the smoothed posterior, and which can change earlier states when a new observation arrives.',
       details: [
-        { label: 'Forward (filtering)', text: 'Online belief over the current state as each observation arrives.' },
+        { label: 'Forward (filtering)', text: 'Online belief over the current state as each observation arrives; its normalisers give the sequence likelihood.' },
         { label: 'Forward–backward (smoothing)', text: 'Posterior over each state using past AND future observations.' },
-        { label: 'Viterbi', text: 'Dynamic programming for the single most probable hidden-state sequence.' },
+        { label: 'Viterbi', text: 'Dynamic programming for the single most probable hidden-state sequence — a joint answer, not the per-time argmax of the smoothed posterior.' },
       ],
     },
     {
@@ -100,7 +100,7 @@ export const HMM_CONTENT: LabContent = {
       body: 'Before deep sequence models, HMMs were the backbone of speech recognition, part-of-speech tagging and gene finding, and they remain the textbook model for noisy time series with discrete latent structure. They are trained by Baum–Welch (the EM algorithm) when the states are unknown. Conceptually they sit between the Bayes lab (recursive updating) and the Sequence-Models area (latent state over time) — a fully probabilistic cousin of the RNN.',
       details: [
         { label: 'Baum–Welch (EM)', text: 'Learns A, B, π from observations alone when the hidden states are unlabelled.' },
-        { label: 'Scaling', text: 'Forward probabilities are renormalised each step to avoid numerical underflow.' },
+        { label: 'Scaling', text: 'Forward probabilities are renormalised each step to avoid numerical underflow; the logs of those normalisers sum to the log-likelihood.' },
         { label: 'Relation to RNNs', text: 'Both carry latent state through time; the HMM’s state is discrete and its inference exact.' },
       ],
     },

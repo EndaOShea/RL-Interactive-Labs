@@ -2,106 +2,82 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import ScatterPlot, { ScatterPoint, ScatterLine, ScatterMarker } from '../../components/labkit/viz/ScatterPlot';
 import { AlgoPill, RunControls, Legend, MonoLabel, GOOD, ParamSlider } from '../../components/stage/primitives';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
+import { useTheme } from '../../utils/theme';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { searchPython } from './python';
-import { retrieve, SEARCH_DOCS, SEARCH_QUERIES } from './shared';
-import { useTheme } from '../../utils/theme';
+import { TABLE, EMB_DIM } from './embeddingTable';
+import { SEARCH_DOCS, SEARCH_QUERIES, DOC_EMBEDDINGS, DOC_PCA, semanticSearch, keywordScores, docPoint, queryPoint } from './searchCore';
+import WordMap from './WordMap';
+import type { MapPoint, MapArrow } from './WordMap';
 
 const ACCENT = '#14b8a6';
-// Neutral grey for all document points — retrieval shown purely by lines + ranked list.
-// This keeps the legend swatches exactly matching what renders on screen.
-const DOC_COLOR = '#6b7494';
+const TOPIC_COLOR: Record<string, string> = { sport: '#38bdf8', tech: '#a78bfa', finance: '#fbbf24' };
+const MAX_K = 5;
 
 const SemanticSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const isLight = useTheme() === 'light';
   const narration = useNarration();
-  const [queryIdx, setQueryIdx] = useState(0);
+  const [queryText, setQueryText] = useState(SEARCH_QUERIES[0]?.text ?? '');
+  const [draft, setDraft] = useState(SEARCH_QUERIES[0]?.text ?? '');
   const [k, setK] = useState(3);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-  const query = SEARCH_QUERIES[queryIdx];
+  const { query, ranked } = useMemo(() => semanticSearch(queryText), [queryText]);
+  const kw = useMemo(() => keywordScores(queryText), [queryText]);
+  const hasVec = query.used.length > 0;
+  const topK = hasVec ? ranked.slice(0, k) : [];
+  const preset = SEARCH_QUERIES.find((q) => q.text === queryText) ?? null;
+  const onTopic = preset ? topK.filter((r) => r.doc.topics.includes(preset.topic)).length : null;
+  const kwHits = kw.scores.filter((s) => s > 0).length;
+  const noSharedWords = topK.filter((r) => (kw.scores[r.doc.id] ?? 0) === 0);
 
-  // Rank ALL docs so users can see the full ordering; topK is first k of ranked.
-  // query is SEARCH_QUERIES[queryIdx], a constant array — queryIdx fully determines query.vec
-  const ranked = useMemo(() => retrieve(query.vec, SEARCH_DOCS.length), [queryIdx]);
-  const topK = ranked.slice(0, k);
-  const topIds = new Set(topK.map((r) => r.doc.id));
+  const qp = queryPoint(query);
+  const points: MapPoint[] = SEARCH_DOCS.map((d, i) => {
+    const p = docPoint(i);
+    return { x: p[0] ?? 0, y: p[1] ?? 0, label: `d${d.id}`, color: TOPIC_COLOR[d.topics[0] ?? 'tech'] ?? ACCENT, faint: hasVec && !topK.some((r) => r.doc.id === d.id), bold: topK.some((r) => r.doc.id === d.id) };
+  });
+  const arrows: MapArrow[] = topK.map((r) => {
+    const p = docPoint(r.doc.id);
+    return { x1: qp[0] ?? 0, y1: qp[1] ?? 0, x2: p[0] ?? 0, y2: p[1] ?? 0, color: ACCENT, width: 1.8, head: false };
+  });
 
-  // ScatterPlot data — all docs rendered in neutral grey (honest legend).
-  // Retrieval shown purely through accent lines + query ring marker + ranked list highlight.
-  const points: ScatterPoint[] = SEARCH_DOCS.map((d) => ({
-    x: d.vec[0],
-    y: d.vec[1],
-    cls: 0,  // 0 → classColors[0] = DOC_COLOR, matching the legend
-    faint: !topIds.has(d.id),
-  }));
-
-  // classColors[0] = DOC_COLOR so colorOf(0) = DOC_COLOR — matches the legend swatch exactly.
-  const customClassColors = [DOC_COLOR];
-
-  const markers: ScatterMarker[] = [
-    { x: query.vec[0], y: query.vec[1], color: ACCENT, r: 7, ring: true },
-  ];
-
-  const lines: ScatterLine[] = topK.map((r) => ({
-    x1: query.vec[0], y1: query.vec[1],
-    x2: r.doc.vec[0], y2: r.doc.vec[1],
-    color: ACCENT, width: 2,
-  }));
+  const submit = (text: string) => { setQueryText(text); setDraft(text); setLastLog(null); narration.cancel(); };
 
   const search = () => {
-    const bestDoc = topK[0];
-    // Find a retrieved doc that shares no words with the query label (for the math note).
-    const noSharedWords = topK.find((r) => {
-      const qWords = new Set(query.label.toLowerCase().split(/\s+/));
-      return r.doc.text.split(/\s+/).every((w) => !qWords.has(w.toLowerCase()));
-    });
-    const semanticNote = noSharedWords
-      ? `d${noSharedWords.doc.id} ("${noSharedWords.doc.text}") shares NO words with the query but is topically close (cos ${noSharedWords.sim.toFixed(3)})`
-      : `all top-${k} docs are retrieved by directional similarity in embedding space`;
-
-    narration.narratePhase(
-      `search:${queryIdx}:${k}`,
-      `The query "${query.label}" is embedded in the same 2-D space as all eight documents. Cosine similarity measures the angle between the query vector and each document vector — the smaller the angle, the more topically related they are. The top-${k} results are ${topK.map((r) => `d${r.doc.id}`).join(', ')}, with the best cosine of ${bestDoc?.sim.toFixed(3) ?? '—'}. Crucially, some retrieved documents share no words with the query at all — they are retrieved purely because their embedding points in the same direction, which is the core advantage of semantic search over keyword matching.`,
-    );
-
+    const best = topK[0];
+    const words = query.used.map((u) => u.word).join(', ');
+    narration.narratePhase(`search:${queryText}:${k}`, hasVec
+      ? `The query is embedded from its text: the vectors of ${words} are averaged into one ${EMB_DIM}-dimensional vector${query.oov.length ? `, and ${query.oov.join(', ')} ${query.oov.length === 1 ? 'is' : 'are'} not in the table so ${query.oov.length === 1 ? 'it is' : 'they are'} ignored` : ''}. Every document was embedded the same way. Ranking by cosine puts ${topK.map((r) => `d${r.doc.id}`).join(', ')} on top, best at ${best?.sim.toFixed(3)}. The keyword baseline matches ${kwHits} of the ${SEARCH_DOCS.length} documents${noSharedWords.length ? `; ${noSharedWords.map((r) => `d${r.doc.id}`).join(', ')} share${noSharedWords.length === 1 ? 's' : ''} no word with the query yet ${noSharedWords.length === 1 ? 'is' : 'are'} retrieved by meaning` : ''}.`
+      : `None of the query's words are in the embedding table, so it has no vector and nothing can be ranked. The keyword baseline matches ${kwHits} documents.`);
     setLastLog({
-      algorithm: 'Semantic search · cosine retrieval',
-      stepDescription: `Retrieve top-${k} documents by cosine similarity to query "${query.label}"`,
-      formula: 'score(d) = cos(q, d);   top-k = argsort↓ score',
+      algorithm: 'Semantic search · mean word vectors + cosine',
+      stepDescription: `rank ${SEARCH_DOCS.length} documents for "${queryText}"`,
+      formula: 'q = mean(v(w) for content words w in the query);  score(d) = cos(q, d);  top-k = argsort↓ score',
       variables: {
-        query: query.label,
+        query: queryText,
+        'words used': words || '—',
+        OOV: query.oov.join(', ') || '—',
         k,
-        'top doc': bestDoc?.doc.id != null ? `d${bestDoc.doc.id}` : '—',
-        'best cos': +(bestDoc?.sim ?? 0).toFixed(3),
+        'top doc': best ? `d${best.doc.id}` : '—',
+        'best cos': best ? +best.sim.toFixed(3) : '—',
+        'keyword hits': `${kwHits}/${SEARCH_DOCS.length}`,
       },
-      result: `top-${k}: ${topK.map((r) => 'd' + r.doc.id).join(', ')}`,
+      result: hasVec ? `top-${k}: ${topK.map((r) => `d${r.doc.id} (${r.sim.toFixed(3)})`).join(', ')}` : 'query has no known words → no vector',
       mathDetails: {
         params: [
-          {
-            label: 'embedding puts query + docs in one space',
-            info: `Both the query vector ${JSON.stringify(query.vec)} and all document vectors live in the same 2-D space — cosine can directly compare them.`,
-          },
-          {
-            label: 'cosine ranks by angle / topic ignoring length',
-            info: `cos(q, d) = q·d / (|q||d|). Two vectors pointing in the same direction score near 1 regardless of their magnitude, so topic is compared, not document length.`,
-          },
-          {
-            label: 'semantic gap',
-            info: semanticNote,
-          },
+          { label: 'embedding from text', info: `Query and documents are the mean of their content words' vectors in the shared hand-built ${EMB_DIM}-D table (${TABLE.length} words). Stop words are dropped; unknown words are ignored and reported.` },
+          { label: 'cosine ranks by direction', info: 'cos(q, d) = q·d / (|q||d|). The table is centred, so documents on another topic score near 0 or below rather than all sitting between 0.3 and 1.' },
+          { label: 'keyword baseline', info: `TF-IDF (stop words removed, idf = ln(N/df)) over the ${SEARCH_DOCS.length} documents: ${kw.matched.length ? `matched ${kw.matched.join(', ')}` : 'no query word occurs in any document, so every keyword score is 0'}${kw.unmatched.length ? `; not in any document: ${kw.unmatched.join(', ')}` : ''}.` },
         ],
-        implication: `These top-${k} documents are the retrieval half of a RAG pipeline: injecting them into an LLM prompt gives the model grounded, source-specific context, reducing hallucination compared to relying on parametric memory alone.`,
+        implication: `These top-${k} documents are what a RAG pipeline would paste into an LLM prompt. The map is a 2-D PCA of the document vectors (${(100 * (DOC_PCA.explained[0] ?? 0)).toFixed(0)}% + ${(100 * (DOC_PCA.explained[1] ?? 0)).toFixed(0)}% of their variance); the ranking uses all ${EMB_DIM} dims.`,
       },
     });
   };
 
-  const truncate = (text: string, max = 38) =>
-    text.length > max ? text.slice(0, max - 1) + '…' : text;
+  const truncate = (text: string, max = 40) => (text.length > max ? text.slice(0, max - 1) + '…' : text);
 
   return (
     <LabStage
@@ -109,133 +85,87 @@ const SemanticSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel 
       running={false}
       narration={narration}
       stats={[
-        { label: 'query', value: query.label, color: ACCENT },
         { label: 'k', value: k },
-        { label: 'best cos', value: topK[0]?.sim.toFixed(3) ?? '—', color: GOOD },
+        { label: 'best cos', value: topK[0] ? topK[0].sim.toFixed(3) : '—', color: GOOD },
+        { label: 'keyword hits', value: `${kwHits}/${SEARCH_DOCS.length}` },
+        ...(onTopic != null ? [{ label: 'on-topic in top-k', value: `${onTopic}/${topK.length}`, color: ACCENT }] : []),
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, searchPython(query.label, query.vec, k))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, searchPython(queryText, k))}
       grid={(
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' }}>
-          <MonoLabel>query ◎ and documents in embedding space — lines = top-k retrieved</MonoLabel>
-          <ScatterPlot
-            points={points}
-            classColors={customClassColors}
-            domain={[0, 10]}
-            range={[0, 10]}
-            width={500}
-            height={440}
-            markers={markers}
-            lines={lines}
-            xLabel="topic dim 0"
-            yLabel="topic dim 1"
-          />
-          {/* Ranked list of all docs */}
-          <div style={{
-            width: 500,
-            background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)',
-            border: '1px solid var(--border)',
-            borderRadius: 10,
-            padding: '10px 14px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-          }}>
-            <MonoLabel style={{ marginBottom: 6 }}>full ranking · cosine score</MonoLabel>
-            {ranked.map((r, rank) => {
-              const isTop = rank < k;
+        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+            <MonoLabel>documents (PCA of their vectors) · ★ query · lines = top-{k}</MonoLabel>
+            <WordMap points={points} arrows={arrows} star={hasVec ? { x: qp[0] ?? 0, y: qp[1] ?? 0, color: ACCENT, label: 'query' } : null}
+              width={420} height={380} xLabel={`PC1 (${(100 * (DOC_PCA.explained[0] ?? 0)).toFixed(0)}%)`} yLabel={`PC2 (${(100 * (DOC_PCA.explained[1] ?? 0)).toFixed(0)}%)`} />
+          </div>
+          <div style={{ width: 430, background: isLight ? 'var(--bg2)' : 'rgba(8,11,20,.55)', border: '1px solid var(--border)', borderRadius: 10, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+              <MonoLabel style={{ width: 44 }}>rank</MonoLabel>
+              <MonoLabel style={{ width: 58 }}>cosine</MonoLabel>
+              <MonoLabel style={{ width: 58 }}>keyword</MonoLabel>
+              <MonoLabel>document</MonoLabel>
+            </div>
+            {ranked.map((r, i) => {
+              const top = hasVec && i < k;
+              const kws = kw.scores[r.doc.id] ?? 0;
               return (
-                <div key={r.doc.id} style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  padding: '3px 6px',
-                  borderLeft: isTop ? `3px solid ${ACCENT}` : '3px solid transparent',
-                  borderRadius: 4,
-                  background: isTop ? 'rgba(20,184,166,.07)' : 'transparent',
-                }}>
-                  <span style={{
-                    fontFamily: 'var(--mono)',
-                    fontSize: 11,
-                    color: isTop ? ACCENT : 'var(--t2)',
-                    minWidth: 90,
-                    flexShrink: 0,
-                  }}>
-                    #{rank + 1} {r.sim.toFixed(3)}
-                  </span>
-                  <span style={{
-                    fontFamily: 'var(--mono)',
-                    fontSize: 11,
-                    color: isTop ? 'var(--t0)' : 'var(--t2)',
-                    opacity: isTop ? 1 : 0.55,
-                  }}>
-                    d{r.doc.id}: &quot;{truncate(r.doc.text)}&quot;
+                <div key={r.doc.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '3px 4px', borderLeft: `3px solid ${top ? ACCENT : 'transparent'}`, background: top ? 'color-mix(in srgb, #14b8a6 8%, transparent)' : 'transparent', borderRadius: 4 }}>
+                  <span style={{ width: 40, fontFamily: 'var(--mono)', fontSize: 11, color: top ? ACCENT : 'var(--t2)' }}>#{i + 1}</span>
+                  <span style={{ width: 58, fontFamily: 'var(--mono)', fontSize: 11, color: top ? 'var(--t0)' : 'var(--t2)' }}>{hasVec ? r.sim.toFixed(3) : '—'}</span>
+                  <span style={{ width: 58, fontFamily: 'var(--mono)', fontSize: 11, color: kws > 0 ? 'var(--t0)' : 'var(--t2)' }}>{kws.toFixed(3)}</span>
+                  <span style={{ fontFamily: 'var(--mono)', fontSize: 11, color: top ? 'var(--t0)' : 'var(--t2)' }}>
+                    <span style={{ color: TOPIC_COLOR[r.doc.topics[0] ?? 'tech'] }}>d{r.doc.id}</span> {truncate(r.doc.text)}
                   </span>
                 </div>
               );
             })}
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 6, lineHeight: 1.5 }}>
+              query words used: {query.used.map((u) => u.word).join(', ') || '—'}{query.oov.length ? ` · not in table (ignored): ${query.oov.join(', ')}` : ''}{query.stop.length ? ` · stop words: ${query.stop.join(', ')}` : ''}
+            </span>
           </div>
         </div>
       )}
-      controls={(
-        <RunControls
-          isPlaying={false}
-          onPlay={search}
-          onReset={() => { setLastLog(null); narration.cancel(); }}
-        />
-      )}
+      controls={<RunControls isPlaying={false} onPlay={search} onReset={() => { setLastLog(null); narration.cancel(); }} />}
       legend={(
-        <Legend
-          title="SEARCH"
-          items={[
-            { color: ACCENT, label: 'query ◎ / retrieved (lines)' },
-            { color: DOC_COLOR, label: 'documents' },
-          ]}
-        />
+        <Legend title="DOCUMENT TOPIC" items={[
+          { color: TOPIC_COLOR.sport, label: 'sport' },
+          { color: TOPIC_COLOR.tech, label: 'tech (d6 also finance)' },
+          { color: TOPIC_COLOR.finance, label: 'finance' },
+          { color: ACCENT, label: 'query / top-k' },
+        ]} />
       )}
       lastLog={lastLog}
-      contextInsight={`Query "${query.label}" top-${k}: ${topK.map((r) => `d${r.doc.id} (${r.sim.toFixed(2)})`).join(', ')}. Retrieval is by cosine similarity in embedding space — documents are ranked by directional closeness to the query vector, not by shared keywords. This is the semantic gap that distinguishes embedding search from TF-IDF: a retrieved document can share zero words with the query yet be topically correct.`}
+      contextInsight={hasVec
+        ? `"${queryText}" → mean of ${query.used.map((u) => u.word).join(', ')}${query.oov.length ? ` (ignored, not in table: ${query.oov.join(', ')})` : ''}. Top-${k}: ${topK.map((r) => `d${r.doc.id} (${r.sim.toFixed(2)})`).join(', ')}.${onTopic != null ? ` ${onTopic} of ${topK.length} are on the query's topic.` : ''} Keyword TF-IDF matches ${kwHits} of ${SEARCH_DOCS.length} documents${noSharedWords.length ? `; ${noSharedWords.map((r) => `d${r.doc.id}`).join(', ')} ${noSharedWords.length === 1 ? 'is' : 'are'} retrieved without sharing a single word with the query` : ''}. Vectors come from a hand-built ${EMB_DIM}-D table, not a trained sentence encoder.`
+        : `"${queryText}" has no word in the embedding table, so it cannot be embedded. Keyword TF-IDF matches ${kwHits} documents.`}
       params={(
         <ParamsWrap>
-          <ParamsHead
-            title="Semantic Search & RAG"
-            hint="Embed a query, rank documents by cosine, retrieve the top-k by meaning."
-          />
+          <ParamsHead title="Semantic Search & RAG" hint="Embed the query from its words, rank documents by cosine, compare with keyword TF-IDF." />
           <div>
-            <MonoLabel style={{ marginBottom: 9 }}>Query preset</MonoLabel>
+            <MonoLabel style={{ marginBottom: 9 }}>Query presets</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {SEARCH_QUERIES.map((q, i) => (
-                <AlgoPill
-                  key={q.label}
-                  accent={ACCENT}
-                  active={queryIdx === i}
-                  onClick={() => { setQueryIdx(i); setLastLog(null); narration.cancel(); }}
-                >
-                  {q.label}
-                </AlgoPill>
+              {SEARCH_QUERIES.map((q) => (
+                <AlgoPill key={q.label} accent={ACCENT} active={queryText === q.text} onClick={() => submit(q.text)}>{q.label}</AlgoPill>
               ))}
             </div>
           </div>
-          <ParamSlider
-            name="top-k"
-            min={1}
-            max={4}
-            step={1}
-            current={k}
-            value={`${k}`}
-            onChange={(v) => { setK(v); setLastLog(null); }}
-            hint="how many documents to retrieve"
-            accent={ACCENT}
-          />
+          <div>
+            <MonoLabel style={{ marginBottom: 6 }}>Your query</MonoLabel>
+            <form onSubmit={(e) => { e.preventDefault(); submit(draft); }} style={{ display: 'flex', gap: 6 }}>
+              <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="e.g. stock prices"
+                style={{ flex: 1, padding: '6px 8px', background: 'var(--bg0)', color: 'var(--t0)', border: '1px solid var(--border)', borderRadius: 6, fontFamily: 'var(--mono)', fontSize: 12 }} />
+              <button type="submit" className="sb-btn" style={{ padding: '6px 10px', borderRadius: 6, border: `1px solid ${ACCENT}`, background: 'transparent', color: 'var(--t0)', fontFamily: 'var(--mono)', fontSize: 11, cursor: 'pointer' }}>search</button>
+            </form>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '6px 0 0', lineHeight: 1.5 }}>Words outside the {TABLE.length}-word table are ignored (shown under the ranking).</p>
+          </div>
+          <ParamSlider name="top-k" min={1} max={MAX_K} step={1} current={k} value={`${k}`} onChange={(v) => { setK(v); setLastLog(null); }} hint="how many documents to retrieve" accent={ACCENT} />
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.6 }}>
+            Documents embed as: {DOC_EMBEDDINGS.map((e, i) => `d${i} = mean(${e.used.map((u) => u.word).join(', ')})`).join(' · ')}
+          </div>
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{
-        topic: 'Semantic search and RAG retrieval',
-        query: query.label,
-        k,
-        topDocs: topK.map((r) => r.doc.id),
-        bestCosine: +(topK[0]?.sim ?? 0).toFixed(3),
-      }}
+      currentParams={{ topic: 'Semantic search and RAG retrieval', query: queryText, k, topDocs: topK.map((r) => r.doc.id), bestCosine: topK[0] ? +topK[0].sim.toFixed(3) : null, keywordHits: kwHits }}
       apiPanel={apiPanel}
     />
   );

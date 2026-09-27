@@ -1,8 +1,10 @@
 // labs/llm/rag/variants.ts — a Variant is an ordered Stage list (the rail) + the
-// compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind.
-import { Chunk, ChunkStrategy, chunkAll, denseScores, bm25Scores, hybridRanking, topK, Ranked, CHUNK_DEFAULTS, rerankScore } from './retrieval';
-import { QUERIES, contentTokens, embedText, cosine, tokenize, WEB_DOCS } from './corpus';
-import { matchEntities } from './graph';
+// compute each stage runs. Stage renderers live in Rag.tsx keyed by StageKind;
+// the end-to-end run is ./pipeline.ts's runPipeline.
+import { chunkAll, rankAll, bm25Scores, topK, CHUNK_DEFAULTS, rerankScore, filterStrips, mmrSelect } from './retrieval';
+import type { Chunk, ChunkStrategy, Ranked, RetrievalMode, StripDoc } from './retrieval';
+import { QUERIES, contentTokens, embedText, cosine, tokenize, hasSignal, WEB_DOCS } from './corpus';
+import { queryEntities } from './graph';
 
 export type StageKind =
   | 'chunk' | 'embed' | 'index' | 'retrieve' | 'rerank' | 'augment' | 'generate'
@@ -14,9 +16,14 @@ export interface Stage { kind: StageKind; label: string; note: string; cfg?: Rec
 
 export interface RagParams {
   strategy: ChunkStrategy; size: number; overlap: number;
-  k: number; retrieval: 'dense' | 'sparse' | 'hybrid'; rerank: boolean; budget: number;
+  k: number; retrieval: RetrievalMode; rerank: boolean; budget: number;
+  // Augment's context selection: plain top-b, or Maximal Marginal Relevance.
+  mmr: boolean; mmrLambda: number;
 }
-export const DEFAULT_PARAMS: RagParams = { strategy: 'recursive', size: CHUNK_DEFAULTS.size, overlap: CHUNK_DEFAULTS.overlap, k: 4, retrieval: 'dense', rerank: false, budget: 3 };
+export const DEFAULT_PARAMS: RagParams = {
+  strategy: 'recursive', size: CHUNK_DEFAULTS.size, overlap: CHUNK_DEFAULTS.overlap, k: 4, retrieval: 'dense', rerank: false, budget: 3,
+  mmr: false, mmrLambda: 0.5,
+};
 
 export interface Variant {
   id: string; name: string; group: 'Foundational' | 'Pre-retrieval' | 'Self-reflective' | 'Structured' | 'Agentic';
@@ -26,43 +33,80 @@ export interface Variant {
 
 // --- shared retrieval used by several variants ---
 export function retrieveRanked(query: string, chunks: Chunk[], p: RagParams): Ranked[] {
-  if (p.retrieval === 'hybrid') {
-    const m = hybridRanking(query, chunks);
-    const order = [...m.entries()].sort((a, b) => b[1] - a[1]).map(([i]) => i);
-    return order.map((idx, rank) => ({ chunk: chunks[idx], score: m.get(idx) ?? 0, rank })); // score = RRF fusion score (matches the ordering)
-  }
-  const scores = p.retrieval === 'sparse' ? bm25Scores(query, chunks) : denseScores(query, chunks);
-  return topK(scores, chunks.length).map((idx, rank) => ({ chunk: chunks[idx], score: scores[idx], rank }));
+  return rankAll(query, chunks, p.retrieval);
 }
 
-export interface GenResult { answer: string; citations: string[]; grounded: boolean; }
-// Deterministic, extractive "generation": stitch the top chunks' first sentence
-// and cite them. If nothing clears the grounding threshold → refuse (the OOD story).
+// Deterministic, extractive "generation": stitch each grounded chunk's first
+// sentence and cite it. `parts` keeps the claim ↔ citation pairs for Reflect.
+export interface GenResult { answer: string; citations: string[]; grounded: boolean; parts: { sentence: string; cite: string }[]; }
+export const refusal = (query: string): string => `I don't have grounded information to answer "${query}" from the indexed Solar-System corpus.`;
+export function firstSentence(t: string): string { return (t.match(/[^.!?]+[.!?]/)?.[0] ?? t).trim(); }
 export function generate(query: string, ranked: Ranked[], budget: number, threshold = 0.12): GenResult {
   const qv = embedText(query);
-  const qHasSignal = qv.some((x) => x !== 0);   // false for out-of-corpus queries (no lexicon hits)
+  const qHasSignal = hasSignal(qv);   // false for out-of-corpus queries (no lexicon hits)
   const qTerms = new Set(contentTokens(query));
   // Grounding is SCALE-FREE: it must not trust `r.score`, which is a cosine (dense),
-  // a BM25 score (sparse/web), or a tiny RRF value (hybrid/fusion) depending on path.
-  // A chunk grounds the answer only if it literally shares a query content-word AND —
-  // when the query has topical signal — is embedding-close to the query. Out-of-corpus
-  // queries (zero query vector) fall back to the lexical anchor alone, so a CRAG
-  // web-fallback doc can still ground even without lexicon overlap.
+  // a BM25 score (sparse/web), a tiny RRF value (hybrid/fusion) or a cross-encoder /
+  // MaxSim score depending on path. A chunk grounds the answer only if it literally
+  // shares a query content-word AND — when the query has topical signal — is
+  // embedding-close to the query. Out-of-corpus queries (zero query vector) fall back
+  // to the lexical anchor alone, so a CRAG web-fallback doc can still ground.
   const used = ranked.slice(0, budget).filter((r) =>
     contentTokens(r.chunk.text).some((w) => qTerms.has(w)) &&
     (!qHasSignal || cosine(qv, r.chunk.vec) >= threshold));
-  if (!used.length) return { answer: `I don't have grounded information to answer "${query}" from the indexed Solar-System corpus.`, citations: [], grounded: false };
-  const first = (t: string) => (t.match(/[^.!?]+[.!?]/)?.[0] ?? t).trim();
-  const answer = used.map((r) => `${first(r.chunk.text)} [${r.chunk.id}]`).join(' ');
-  return { answer, citations: used.map((r) => r.chunk.id), grounded: true };
+  if (!used.length) return { answer: refusal(query), citations: [], grounded: false, parts: [] };
+  const parts = used.map((r) => ({ sentence: firstSentence(r.chunk.text), cite: r.chunk.id }));
+  const answer = parts.map((pt) => `${pt.sentence} [${pt.cite}]`).join(' ');
+  return { answer, citations: used.map((r) => r.chunk.id), grounded: true, parts };
 }
 
-// One-shot Naive run used by Milestone A before the stage renderers exist.
+// One-shot Naive run (kept for callers that just want the baseline answer).
 export function runNaive(query: string, p: RagParams) {
   const chunks = chunkAll(p.strategy, p.size, p.overlap);
   const ranked = retrieveRanked(query, chunks, p);
   const gen = generate(query, ranked, p.budget);
   return { chunks, ranked, gen };
+}
+
+// --- Augment: context selection (+ Advanced RAG's compression) ---------------
+// Compression (Advanced RAG's rail sets cfg.compress on its Augment stage) runs
+// the shared sentence filter over the candidate pool BEFORE packing: sentences
+// scoring ≥ max(COMPRESS_FLOOR, COMPRESS_RATIO × best sentence) survive, and a
+// chunk with no surviving sentence is dropped. Selection then packs `budget`
+// chunks — the first ones, or by MMR (λ·rel − (1−λ)·redundancy) where rel is the
+// pool's own score divided by its best score (scale-free across retrievers).
+export const COMPRESS_RATIO = 0.6, COMPRESS_FLOOR = 0.1;
+export interface AugmentResult {
+  pool: Ranked[]; compressed?: { docs: StripDoc[]; cut: number }; selected: Ranked[];
+  dropped: { r: Ranked; why: 'over budget' | 'compressed away' | 'not picked by MMR' }[];
+  mmrOrder?: number[];
+}
+export function augment(query: string, candidates: Ranked[], p: RagParams, compress: boolean): AugmentResult {
+  let pool = candidates;
+  const dropped: AugmentResult['dropped'] = [];
+  let compressed: AugmentResult['compressed'];
+  if (compress && candidates.length) {
+    const f = filterStrips(query, candidates.map((r) => r.chunk), COMPRESS_RATIO, COMPRESS_FLOOR);
+    compressed = { docs: f.docs, cut: f.cut };
+    pool = candidates.flatMap((r, i) => {
+      const d = f.docs[i];
+      if (d?.refined) return [{ ...r, chunk: d.refined }];
+      dropped.push({ r, why: 'compressed away' });
+      return [];
+    });
+  }
+  let selected: Ranked[]; let mmrOrder: number[] | undefined;
+  if (p.mmr && pool.length) {
+    const top = pool.reduce((m, r) => Math.max(m, r.score), 0);
+    const rel = pool.map((r) => (top > 0 ? r.score / top : 0));
+    mmrOrder = mmrSelect(pool.map((r) => r.chunk), rel, p.mmrLambda, p.budget);
+    selected = mmrOrder.flatMap((i) => { const r = pool[i]; return r ? [r] : []; });
+    pool.forEach((r, i) => { if (!mmrOrder?.includes(i)) dropped.push({ r, why: i < p.budget ? 'not picked by MMR' : 'over budget' }); });
+  } else {
+    selected = pool.slice(0, p.budget);
+    pool.slice(p.budget).forEach((r) => dropped.push({ r, why: 'over budget' }));
+  }
+  return { pool, compressed, selected, dropped, mmrOrder };
 }
 
 const NAIVE: Variant = {
@@ -72,7 +116,7 @@ const NAIVE: Variant = {
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
     { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Score every chunk against the query and fetch the top-k.' },
     { kind: 'augment', label: 'Augment', note: 'Pack the retrieved chunks into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
@@ -80,239 +124,276 @@ const NAIVE: Variant = {
 
 const ADVANCED: Variant = {
   id: 'advanced', name: 'Advanced RAG', group: 'Foundational', year: '2023',
-  blurb: 'Adds a pre-retrieval query rewrite and a post-retrieval reranker + context compression around the naive core — the "pre/post" pattern from the RAG survey.',
+  blurb: 'Wraps the naive core in pre- and post-retrieval steps, the pattern from the RAG survey: a pseudo-relevance-feedback rewrite expands the query with the heaviest terms of a first-pass retrieval, a cross-encoder reranks the candidates, and extractive compression keeps only the sentences of each chunk that score well on their own before packing.',
   stages: () => [
-    { kind: 'rewrite', label: 'Rewrite', note: 'Expand the query with inferred topic keywords before retrieval.' },
+    { kind: 'rewrite', label: 'Rewrite', note: 'Pseudo-relevance feedback: expand the query with the top terms of a first-pass retrieval.' },
     { kind: 'chunk', label: 'Chunk', note: 'Split documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Vectorize chunks.' },
     { kind: 'index', label: 'Index', note: 'Build the vector index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve on the rewritten query.' },
-    { kind: 'rerank', label: 'Rerank', note: 'Cross-encoder reranking of candidates.' },
-    { kind: 'augment', label: 'Augment', note: 'Compress + pack top chunks.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve on the expanded query.' },
+    { kind: 'rerank', label: 'Rerank', note: 'Cross-encoder reranking of candidates, on the original query.' },
+    { kind: 'augment', label: 'Augment', note: 'Compress each chunk to its relevant sentences, then pack.', cfg: { compress: true } },
     { kind: 'generate', label: 'Generate', note: 'Answer with citations.' },
   ],
 };
 
 const HYDE: Variant = {
   id: 'hyde', name: 'HyDE', group: 'Pre-retrieval', year: '2022',
-  blurb: 'Fabricates a hypothetical answer document from the query and embeds THAT instead of the bare query — closing the short-question-vs-long-passage embedding gap before retrieval even runs.',
+  blurb: 'Writes a hypothetical answer passage for the query and retrieves by THAT passage instead of the bare question. Here the passage is templated (no LLM): one answer-style sentence per topic the question touches, in the corpus\'s own register, so its vector can land nearer the real answer passages.',
   stages: () => [
-    { kind: 'hyde', label: 'HyDE', note: 'Generate a hypothetical answer document from the query.' },
+    { kind: 'hyde', label: 'HyDE', note: 'Write a hypothetical answer passage from the query.' },
     { kind: 'chunk', label: 'Chunk', note: 'Split documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Vectorize chunks.' },
     { kind: 'index', label: 'Index', note: 'Build the vector index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve using the hypothetical document’s embedding.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve using the hypothetical passage instead of the query.' },
     { kind: 'augment', label: 'Augment', note: 'Pack the retrieved chunks into the prompt.' },
-    { kind: 'generate', label: 'Generate', note: 'Answer with citations.' },
+    { kind: 'generate', label: 'Generate', note: 'Answer the original query with citations.' },
   ],
 };
 
 const FUSION: Variant = {
   id: 'fusion', name: 'RAG-Fusion', group: 'Pre-retrieval', year: '2023',
-  blurb: 'Generates several paraphrases of the query, retrieves a ranking for each, then fuses all of them with Reciprocal Rank Fusion — a chunk that ranks respectably across every phrasing can outrank one that is a top hit for only a single phrasing.',
+  blurb: 'Generates facet sub-queries (the full query plus one focused sub-query per topic it touches), retrieves a dense ranking for each, then fuses them with Reciprocal Rank Fusion: a chunk that ranks respectably under several sub-queries can outrank one that tops only a single ranking.',
   stages: () => [
-    { kind: 'multiquery', label: 'Multi-Query', note: 'Generate several paraphrases of the query.' },
+    { kind: 'multiquery', label: 'Multi-Query', note: 'Generate the full query plus one sub-query per topic facet.' },
     { kind: 'chunk', label: 'Chunk', note: 'Split documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Vectorize chunks.' },
     { kind: 'index', label: 'Index', note: 'Build the vector index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve a dense ranking per query variant.' },
-    { kind: 'fuse', label: 'Fuse', note: 'Combine the per-query rankings with Reciprocal Rank Fusion.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Retrieve a dense ranking per sub-query.' },
+    { kind: 'fuse', label: 'Fuse', note: 'Combine the per-sub-query rankings with Reciprocal Rank Fusion.' },
     { kind: 'augment', label: 'Augment', note: 'Pack the fused top chunks into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Answer with citations.' },
   ],
 };
 
-// --- Self-RAG: reflection tokens (relevance + support grading) ---
-export type ReflToken = 'Retrieve' | 'Relevant' | 'Irrelevant' | 'Supported' | 'Unsupported' | 'Useful';
-// Relevance grader — decide if a retrieved chunk is worth keeping for the query.
-// Reuses the "cross-encoder" rerankScore (dense + lexical overlap) and keeps the
-// chunk only if that score clears a threshold.
-export const RELEVANCE_TAU = 0.18;
-export function isRelevant(query: string, chunk: Chunk, tau = RELEVANCE_TAU): boolean {
-  return rerankScore(query, chunk) >= tau;
+// --- Self-RAG: IsRel (critique) and IsSup (reflect) reflection tokens ---------
+// Critique: the cross-encoder scores each retrieved chunk; a chunk is Relevant
+// when its score is ≥ max(RELEVANCE_FLOOR, RELEVANCE_RATIO × the best score).
+// The relative cut adapts to the query, so it actually separates the chunks
+// that answer it from those that merely share its topic.
+export const RELEVANCE_RATIO = 0.8, RELEVANCE_FLOOR = 0.2;
+export type RelToken = 'Relevant' | 'Irrelevant';
+export interface CritiqueTag { chunk: Chunk; score: number; token: RelToken; }
+export function critiqueChunks(query: string, top: Ranked[]): { tags: CritiqueTag[]; cut: number } {
+  const scores = top.map((r) => rerankScore(query, r.chunk));
+  const best = scores.reduce((m, s) => Math.max(m, s), 0);
+  const cut = Math.max(RELEVANCE_FLOOR, RELEVANCE_RATIO * best);
+  return { tags: top.map((r, i) => ({ chunk: r.chunk, score: scores[i] ?? 0, token: (scores[i] ?? 0) >= cut ? 'Relevant' : 'Irrelevant' })), cut };
 }
-// Is the answer supported by the kept chunks? (token overlap of answer vs context)
-export function isSupported(answer: string, kept: Chunk[]): boolean {
-  const ctx = new Set(kept.flatMap((c) => tokenize(c.text)));
-  const a = tokenize(answer).filter((w) => w.length > 3);
-  const covered = a.filter((w) => ctx.has(w)).length / (a.length || 1);
-  return covered >= 0.5;
+
+// Reflect: a claim-level support check that can fail. Each answer sentence is
+// Supported only if (1) its content words all occur in its OWN cited chunk,
+// (2) it names every entity the query names, and (3) it is on the query's topic:
+// it shares a query content word and — when the query has topical signal — its
+// own vector has cosine ≥ CLAIM_TAU with the query. A refusal is an abstention,
+// not a failure. The verified answer keeps only the supported claims.
+export const CLAIM_TAU = 0.5;
+export type SupportToken = 'Supported' | 'Unsupported';
+export type Verdict = 'fully supported' | 'partially supported' | 'no support' | 'abstained';
+export interface ClaimCheck { sentence: string; cite: string; entailed: boolean; missingEntities: string[]; sharesTerm: boolean; topicCos: number; token: SupportToken; }
+export interface Reflection { claims: ClaimCheck[]; verdict: Verdict; answer: string; citations: string[]; }
+export function reflectSupport(query: string, gen: GenResult, used: Chunk[]): Reflection {
+  if (!gen.grounded) return { claims: [], verdict: 'abstained', answer: gen.answer, citations: [] };
+  const qv = embedText(query), qSignal = hasSignal(qv);
+  const qTerms = new Set(contentTokens(query));
+  const ents = queryEntities(query);
+  const claims: ClaimCheck[] = gen.parts.map((pt) => {
+    const src = used.find((c) => c.id === pt.cite);
+    const srcWords = new Set(contentTokens(src?.text ?? ''));
+    const words = contentTokens(pt.sentence);
+    const entailed = words.every((w) => srcWords.has(w));
+    const toks = tokenize(pt.sentence);
+    const missingEntities = ents.filter((e) => { const et = tokenize(e.label); return !toks.some((_, i) => et.every((w, k) => toks[i + k] === w)); }).map((e) => e.label);
+    const sharesTerm = words.some((w) => qTerms.has(w));
+    const topicCos = cosine(embedText(pt.sentence), qv);
+    const ok = entailed && missingEntities.length === 0 && sharesTerm && (!qSignal || topicCos >= CLAIM_TAU);
+    return { sentence: pt.sentence, cite: pt.cite, entailed, missingEntities, sharesTerm, topicCos, token: ok ? 'Supported' : 'Unsupported' };
+  });
+  const good = claims.filter((c) => c.token === 'Supported');
+  const verdict: Verdict = good.length === claims.length ? 'fully supported' : good.length ? 'partially supported' : 'no support';
+  return {
+    claims, verdict,
+    answer: good.length ? good.map((c) => `${c.sentence} [${c.cite}]`).join(' ') : refusal(query),
+    citations: good.map((c) => c.cite),
+  };
 }
 
 const SELF_RAG: Variant = {
   id: 'self-rag', name: 'Self-RAG', group: 'Self-reflective', year: '2023',
-  blurb: 'Wraps retrieval in reflection tokens: a Critique step grades each retrieved chunk Relevant/Irrelevant and drops the irrelevant ones before augmentation, then a post-generation Reflect step checks whether the answer is actually Supported by the kept context instead of trusting it by default.',
+  blurb: 'Wraps retrieval in reflection tokens: Critique grades each retrieved chunk Relevant/Irrelevant against a cut relative to the best cross-encoder score and drops the irrelevant ones; after generation, Reflect checks every answer sentence against its own cited chunk and the question (right entity, on topic) and keeps only the supported claims.',
   stages: () => [
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
     { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Score every chunk against the query and fetch the top-k.' },
     { kind: 'critique', label: 'Critique', note: 'Grade each retrieved chunk Relevant/Irrelevant; drop the irrelevant ones.' },
     { kind: 'augment', label: 'Augment', note: 'Pack the surviving relevant chunks into the prompt.' },
-    { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
-    { kind: 'reflect', label: 'Reflect', note: 'Check whether the answer is actually supported by the kept context.' },
+    { kind: 'generate', label: 'Generate', note: 'Produce a draft answer with citations.' },
+    { kind: 'reflect', label: 'Reflect', note: 'Check each answer sentence against its cited chunk and the question; keep the supported ones.' },
   ],
 };
 
-// --- Corrective RAG (CRAG): retrieval grading + web fallback ---
+// --- Corrective RAG (CRAG) ------------------------------------------------------
+// The retrieval evaluator is the cross-encoder, run on each of the top-k chunks.
+// As in the paper: CORRECT if any chunk scores ≥ GRADE_HI, INCORRECT if every
+// chunk scores < GRADE_LO, AMBIGUOUS otherwise. Correct → refine the index
+// chunks; incorrect → discard them and refine web results; ambiguous → both.
 export type Grade = 'correct' | 'ambiguous' | 'incorrect';
-// Retrieval evaluator — grade the top-1 retrieval confidence: a high top score
-// means the index hit is trustworthy; a very low one means it is not even
-// on-topic; anything in between is ambiguous.
-export const GRADE_HI = 0.5, GRADE_LO = 0.2;
-// SCALE-FREE: grade off a recomputed cosine of the query vs the top chunk, NOT
-// `ranked[0].score` (a BM25/RRF value under sparse/hybrid → would misgrade every query).
-export function gradeRetrieval(query: string, ranked: Ranked[], hi = GRADE_HI, lo = GRADE_LO): Grade {
-  const top = ranked[0] ? cosine(embedText(query), ranked[0].chunk.vec) : 0;
-  return top >= hi ? 'correct' : top <= lo ? 'incorrect' : 'ambiguous';
+export const GRADE_HI = 0.7, GRADE_LO = 0.3;
+export function gradeRetrieval(query: string, top: Ranked[], hi = GRADE_HI, lo = GRADE_LO): { grade: Grade; scores: number[]; best: number } {
+  const scores = top.map((r) => rerankScore(query, r.chunk));
+  const best = scores.reduce((m, s) => Math.max(m, s), 0);
+  return { grade: best >= hi ? 'correct' : best < lo ? 'incorrect' : 'ambiguous', scores, best };
 }
-// On incorrect/ambiguous, pull from the web corpus and merge (knowledge
-// refinement). Scored with BM25 (lexical), NOT dense: an out-of-corpus query
-// embeds to a zero vector (no lexicon signal), so dense similarity can never
-// match the web doc — but the query still shares literal words with it.
-export function webFallback(query: string): Ranked[] {
-  const chunks = WEB_DOCS.map((d) => ({ id: `w${d.id}`, docId: d.id, title: d.title, tags: d.tags, text: d.text, vec: embedText(d.text) }));
+// Web search over the tiny baked web corpus, scored with BM25 (lexical — an
+// out-of-corpus query embeds to a zero vector, so dense could never match).
+// Only documents that actually match (BM25 > 0) are returned.
+export function webSearch(query: string): Ranked[] {
+  const chunks: Chunk[] = WEB_DOCS.map((d) => ({ id: `w${d.id}`, docId: d.id, title: d.title, tags: d.tags, text: d.text, vec: embedText(d.text) }));
   const s = bm25Scores(query, chunks);
-  return topK(s, chunks.length).map((idx, rank) => ({ chunk: chunks[idx], score: s[idx], rank }));
+  return topK(s, chunks.length).filter((i) => (s[i] ?? 0) > 0).flatMap((idx, rank) => { const c = chunks[idx]; return c ? [{ chunk: c, score: s[idx] ?? 0, rank }] : []; });
+}
+// Knowledge refinement (decompose-then-recompose): split every document the
+// grade kept into sentence strips, score each strip with the evaluator, keep
+// strips ≥ max(STRIP_FLOOR, STRIP_RATIO × best strip) and recompose each doc
+// from its kept strips. The refined docs are packed best-first by the
+// evaluator's score of the refined text.
+export const STRIP_RATIO = 0.6, STRIP_FLOOR = 0.1;
+export function refineKnowledge(query: string, docs: Ranked[]): { strips: StripDoc[]; cut: number; refined: Ranked[] } {
+  const f = filterStrips(query, docs.map((r) => r.chunk), STRIP_RATIO, STRIP_FLOOR);
+  const refined = f.docs.flatMap((d) => (d.refined ? [{ chunk: d.refined, score: rerankScore(query, d.refined), rank: 0 }] : []))
+    .sort((a, b) => b.score - a.score).map((r, i) => ({ ...r, rank: i }));
+  return { strips: f.docs, cut: f.cut, refined };
 }
 
 const CRAG: Variant = {
   id: 'crag', name: 'Corrective RAG (CRAG)', group: 'Self-reflective', year: '2024',
-  blurb: 'Grades the top retrieved chunk before trusting it: a confident match uses the index as-is, an ambiguous one keeps the index but backs it up with a web search, and a confidently wrong (or empty) match discards the index result entirely and falls back to the web.',
+  blurb: 'A retrieval evaluator (the cross-encoder) scores every retrieved chunk before anything is trusted: a confident match keeps the index, an ambiguous one keeps the index and adds a web search, and an incorrect one discards the index for the web. The kept documents are then refined strip by strip, keeping only the sentences the evaluator rates relevant.',
   stages: () => [
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
     { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks.' },
-    { kind: 'grade', label: 'Grade', note: 'Grade the top retrieval’s confidence: correct, ambiguous, or incorrect.' },
-    { kind: 'augment', label: 'Augment', note: 'Pack index and/or web chunks into the prompt, per the grade.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Score every chunk against the query and fetch the top-k.' },
+    { kind: 'grade', label: 'Grade', note: 'Evaluate each retrieved chunk: correct, ambiguous or incorrect, then refine the kept knowledge.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the refined index and/or web knowledge into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
 };
 
-// --- GraphRAG: knowledge graph + local (ego-graph) / global (community) search ---
-// The graph itself (entities/relations/communities) and the local/global search
-// functions live in ./graph — this rail just names the two extra stages;
-// Rag.tsx's pipe branch (gated on `hasGraph`) calls localSearch/globalSearch and
-// feeds their result into the same augment/generate every other variant shares.
 const GRAPH_RAG: Variant = {
   id: 'graph-rag', name: 'GraphRAG', group: 'Structured', year: '2024',
-  blurb: 'Builds a knowledge graph over the corpus — entities wired by explicit relations (orbits, has-moon, visited-by…) and clustered into communities. Local mode walks the ego-graph around query-matched entities to resolve multi-hop questions a flat vector index conflates; global mode map-reduces over community summaries for broad, corpus-spanning questions.',
+  blurb: 'Extracts a knowledge graph from the corpus text: proper-noun entities, typed relations (has-moon, visited-by, orbits, has-feature) and co-mentions, clustered into communities by greedy modularity, each with an extractive summary. Local mode walks the ego-graph around the entities the query names to scope retrieval; global mode map-reduces over the community summaries.',
   stages: () => [
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
-    { kind: 'graphbuild', label: 'Graph Build', note: 'Build a knowledge graph over corpus entities and relations, clustered into communities.' },
-    { kind: 'graphsearch', label: 'Graph Search', note: 'Search the graph: locally via the ego-graph around matched entities, or globally via community summaries.' },
+    { kind: 'graphbuild', label: 'Graph Build', note: 'Extract entities and relations from the text, detect communities, summarise each.' },
+    { kind: 'graphsearch', label: 'Graph Search', note: 'Search the graph: locally via the ego-graph around linked entities, or globally via community summaries.' },
     { kind: 'augment', label: 'Augment', note: 'Pack the graph-selected chunks (or community summaries) into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
 };
 
-// --- RAPTOR: recursive summary tree (leaves=chunks, per-community summaries, one corpus root) ---
-// The tree itself and its flat, level-agnostic scoring (`buildTree`/`retrieveTree`)
-// live in ./graph, reusing the SAME COMMUNITIES GraphRAG above already defines —
-// this rail just names the extra 'tree' stage; Rag.tsx's pipe branch (gated on
-// `hasTree`) calls buildTree/retrieveTree and feeds the hits into the same
-// augment/generate every other variant shares.
 const RAPTOR: Variant = {
   id: 'raptor', name: 'RAPTOR', group: 'Structured', year: '2024',
-  blurb: 'Recursively summarizes the corpus into a tree instead of indexing a flat chunk list: leaf nodes are the chunks, one summary node sits above each community, and a single root node summarizes the whole corpus. Retrieval scores every node — leaf or summary, at any level — against the query, so a broad, corpus-spanning question can be answered by one high-level summary node instead of stitching together many individual chunks.',
+  blurb: 'Builds a summary tree instead of a flat chunk list: the chunks are clustered by their embeddings (k-means, k chosen by silhouette), each cluster gets an extractive summary node (its sentences nearest the centroid), a summary layer with more than six nodes is clustered again, and one root caps the tree. Retrieval scores every node, leaf or summary, so a summary can stand in for several chunks.',
   stages: () => [
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
-    { kind: 'tree', label: 'Tree', note: 'Recursively summarize: chunks roll up into per-community summary nodes, which roll up into one corpus root.' },
+    { kind: 'tree', label: 'Tree', note: 'Cluster the chunks, summarise each cluster, cap the summaries with one root.' },
     { kind: 'retrieve', label: 'Retrieve', note: 'Score every tree node — leaf chunk or summary — against the query and keep the top-k.' },
     { kind: 'augment', label: 'Augment', note: 'Pack the retrieved nodes (chunks and/or summaries) into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
 };
 
-// --- Contextual Retrieval: prepend a chunk-specific situating context before
-// embedding (see ./retrieval's `contextualize`) so a bare, pronoun-heavy
-// fragment isn't stranded from the document that gives it meaning. Rag.tsx's
-// pipe branch (gated on `hasContextual`) re-embeds every chunk with
-// `contextualize(chunk)` and retrieves/augments/generates over those —
-// Augment/Generate still answer the ORIGINAL query.
 const CONTEXTUAL: Variant = {
   id: 'contextual', name: 'Contextual Retrieval', group: 'Structured', year: '2024',
-  blurb: 'Prepends a short, chunk-specific situating context — which document and category a chunk came from — before it is embedded (and indexed), so a bare fragment is no longer stranded from the document that gives it meaning. Chunking is unchanged; only what gets embedded and retrieved against changes.',
+  blurb: 'Prepends a short, chunk-specific situating context — the document and category the chunk came from — to the text that gets embedded AND indexed for BM25, so a bare fragment is no longer stranded from the document that gives it meaning. The raw chunk is still what gets packed and quoted.',
   stages: () => [
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Prepend a chunk-specific situating context, then vectorize — not the bare chunk.' },
-    { kind: 'index', label: 'Index', note: 'Store the contextualized vectors in the index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest contextualized chunks.' },
-    { kind: 'augment', label: 'Augment', note: 'Pack the retrieved (contextualized) chunks into the prompt.' },
+    { kind: 'index', label: 'Index', note: 'Index the contextualized text (vectors and BM25 terms).' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Score every contextualized chunk against the query and fetch the top-k.' },
+    { kind: 'augment', label: 'Augment', note: 'Pack the retrieved raw chunks into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
 };
 
-// --- ColBERT: late-interaction reranking. First-stage retrieval is an
-// ordinary pooled single-vector cosine (identical to Naive); the rail's
-// OWN rerank stage is marked `cfg: { colbert: true }` so Rag.tsx's pipe and
-// StageDetail can tell it apart from Advanced RAG's cross-encoder rerank
-// stage and reorder candidates by token-level MaxSim (./retrieval's
-// `maxSim`) instead of `rerankScore`.
 const COLBERT: Variant = {
   id: 'colbert', name: 'ColBERT', group: 'Structured', year: '2020',
-  blurb: 'Late interaction: keeps one embedding per TOKEN instead of pooling a chunk into a single vector, then scores query↔chunk by MaxSim — summing, for every query token, its single best-matching chunk token. A chunk that shares a few precise token-level matches with the query can outrank one with a higher pooled single-vector cosine.',
+  blurb: 'Late interaction: keeps one vector per TOKEN instead of pooling a chunk into a single vector, then scores query↔chunk by MaxSim — summing, for every query token, its best-matching chunk token. Token vectors carry both topic (lexicon axes) and identity (a hashed one-hot), so an exact word such as "Saturn" outscores a same-topic synonym. Used here as a second-stage reranker.',
   stages: () => [
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a pooled vector, for the single-vector first-stage retrieval below.' },
     { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks by pooled cosine.' },
-    { kind: 'rerank', label: 'Rerank', note: 'Reorder the candidates by token-level MaxSim (late interaction) instead of a single pooled vector.', cfg: { colbert: true } },
+    { kind: 'retrieve', label: 'Retrieve', note: 'First stage: fetch the top-k candidates with the pooled retriever.' },
+    { kind: 'rerank', label: 'Rerank', note: 'Reorder the candidates by token-level MaxSim (late interaction).', cfg: { colbert: true } },
     { kind: 'augment', label: 'Augment', note: 'Pack the MaxSim-reranked chunks into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
 };
 
-// --- Agentic / Adaptive RAG: route by query complexity, then treat retrieval
-// as a tool an agent can call repeatedly. `routeQuery` is informational — it
-// picks the strategy a full agent WOULD take (Rag.tsx's pipe still runs the
-// loop below regardless, so route/retrieve/reflect all stay reachable on the
-// rail); `agenticLoop` is the actual mechanism: retrieve, check whether every
-// entity the query names is literally covered by the retrieved text, and if
-// not, refine the query with the missing entity and re-retrieve, up to
-// maxIter. Rag.tsx's pipe branch (gated on `hasReflect`) feeds Augment/
-// Generate from the LAST step's retrieval, not the first-pass one the
-// Retrieve stage shows — mirrors how CRAG's grade can swap in web chunks
-// instead of the raw retrieval.
+// --- Agentic / Adaptive RAG -----------------------------------------------------
+// The router decides the plan:
+//   no-retrieval — the query has no topic signal and names no known entity, so
+//                  the index cannot help: skip retrieval and answer directly
+//                  (this demo has no parametric knowledge, so it abstains);
+//   single-step  — one retrieval pass with the configured retriever;
+//   multi-step   — ≥ 2 named entities or selection/comparison wording: retrieve,
+//                  reflect (does the #1 chunk name every entity the query names?),
+//                  and on a miss switch retrieval tool (dense → hybrid → sparse)
+//                  with the missing names appended, up to AGENT_MAX_ITER passes.
 export type Route = 'no-retrieval' | 'single-step' | 'multi-step';
-export function routeQuery(query: string): Route {
-  const toks = tokenize(query); const entities = matchEntities(query).length;
-  if (toks.length <= 3) return 'no-retrieval';
-  return entities >= 2 || /\b(which|compare|and|both|most)\b/.test(query.toLowerCase()) ? 'multi-step' : 'single-step';
+export const AGENT_MAX_ITER = 3;
+const COMPARATIVE = /\b(which|compare|and|both|most)\b/;
+export interface RouteInfo { route: Route; entities: string[]; signal: boolean; comparative: boolean; }
+export function routeInfo(query: string): RouteInfo {
+  const entities = queryEntities(query).map((e) => e.label);
+  const signal = hasSignal(embedText(query));
+  const comparative = COMPARATIVE.test(query.toLowerCase());
+  const route: Route = !signal && !entities.length ? 'no-retrieval'
+    : entities.length >= 2 || comparative ? 'multi-step' : 'single-step';
+  return { route, entities, signal, comparative };
 }
-export interface AgentStep { iter: number; query: string; topIds: string[]; covered: boolean; missing: string[] }
-// Agentic loop: retrieve → is every matched entity covered? → refine query with a
-// missing entity → re-retrieve, up to maxIter.
-export function agenticLoop(query: string, chunks: Chunk[], p: RagParams, maxIter = 3): AgentStep[] {
-  const wanted = matchEntities(query).map((e) => e.label.toLowerCase());
-  const steps: AgentStep[] = []; let q = query;
+export function routeQuery(query: string): Route { return routeInfo(query).route; }
+export const nextTool = (t: RetrievalMode): RetrievalMode => (t === 'dense' ? 'hybrid' : 'sparse');
+export interface AgentStep { iter: number; query: string; tool: RetrievalMode; topIds: string[]; top1: string | null; covered: boolean; missing: string[]; }
+export interface AgentRun { route: RouteInfo; steps: AgentStep[]; final: Ranked[]; }
+export function runAgent(query: string, chunks: Chunk[], p: RagParams): AgentRun {
+  const route = routeInfo(query);
+  if (route.route === 'no-retrieval') return { route, steps: [], final: [] };
+  const steps: AgentStep[] = [];
+  let q = query, tool: RetrievalMode = p.retrieval, final: Ranked[] = [];
+  const maxIter = route.route === 'multi-step' ? AGENT_MAX_ITER : 1;
   for (let i = 0; i < maxIter; i++) {
-    const ranked = retrieveRanked(q, chunks, p).slice(0, p.k);
-    const seen = new Set(ranked.flatMap((r) => tokenize(r.chunk.text)));
-    const missing = wanted.filter((w) => !seen.has(w));
-    steps.push({ iter: i, query: q, topIds: ranked.map((r) => r.chunk.id), covered: missing.length === 0, missing });
-    if (!missing.length) break;
-    q = `${query} ${missing.join(' ')}`; // refine
+    final = rankAll(q, chunks, tool).slice(0, p.k);
+    const lead = final[0];
+    const leadToks = lead ? tokenize(lead.chunk.text) : [];
+    const missing = route.entities.filter((label) => {
+      const et = tokenize(label);
+      return !leadToks.some((_, j) => et.every((w, k) => leadToks[j + k] === w));
+    });
+    steps.push({ iter: i, query: q, tool, topIds: final.map((r) => r.chunk.id), top1: lead?.chunk.id ?? null, covered: missing.length === 0, missing });
+    if (!missing.length || i === maxIter - 1) break;
+    q = `${query} ${missing.join(' ')}`;
+    tool = nextTool(tool);
   }
-  return steps;
+  return { route, steps, final };
 }
 
 const AGENTIC: Variant = {
   id: 'agentic', name: 'Agentic / Adaptive RAG', group: 'Agentic', year: '2024',
-  blurb: 'Routes each query by complexity — trivial, single-hop, or multi-hop/comparative — before ever touching the index, then treats retrieval as a tool it can call more than once: after retrieving, it checks whether every entity the query names is actually covered by the retrieved text, and if not, refines the query with the missing entity and retrieves again (up to a few iterations) before augmenting and generating.',
+  blurb: 'A router picks the plan before the index is touched: no retrieval when the query shares nothing with the index, one retrieval pass for a single-hop question, or a retrieve → reflect loop for multi-hop/selection questions. In the loop, the agent checks whether its best chunk names every entity the question names and, if not, switches retrieval tool (dense → hybrid → sparse) with the missing names added and retrieves again.',
   stages: () => [
-    { kind: 'route', label: 'Route', note: 'Classify the query’s complexity and pick a retrieval strategy.' },
+    { kind: 'route', label: 'Route', note: 'Classify the query and pick a plan: no retrieval, single-step or multi-step.' },
     { kind: 'chunk', label: 'Chunk', note: 'Split the source documents into passages.' },
     { kind: 'embed', label: 'Embed', note: 'Map each chunk to a vector.' },
     { kind: 'index', label: 'Index', note: 'Store vectors in the (vector-DB) index.' },
-    { kind: 'retrieve', label: 'Retrieve', note: 'Embed the query and fetch the top-k nearest chunks — iteration 0 of the agentic loop.' },
+    { kind: 'retrieve', label: 'Retrieve', note: 'Iteration 0: retrieve with the configured retriever (skipped when the router chose no retrieval).' },
     // cfg.agentic distinguishes this from Self-RAG's OWN 'reflect' stage (a
-    // post-generation support check) — the two share a stage kind but never
-    // a variant, same convention as ColBERT's cfg.colbert marker on 'rerank'.
-    { kind: 'reflect', label: 'Reflect', note: 'Check whether every matched entity is covered by the retrieval; if not, refine the query and re-retrieve.', cfg: { agentic: true } },
+    // post-generation support check) — the two share a stage kind but never a
+    // variant, same convention as ColBERT's cfg.colbert marker on 'rerank'.
+    { kind: 'reflect', label: 'Reflect', note: 'Does the best chunk name every entity the query names? If not, switch tool, refine and retrieve again.', cfg: { agentic: true } },
     { kind: 'augment', label: 'Augment', note: 'Pack the final iteration’s retrieved chunks into the prompt.' },
     { kind: 'generate', label: 'Generate', note: 'Produce a grounded answer with citations.' },
   ],
@@ -320,4 +401,5 @@ const AGENTIC: Variant = {
 
 export const VARIANTS: Record<string, Variant> = { naive: NAIVE, advanced: ADVANCED, hyde: HYDE, fusion: FUSION, 'self-rag': SELF_RAG, crag: CRAG, 'graph-rag': GRAPH_RAG, raptor: RAPTOR, contextual: CONTEXTUAL, colbert: COLBERT, agentic: AGENTIC };
 export const VARIANT_ORDER: string[] = ['naive', 'advanced', 'hyde', 'fusion', 'self-rag', 'crag', 'graph-rag', 'raptor', 'contextual', 'colbert', 'agentic'];
+export function variantById(id: string): Variant { return VARIANTS[id] ?? NAIVE; }
 export { QUERIES };

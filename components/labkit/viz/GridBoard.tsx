@@ -4,7 +4,9 @@ import { useTheme } from '../../../utils/theme';
 // Grid board for search/pathfinding. Each cell has a discrete state with its own
 // colour; supports drag-to-paint walls. Pure/presentational — the lab owns the
 // grid + search state. Reusable for mazes and model-checking grids.
-export type CellState = 'empty' | 'wall' | 'start' | 'goal' | 'frontier' | 'visited' | 'path' | 'current';
+// 'frontierB' / 'visitedB' are a second search's frontier and settled cells
+// (e.g. the backward half of a bidirectional search), drawn in violet.
+export type CellState = 'empty' | 'wall' | 'start' | 'goal' | 'frontier' | 'visited' | 'frontierB' | 'visitedB' | 'path' | 'current';
 
 const COLORS: Record<CellState, string> = {
   empty: 'rgba(20,26,44,.55)',
@@ -13,6 +15,8 @@ const COLORS: Record<CellState, string> = {
   goal: '#f87171',
   frontier: '#38bdf8',
   visited: 'rgba(56,189,248,.22)',
+  frontierB: '#a78bfa',
+  visitedB: 'rgba(167,139,250,.24)',
   path: '#fbbf24',
   current: '#ffffff',
 };
@@ -45,7 +49,7 @@ const GridBoard: React.FC<GridBoardProps> = ({ cols, rows, state, label, cell = 
     return COLORS[s];
   };
   const labelFillFor = (s: CellState) => {
-    if (s === 'visited' || s === 'empty') return 'var(--t2)';
+    if (s === 'visited' || s === 'visitedB' || s === 'empty') return 'var(--t2)';
     if (s === 'current' && isLight) return '#fff'; // current's fill flipped dark on light — flip its label light too
     return 'rgba(8,11,20,.8)';
   };

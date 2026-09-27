@@ -15,12 +15,15 @@ export interface HeatmapProps {
   rowLabels?: string[];
   colLabels?: string[];
   accent?: string;
+  /** Optional per-row opacity (0..1) to de-emphasise rows WITHOUT altering the
+   *  values shown — dim for focus, never rescale the data. */
+  rowOpacity?: number[];
 }
 
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 function rgb(r: number, g: number, b: number) { return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`; }
 
-const Heatmap: React.FC<HeatmapProps> = ({ matrix, mode = 'heat', min, max, cell = 26, gap = 2, showValues, rowLabels, colLabels, accent = 'var(--acc)' }) => {
+const Heatmap: React.FC<HeatmapProps> = ({ matrix, mode = 'heat', min, max, cell = 26, gap = 2, showValues, rowLabels, colLabels, rowOpacity }) => {
   const rows = matrix.length, cols = matrix[0]?.length ?? 0;
   let lo = min ?? Infinity, hi = max ?? -Infinity;
   if (min == null || max == null) matrix.forEach((r) => r.forEach((v) => { lo = Math.min(lo, v); hi = Math.max(hi, v); }));
@@ -63,7 +66,7 @@ const Heatmap: React.FC<HeatmapProps> = ({ matrix, mode = 'heat', min, max, cell
         const x = padL + c * (cell + gap), y = padT + r * (cell + gap);
         const t = hi > lo ? (v - lo) / (hi - lo) : 0;
         return (
-          <g key={`${r}-${c}`}>
+          <g key={`${r}-${c}`} opacity={rowOpacity?.[r] ?? 1}>
             <rect x={x} y={y} width={cell} height={cell} rx={3} fill={color(v)} stroke="rgba(120,130,170,.12)" strokeWidth={0.6} />
             {showValues && cell >= 20 && <text x={x + cell / 2} y={y + cell / 2 + 3} textAnchor="middle" fontSize={Math.min(9.5, cell / 2.6)} fontFamily="var(--mono)" fill={t > 0.55 ? 'rgba(8,11,20,.85)' : 'var(--t1)'}>{Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2)}</text>}
           </g>

@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "validate:rag-architecture": "node scripts/validate-rag-architecture.mjs",
+    "patch:rag-guidance": "node scripts/patch-rag-guidance.mjs",
+    "check:python-exports": "node scripts/check-python-exports.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
