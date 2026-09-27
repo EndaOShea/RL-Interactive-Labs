@@ -8,82 +8,16 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { hmmPython } from './python';
-import { rng } from './shared';
 import { useTheme } from '../../utils/theme';
+import { casino, forward, smoothed, viterbi, generate, SEQ_SEED } from './hmmCore';
 
 const ACCENT = '#e879f9';
 const FAIR = '#34d399';     // state 0
 const LOADED = '#f87171';   // state 1
 
-interface Hmm { A: number[][]; B: number[][]; pi: number[]; }
-
-/* ---------- HMM inference (2 states, scaled to avoid underflow) ---------- */
-function forward(obs: number[], h: Hmm): { alpha: number[][]; c: number[] } {
-  const T = obs.length, S = h.pi.length;
-  const alpha: number[][] = Array.from({ length: T }, () => new Array(S).fill(0));
-  const c: number[] = new Array(T).fill(0);
-  for (let s = 0; s < S; s++) alpha[0][s] = h.pi[s] * h.B[s][obs[0]];
-  c[0] = alpha[0].reduce((a, b) => a + b, 0) || 1;
-  for (let s = 0; s < S; s++) alpha[0][s] /= c[0];
-  for (let t = 1; t < T; t++) {
-    for (let s = 0; s < S; s++) {
-      let acc = 0;
-      for (let sp = 0; sp < S; sp++) acc += alpha[t - 1][sp] * h.A[sp][s];
-      alpha[t][s] = acc * h.B[s][obs[t]];
-    }
-    c[t] = alpha[t].reduce((a, b) => a + b, 0) || 1;
-    for (let s = 0; s < S; s++) alpha[t][s] /= c[t];
-  }
-  return { alpha, c };
-}
-function smoothed(obs: number[], h: Hmm): number[][] {
-  const T = obs.length, S = h.pi.length;
-  const { alpha, c } = forward(obs, h);
-  const beta: number[][] = Array.from({ length: T }, () => new Array(S).fill(0));
-  for (let s = 0; s < S; s++) beta[T - 1][s] = 1;
-  for (let t = T - 2; t >= 0; t--) {
-    for (let s = 0; s < S; s++) {
-      let acc = 0;
-      for (let sp = 0; sp < S; sp++) acc += h.A[s][sp] * h.B[sp][obs[t + 1]] * beta[t + 1][sp];
-      beta[t][s] = acc / (c[t + 1] || 1);
-    }
-  }
-  return alpha.map((a, t) => {
-    const g = a.map((v, s) => v * beta[t][s]);
-    const z = g.reduce((p, q) => p + q, 0) || 1;
-    return g.map((v) => v / z);
-  });
-}
-function viterbi(obs: number[], h: Hmm): number[] {
-  const T = obs.length, S = h.pi.length;
-  const ln = (x: number) => Math.log(Math.max(x, 1e-12));
-  const d: number[][] = Array.from({ length: T }, () => new Array(S).fill(0));
-  const psi: number[][] = Array.from({ length: T }, () => new Array(S).fill(0));
-  for (let s = 0; s < S; s++) d[0][s] = ln(h.pi[s]) + ln(h.B[s][obs[0]]);
-  for (let t = 1; t < T; t++) {
-    for (let s = 0; s < S; s++) {
-      let best = -Infinity, arg = 0;
-      for (let sp = 0; sp < S; sp++) { const val = d[t - 1][sp] + ln(h.A[sp][s]); if (val > best) { best = val; arg = sp; } }
-      d[t][s] = best + ln(h.B[s][obs[t]]); psi[t][s] = arg;
-    }
-  }
-  const path = new Array(T).fill(0);
-  path[T - 1] = d[T - 1][0] >= d[T - 1][1] ? 0 : 1;
-  for (let t = T - 2; t >= 0; t--) path[t] = psi[t + 1][path[t + 1]];
-  return path;
-}
-function generate(T: number, h: Hmm, seed: number): { states: number[]; obs: number[] } {
-  const r = rng(seed);
-  const pick = (p: number[]) => { const u = r(); let acc = 0; for (let i = 0; i < p.length; i++) { acc += p[i]; if (u <= acc) return i; } return p.length - 1; };
-  const states: number[] = [], obs: number[] = [];
-  let s = pick(h.pi);
-  for (let t = 0; t < T; t++) { states.push(s); obs.push(pick(h.B[s])); s = pick(h.A[s]); }
-  return { states, obs };
-}
-
 const mix = (p: number) => {
   const a = [52, 211, 153], b = [248, 113, 113];
-  return `rgb(${a.map((c, i) => Math.round(c + (b[i] - c) * p)).join(',')})`;
+  return `rgb(${a.map((c, i) => Math.round(c + ((b[i] ?? c) - c) * p)).join(',')})`;
 };
 
 const FACE = ['1', '2', '3', '4', '5', '6'];
@@ -113,7 +47,7 @@ const Timeline: React.FC<{
       {obs.map((o, t) => {
         const x = labelX + t * cw;
         const p = filtered[t] ?? 0;
-        const sm = smoothed ? smoothed[t] : 0;
+        const sm = smoothed ? smoothed[t] ?? 0 : 0;
         const tru = truth[t], vit = viterbi[t] ?? 0;
         const hit = vit === tru;
         return (
@@ -139,11 +73,13 @@ const Timeline: React.FC<{
 
 interface Preset { name: string; stay: number; p6: number; T: number; tip: string; }
 const PRESETS: Preset[] = [
-  { name: 'sticky & blatant', stay: 0.92, p6: 0.6, T: 18, tip: 'long honest/cheating runs + a very loaded die → easy to infer' },
-  { name: 'subtle cheat', stay: 0.88, p6: 0.35, T: 20, tip: 'barely-loaded die → the posterior stays unsure; smoothing helps most here' },
-  { name: 'twitchy switching', stay: 0.6, p6: 0.55, T: 20, tip: 'frequent die swaps → filtering lags the truth and Viterbi makes mistakes' },
-  { name: 'long game', stay: 0.85, p6: 0.5, T: 24, tip: 'a longer sequence — watch belief recover after each switch' },
+  { name: 'sticky & blatant', stay: 0.92, p6: 0.6, T: 18, tip: 'long honest/cheating runs + a very loaded die → easy to infer (Viterbi recovers 17 of these 18 rolls)' },
+  { name: 'subtle cheat', stay: 0.88, p6: 0.35, T: 20, tip: 'barely-loaded die (P(6) = 0.35) → the belief hovers closer to 50/50 than in any other preset' },
+  { name: 'twitchy switching', stay: 0.6, p6: 0.55, T: 20, tip: 'frequent die swaps → little memory to exploit: the belief just follows each roll (a six → loaded), smoothing adds almost nothing, and Viterbi still gets 7 of the 20 rolls wrong' },
+  { name: 'long game', stay: 0.85, p6: 0.5, T: 24, tip: 'a longer sequence — watch the belief recover after each switch' },
 ];
+
+const LN6 = Math.log(1 / 6);
 
 const HmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
@@ -153,52 +89,63 @@ const HmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [t, setStep] = useState(0);     // observations revealed
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-  const hmm: Hmm = useMemo(() => ({
-    A: [[stay, 1 - stay], [1 - stay, stay]],
-    B: [new Array(6).fill(1 / 6), [...new Array(5).fill((1 - p6) / 5), p6]],
-    pi: [0.5, 0.5],
-  }), [stay, p6]);
+  const hmm = useMemo(() => casino(stay, p6), [stay, p6]);
+  const seq = useMemo(() => generate(T, hmm, SEQ_SEED), [T, hmm]);
 
-  const seq = useMemo(() => generate(T, hmm, 12345), [T, hmm]);
-
-  // inference over the revealed prefix
+  // inference over the revealed prefix (Viterbi is re-decoded over the whole prefix each roll)
   const infer = useMemo(() => {
-    if (t === 0) return { filtered: [] as number[], viterbi: [] as number[], smoothed: undefined as number[] | undefined };
+    if (t === 0) return { filtered: [] as number[], viterbi: [] as number[], smoothed: undefined as number[] | undefined, logLik: 0 };
     const obs = seq.obs.slice(0, t);
-    const { alpha } = forward(obs, hmm);
-    const filtered = alpha.map((a) => a[1]);          // P(loaded | o_{1:t})
+    const { alpha, logLik } = forward(obs, hmm);
+    const filtered = alpha.map((a) => a[1] ?? 0);        // P(loaded | o_1..o_t)
     const vit = viterbi(obs, hmm);
-    const smo = t >= T ? smoothed(obs, hmm).map((g) => g[1]) : undefined;
-    return { filtered, viterbi: vit, smoothed: smo };
+    const smo = t >= T ? smoothed(obs, hmm).map((g) => g[1] ?? 0) : undefined;
+    return { filtered, viterbi: vit, smoothed: smo, logLik };
   }, [t, seq, hmm, T]);
 
   const vitAcc = t > 0 ? infer.viterbi.reduce((a, v, i) => a + (v === seq.states[i] ? 1 : 0), 0) / t : 0;
-  const curP = t > 0 ? infer.filtered[t - 1] : 0.5;
+  const curP = t > 0 ? infer.filtered[t - 1] ?? 0.5 : 0.5;
+  const fairOnly = t * LN6;
+  // end-of-game comparisons: confidence |p − ½| and posterior decoding vs Viterbi
+  const sharp = (arr: number[]) => arr.reduce((a, p) => a + Math.abs(p - 0.5), 0) / Math.max(1, arr.length);
+  const sharpF = sharp(infer.filtered);
+  const sharpS = infer.smoothed ? sharp(infer.smoothed) : null;
+  const disagree = infer.smoothed ? infer.smoothed.reduce((a, g, i) => a + ((g > 0.5 ? 1 : 0) !== infer.viterbi[i] ? 1 : 0), 0) : null;
 
   const reset = () => { sim.stop(); narration.cancel(); setStep(0); setLastLog(null); };
 
   const intro = () =>
-    `The challenge: you watch a casino's dice but never see which die is in play — a fair one or a die loaded toward six — and the casino secretly switches between them. This is a hidden Markov model: a hidden state that hops between fair and loaded as a Markov chain, emitting a roll you can see at each step. The forward algorithm tracks your belief online: each new roll multiplies in its emission likelihood and the transition prior, then renormalises — recursive Bayes in a discrete state space. Watch the P-of-loaded row warm from green toward red as a streak of sixes piles up, lagging slightly behind the true die, while Viterbi marks its single most likely explanation of the whole streak. This machinery powered speech recognition and gene finding for decades.`;
+    `The challenge: you watch a casino's dice but never see which die is in play — a fair one or a die loaded toward six — and the casino secretly switches between them. This is a hidden Markov model: a hidden state that hops between fair and loaded as a Markov chain, emitting a roll you can see at each step. The forward algorithm tracks your belief online: each new roll multiplies in its emission likelihood and the transition prior, then renormalises — recursive Bayes in a discrete state space, and the product of those normalisers is the probability of the rolls themselves. Watch the P-of-loaded row warm from green toward red as sixes pile up, while Viterbi re-decodes its single most likely explanation of the whole sequence so far at every roll — so earlier Viterbi cells can change. This machinery powered speech recognition and gene finding for decades.`;
+
+  const endSummary = () => {
+    const sm = sharpS == null ? '' : sharpS > sharpF + 0.005
+      ? `The smoothed row, which uses the whole sequence — past and future — is more decisive than the online filtered belief (average confidence |p − ½| of ${sharpS.toFixed(2)} vs ${sharpF.toFixed(2)}), because hindsight resolves rolls that were ambiguous at the time.`
+      : `Here the smoothed row is barely more decisive than filtering (|p − ½| ${sharpS.toFixed(2)} vs ${sharpF.toFixed(2)}): with so little stickiness, future rolls say almost nothing about the present die.`;
+    const dis = disagree == null ? '' : disagree > 0
+      ? ` Picking the more likely die at each roll from the smoothed belief disagrees with the Viterbi path at ${disagree} of ${T} rolls — the single most likely path is not the sequence of individually most likely states.`
+      : ' Here the per-roll most likely die under the smoothed belief matches the Viterbi path everywhere, though in general they can differ.';
+    return `Viterbi recovered the hidden die at ${(vitAcc * 100).toFixed(0)} percent of the rolls. ${sm}${dis}`;
+  };
 
   const step = () => {
     narration.narratePhase('run:hmm', intro());
     if (t >= T) {
       sim.pause();
-      narration.narratePhase('done:hmm',
-        `The sequence is complete. Viterbi recovered the hidden die about ${(vitAcc * 100).toFixed(0)} percent of the time, and the smoothed row — which uses the WHOLE sequence, past and future — is sharper than the online filtered belief, because hindsight resolves the moments where a single roll was ambiguous. That gap between filtering and smoothing is the price of having to decide in real time.`);
+      narration.narratePhase('done:hmm', `The sequence is complete. ${endSummary()}`);
       return;
     }
     const nextT = t + 1;
     setStep(nextT);
     const obs = seq.obs.slice(0, nextT);
-    const { alpha } = forward(obs, hmm);
-    const pLoaded = alpha[nextT - 1][1];
-    const roll = seq.obs[nextT - 1] + 1;
+    const { alpha, logLik } = forward(obs, hmm);
+    const pLoaded = alpha[nextT - 1]?.[1] ?? 0.5;
+    const roll = (seq.obs[nextT - 1] ?? 0) + 1;
+    const trueLoaded = seq.states[nextT - 1] === 1;
 
     setLastLog({
       algorithm: 'Hidden Markov Model · forward filtering',
       stepDescription: `Observed roll ${roll} at t=${nextT}; update the belief over the hidden die`,
-      formula: 'α_t(s) ∝ B[s,o_t] · Σ_{s′} α_{t-1}(s′) A[s′,s]',
+      formula: 'α_t(s) ∝ B[s,o_t] · Σ_{s′} α_{t-1}(s′) A[s′,s] ;  log p(o_1..o_t) = Σ log c_τ',
       variables: {
         t: nextT,
         roll,
@@ -206,18 +153,21 @@ const HmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         'P(fair)': +(1 - pLoaded).toFixed(3),
         'stay prob': +stay.toFixed(2),
         'P(6|loaded)': +p6.toFixed(2),
-        'true die': seq.states[nextT - 1] === 1 ? 'Loaded' : 'Fair',
+        'log p(rolls)': +logLik.toFixed(3),
+        'log p if all fair': +(nextT * LN6).toFixed(3),
+        'true die': trueLoaded ? 'Loaded' : 'Fair',
       },
-      result: `belief P(loaded)=${pLoaded.toFixed(2)} · true die ${seq.states[nextT - 1] === 1 ? 'LOADED' : 'FAIR'}`,
+      result: `belief P(loaded)=${pLoaded.toFixed(2)} · true die ${trueLoaded ? 'LOADED' : 'FAIR'} · log p(rolls)=${logLik.toFixed(2)}`,
       mathDetails: {
         params: [
           { label: 'predict', info: 'Multiply the previous belief by the transition matrix A — the die may have switched since the last roll.' },
-          { label: 'update', info: 'Multiply by the emission likelihood B[s, roll] of the observed face, then renormalise (the scaling step).' },
-          { label: 'filter vs smooth', info: 'Filtering uses only past rolls; the forward–backward smoothed posterior (shown at the end) also uses future rolls and is sharper.' },
+          { label: 'update', info: 'Multiply by the emission likelihood B[s, roll] of the observed face, then renormalise by c_t (the scaling step).' },
+          { label: 'likelihood', info: `The normalisers multiply to the probability of the rolls: log p(o_1..o_t) = Σ log c_τ = ${logLik.toFixed(2)}, vs ${(nextT * LN6).toFixed(2)} if every roll came from the fair die.` },
+          { label: 'filter vs smooth vs Viterbi', info: 'Filtering uses only past rolls; the forward–backward smoothed posterior (shown at the end) also uses future rolls. Viterbi re-decodes the most likely whole path over the prefix at every roll, and its path can disagree with the per-roll most likely state.' },
         ],
         implication: pLoaded > 0.5
-          ? 'The recent rolls now favour the loaded die — but a sticky transition matrix keeps the belief from flipping on a single suspicious six.'
-          : 'The evidence still favours the fair die; it takes a run of sixes to overcome the prior that the die rarely switches.',
+          ? 'The recent rolls now favour the loaded die — though a sticky transition matrix keeps the belief from flipping on a single suspicious six.'
+          : 'The evidence still favours the fair die; with a sticky chain it takes a run of sixes to overcome the prior that the die rarely switches.',
       },
     });
   };
@@ -241,14 +191,14 @@ const HmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         { label: 't', value: `${t}/${T}` },
         { label: 'true', value: t > 0 ? (seq.states[t - 1] === 1 ? 'LOAD' : 'FAIR') : '—', color: t > 0 && seq.states[t - 1] === 1 ? LOADED : FAIR },
         { label: 'Viterbi acc', value: `${(vitAcc * 100).toFixed(0)}%`, color: ACCENT },
-        { label: 'stay', value: stay.toFixed(2) },
+        { label: 'log p(rolls)', value: t > 0 ? infer.logLik.toFixed(2) : '—' },
       ]}
       onDownloadCode={() => downloadCode(descriptor.codeFile, hmmPython(stay, p6, T))}
       grid={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
           <Timeline obs={obsR} truth={truR} filtered={infer.filtered} viterbi={infer.viterbi} smoothed={infer.smoothed} total={T} />
-          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', maxWidth: 520, textAlign: 'center', lineHeight: 1.5 }}>
-            Each roll updates the belief P(loaded). The <span style={{ color: FAIR }}>fair</span>/<span style={{ color: LOADED }}>loaded</span> rows are the hidden truth and Viterbi's guess (dashed white = a Viterbi mistake). The smoothed row appears once the game ends.
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', maxWidth: 560, textAlign: 'center', lineHeight: 1.5 }}>
+            Each roll updates the belief P(loaded). The <span style={{ color: FAIR }}>fair</span>/<span style={{ color: LOADED }}>loaded</span> rows are the hidden truth and Viterbi's guess (dashed white = a Viterbi mistake). The Viterbi row is re-decoded over the whole prefix at every roll, so earlier cells can change. The smoothed row appears once the game ends{disagree != null ? ` — its per-roll most likely die disagrees with Viterbi at ${disagree} of ${T} rolls` : ''}.
           </div>
         </div>
       )}
@@ -264,7 +214,7 @@ const HmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       rewardValue={curP.toFixed(2)}
       rewardSeries={infer.filtered}
       lastLog={lastLog}
-      contextInsight={`Two hidden states — a fair die and one loaded toward six with P(6)=${p6.toFixed(2)} — switch with stay-probability ${stay.toFixed(2)}. The forward algorithm gives the online belief P(loaded|rolls so far); right now it is ${curP.toFixed(2)} and the true die is ${t > 0 ? (seq.states[t - 1] === 1 ? 'loaded' : 'fair') : 'unknown'}. Viterbi's most-likely path matches the truth ${(vitAcc * 100).toFixed(0)}% of the time. When the game ends, the forward–backward SMOOTHED posterior (using future rolls too) is sharper than filtering — the difference between real-time and retrospective inference.`}
+      contextInsight={`Two hidden states — a fair die and one loaded toward six with P(6)=${p6.toFixed(2)} — switch with stay-probability ${stay.toFixed(2)}. The forward algorithm gives the online belief P(loaded|rolls so far); right now it is ${curP.toFixed(2)} and the true die is ${t > 0 ? (seq.states[t - 1] === 1 ? 'loaded' : 'fair') : 'unknown'}. Its normalisers give log p(rolls) = ${t > 0 ? infer.logLik.toFixed(2) : '—'}${t > 0 ? ` (vs ${fairOnly.toFixed(2)} if every roll came from the fair die)` : ''}. Viterbi's most-likely path, re-decoded over the prefix at each roll, matches the truth ${(vitAcc * 100).toFixed(0)}% of the time.${infer.smoothed ? ` ${endSummary()}` : ' When the game ends, the forward–backward smoothed posterior (using future rolls too) appears for comparison.'}`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Hidden Markov Model" hint="Infer the hidden die from the rolls you can see." />
@@ -281,16 +231,16 @@ const HmmLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             </div>
           </div>
           <ParamSlider name="Stay probability" value={stay.toFixed(2)} min={0.5} max={0.97} step={0.01} current={stay}
-            onChange={(v) => { setStay(v); if (!sim.isPlaying) reset(); }} hint="P(same die next step) — stickiness of the chain" accent={ACCENT} />
+            onChange={(v) => { setStay(v); reset(); }} hint="P(same die next step) — stickiness of the chain" accent={ACCENT} />
           <ParamSlider name="P(6 | loaded)" value={p6.toFixed(2)} min={0.17} max={0.8} step={0.01} current={p6}
-            onChange={(v) => { setP6(v); if (!sim.isPlaying) reset(); }} hint="how loaded the cheating die is (0.17 = fair)" accent={ACCENT} />
+            onChange={(v) => { setP6(v); reset(); }} hint="how loaded the cheating die is (0.17 ≈ fair)" accent={ACCENT} />
           <ParamSlider name="Sequence length" value={`${T}`} min={10} max={24} step={1} current={T}
-            onChange={(v) => { setT(v); if (!sim.isPlaying) reset(); }} hint="number of rolls" accent={ACCENT} />
+            onChange={(v) => { setT(v); reset(); }} hint="number of rolls" accent={ACCENT} />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={120} max={900} step={40} current={sim.speed} onChange={sim.setSpeed} hint="roll interval" accent={ACCENT} />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ topic: 'Hidden Markov model (forward-backward + Viterbi)', stayProb: stay, pSixLoaded: p6, length: T, revealed: t, pLoadedNow: +curP.toFixed(3), viterbiAccuracy: +vitAcc.toFixed(3) }}
+      currentParams={{ topic: 'Hidden Markov model (forward-backward + Viterbi)', stayProb: stay, pSixLoaded: p6, length: T, revealed: t, pLoadedNow: +curP.toFixed(3), viterbiAccuracy: +vitAcc.toFixed(3), logLikelihood: t > 0 ? +infer.logLik.toFixed(3) : null, smoothedVsViterbiDisagreements: disagree }}
       apiPanel={apiPanel}
     />
   );

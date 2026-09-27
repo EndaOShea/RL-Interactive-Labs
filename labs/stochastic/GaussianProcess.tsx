@@ -9,40 +9,34 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { gpPython } from './python';
+import { KERNELS } from './shared';
+import type { KernelId } from './shared';
 import {
-  rng, gaussFrom, kernel, gram, cross, invert, matVec, matMul, transpose, dot, cholesky, mvnSample,
-  KernelId, KERNELS, Vec, Mat,
-} from './shared';
+  gpPosterior, gpSamples, fitHyper, DATA_SET, XS, XC, IDX_GAP, IDX_DATA, PERIOD, ELL_RANGE, SF_RANGE, SN_RANGE,
+} from './gpCore';
+import type { HyperFit } from './gpCore';
 
 const ACCENT = '#e879f9';
 const DATA = '#fcd34d';
 const SAMP = 'rgba(232,121,249,0.30)';
 const BAND = 'rgba(232,121,249,0.9)';
 
-const NXS = 140;        // fine grid for mean / band
-const NXC = 56;         // coarse grid for sampled functions (keeps Cholesky cheap)
-const N_SAMP = 4;
-const PERIOD = 0.3;
-
-const fTrue = (x: number) => Math.sin(2 * Math.PI * x) * 0.7;
-
-// Fixed data with a gap; revealed one point at a time during Run.
-const DATA_SET = (() => {
-  const r = rng(7);
-  const xs = [0.07, 0.16, 0.25, 0.33, 0.60, 0.70, 0.82, 0.93];
-  const ys = xs.map((x) => fTrue(x) + gaussFrom(r) * 0.06);
-  return { xs, ys };
-})();
 const XTR = DATA_SET.xs, YTR = DATA_SET.ys;
-const XS = Array.from({ length: NXS }, (_, i) => i / (NXS - 1));
-const XC = Array.from({ length: NXC }, (_, i) => i / (NXC - 1));
+const X_GAP = XS[IDX_GAP] ?? 0.46, X_DATA = XS[IDX_DATA] ?? 0.16;
 
-interface Preset { name: string; kernel: KernelId; ell: number; sn: number; tip: string; }
+const KERNEL_FORMULA: Record<KernelId, string> = {
+  rbf: 'σ_f²·exp(−r²/2ℓ²)',
+  matern32: 'σ_f²(1+√3r/ℓ)·e^(−√3r/ℓ)',
+  periodic: `σ_f²·exp(−2sin²(πr/${PERIOD})/ℓ²)`,
+  linear: 'σ_f²·[(x−½)(x′−½) + 0.02]',
+};
+
+interface Preset { name: string; kernel: KernelId; ell: number; sf: number; sn: number; tip: string; }
 const PRESETS: Preset[] = [
-  { name: 'smooth fit (RBF)', kernel: 'rbf', ell: 0.15, sn: 0.06, tip: 'a smooth interpolation; the band pinches at data and balloons in the gap' },
-  { name: 'short lengthscale', kernel: 'rbf', ell: 0.05, sn: 0.06, tip: 'tiny ℓ → wiggly, over-flexible; uncertainty snaps back up between points' },
-  { name: 'rough (Matérn-3/2)', kernel: 'matern32', ell: 0.15, sn: 0.06, tip: 'less smooth sample paths — a more realistic prior for many signals' },
-  { name: 'periodic kernel', kernel: 'periodic', ell: 0.6, sn: 0.06, tip: 'assumes repetition — it confidently extrapolates the pattern into the gap' },
+  { name: 'smooth fit (RBF)', kernel: 'rbf', ell: 0.15, sf: 1, sn: 0.06, tip: 'a smooth interpolation; the band pinches at the data and balloons in the gap' },
+  { name: 'short lengthscale', kernel: 'rbf', ell: 0.05, sf: 1, sn: 0.06, tip: 'tiny ℓ → wiggly, over-flexible; uncertainty snaps back up between neighbouring points and returns to the prior σ_f in the gap' },
+  { name: 'rough (Matérn-3/2)', kernel: 'matern32', ell: 0.15, sf: 1, sn: 0.06, tip: 'less smooth sample paths — a more realistic prior for many signals' },
+  { name: 'periodic kernel', kernel: 'periodic', ell: 0.6, sf: 1, sn: 0.06, tip: `the period is fixed at ${PERIOD}: the kernel fills the gap by copying the data one period away — confidently, but the true curve has period 1, so the mean is wrong there and the log marginal likelihood collapses` },
 ];
 
 const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
@@ -53,92 +47,75 @@ const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
   const [sn, setSn] = useState(0.06);
   const [revealed, setRevealed] = useState(0);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
+  const [fit, setFit] = useState<(HyperFit & { from: number | null; kid: KernelId }) | null>(null);
 
   const obsX = XTR.slice(0, revealed);
   const obsY = YTR.slice(0, revealed);
 
-  // Posterior mean + variance on the fine grid (closed form).
-  const post = useMemo(() => {
-    const mean = new Array(NXS).fill(0);
-    const std = new Array(NXS).fill(sf);
-    if (revealed === 0) {
-      for (let g = 0; g < NXS; g++) std[g] = Math.sqrt(Math.max(0, kernel(kid, XS[g], XS[g], ell, sf, PERIOD)));
-      return { mean, std };
-    }
-    const K = gram(kid, obsX, ell, sf, PERIOD).map((row, i) => row.map((v, j) => v + (i === j ? sn * sn : 0)));
-    const Kinv = invert(K);
-    const KinvY = matVec(Kinv, obsY);
-    for (let g = 0; g < NXS; g++) {
-      const ks = obsX.map((xo) => kernel(kid, XS[g], xo, ell, sf, PERIOD));
-      mean[g] = dot(ks, KinvY);
-      const v = kernel(kid, XS[g], XS[g], ell, sf, PERIOD) - dot(ks, matVec(Kinv, ks));
-      std[g] = Math.sqrt(Math.max(0, v));
-    }
-    return { mean, std };
-  }, [kid, ell, sf, sn, revealed]);
+  // Posterior mean + variance on the fine grid, and the log marginal likelihood (closed form, Cholesky).
+  const post = useMemo(() => gpPosterior(kid, ell, sf, sn, XTR.slice(0, revealed), YTR.slice(0, revealed)), [kid, ell, sf, sn, revealed]);
+  // A few sample functions on the coarse grid (prior when revealed = 0, else posterior).
+  const samples = useMemo(() => gpSamples(kid, ell, sf, sn, XTR.slice(0, revealed), YTR.slice(0, revealed), Math.random), [kid, ell, sf, sn, revealed]);
 
-  // A few sample functions on the coarse grid (prior when revealed=0, else posterior).
-  const samples = useMemo(() => {
-    let meanC: Vec; let covC: Mat;
-    const Kss = gram(kid, XC, ell, sf, PERIOD);
-    if (revealed === 0) {
-      meanC = new Array(NXC).fill(0);
-      covC = Kss;
-    } else {
-      const K = gram(kid, obsX, ell, sf, PERIOD).map((row, i) => row.map((v, j) => v + (i === j ? sn * sn : 0)));
-      const Kinv = invert(K);
-      const Ksc = cross(kid, XC, obsX, ell, sf, PERIOD);           // NXC × n
-      const KinvY = matVec(Kinv, obsY);
-      meanC = Ksc.map((ks) => dot(ks, KinvY));
-      const KscKinv = matMul(Ksc, Kinv);                           // NXC × n
-      const reduce = matMul(KscKinv, transpose(Ksc));              // NXC × NXC
-      covC = Kss.map((row, i) => row.map((v, j) => v - reduce[i][j]));
-    }
-    const L = cholesky(covC, 1e-6);
-    return Array.from({ length: N_SAMP }, () => mvnSample(meanC, L, Math.random));
-  }, [kid, ell, sf, sn, revealed]);
-
-  const gapIdx = Math.round(0.46 * (NXS - 1));   // a point inside the gap
-  const sigGap = post.std[gapIdx];
-  const nearData = post.std[Math.round(0.16 * (NXS - 1))];
+  const sigGap = post.std[IDX_GAP] ?? 0;
+  const nearData = post.std[IDX_DATA] ?? 0;
+  const logML = post.logML;
+  const gapRatio = sigGap / Math.max(1e-9, nearData);
+  const bandShape = gapRatio >= 3 ? 'balloons' : gapRatio >= 1.5 ? 'widens' : 'flat';
 
   const reset = () => { sim.stop(); narration.cancel(); setRevealed(0); setLastLog(null); };
 
   const intro = () =>
-    `The challenge: fit a function to a few points AND honestly report how sure you are everywhere in between — without ever choosing network weights. A Gaussian process places a prior directly over functions through a kernel that says how strongly nearby inputs co-vary. Before any data it is just smooth random curves with a flat uncertainty band. Each time Run reveals a point, the posterior conditions on it: watch the band pinch to almost nothing right at the observation and stay fat across the empty gap, because many functions still fit there. The lengthscale slider sets how quickly the function may wiggle, and the kernel encodes your assumption — smooth, rough, or periodic. This closed-form uncertainty is why Gaussian processes drive Bayesian optimisation and small-data modelling.`;
+    `The challenge: fit a function to a few points AND honestly report how sure you are everywhere in between — without ever choosing network weights. A Gaussian process places a prior directly over functions through a kernel that says how strongly nearby inputs co-vary. Before any data it is just random curves with a flat uncertainty band. Each time Run reveals a point, the posterior conditions on it: the band pinches to about the noise level right at the observation and, with a smooth kernel, stays wide across the empty gap, because many functions still fit there. The lengthscale slider sets how quickly the function may wiggle, and the kernel encodes your assumption — smooth, rough, periodic or linear. The log marginal likelihood scores how well those assumptions explain the data. This closed-form uncertainty is why Gaussian processes drive Bayesian optimisation and small-data modelling.`;
+
+  const shapeSentence = () => {
+    if (bandShape === 'balloons') return `The band is tight — about ${nearData.toFixed(2)} beside the data, near the noise level σ_n = ${sn.toFixed(2)} — and balloons to ${sigGap.toFixed(2)} across the gap, where the process has nothing to condition on.`;
+    if (bandShape === 'widens') return `The band widens from ${nearData.toFixed(2)} beside the data to ${sigGap.toFixed(2)} in the gap — the lengthscale ℓ = ${ell.toFixed(2)} lets the data on both sides constrain much of it.`;
+    const why = kid === 'linear'
+      ? 'a linear kernel only allows straight lines, so its uncertainty is smallest near the middle of the data'
+      : kid === 'periodic'
+        ? `the periodic kernel copies data one period (${PERIOD}) away into the gap — confidently, whether or not the signal really repeats`
+        : 'the lengthscale is long enough to bridge the gap';
+    return `With this kernel the band is no wider in the gap (${sigGap.toFixed(2)}) than beside the data (${nearData.toFixed(2)}): ${why}.`;
+  };
 
   const step = () => {
     narration.narratePhase(`run:${kid}`, intro());
     if (revealed >= XTR.length) {
       sim.pause();
       narration.narratePhase(`done:${kid}`,
-        `All points are in. Look at the band: it is tight, near the noise level, wherever there is data, and balloons to about ${sigGap.toFixed(2)} across the gap where the process has nothing to condition on. That uncertainty came for free from the closed-form posterior — no training loop. Change the kernel or lengthscale and the SHAPE of that uncertainty changes, because in a Gaussian process the kernel is the model.`);
+        `All points are in. ${shapeSentence()} That uncertainty came for free from the closed-form posterior — no training loop. The log marginal likelihood is ${logML != null ? logML.toFixed(1) : 'undefined'}: change the kernel or its hyperparameters to raise it, because in a Gaussian process the kernel is the model.`);
       return;
     }
     const nextRev = revealed + 1;
     setRevealed(nextRev);
+    const p = gpPosterior(kid, ell, sf, sn, XTR.slice(0, nextRev), YTR.slice(0, nextRev));
+    const g = p.std[IDX_GAP] ?? 0, d = p.std[IDX_DATA] ?? 0;
 
     setLastLog({
-      algorithm: `Gaussian Process · ${KERNELS.find((k) => k.id === kid)!.label}`,
+      algorithm: `Gaussian Process · ${KERNELS.find((k) => k.id === kid)?.label ?? kid}`,
       stepDescription: `Conditioned on ${nextRev} of ${XTR.length} observations`,
       formula: 'μ∗ = K∗(K+σ²I)⁻¹y ;  Σ∗ = K∗∗ − K∗(K+σ²I)⁻¹K∗ᵀ',
       variables: {
         kernel: kid,
+        'k(x,x′)': KERNEL_FORMULA[kid],
         'ℓ length': +ell.toFixed(3),
         'σ_f signal': +sf.toFixed(2),
         'σ_n noise': +sn.toFixed(3),
-        'points': nextRev,
-        'σ gap': +sigGap.toFixed(3),
-        'σ@data': +nearData.toFixed(3),
+        points: nextRev,
+        [`σ gap (x=${X_GAP.toFixed(2)})`]: +g.toFixed(3),
+        [`σ data (x=${X_DATA.toFixed(2)})`]: +d.toFixed(3),
+        'log p(y|X)': p.logML != null ? +p.logML.toFixed(3) : '—',
       },
-      result: `${nextRev} pts · band: data ${nearData.toFixed(2)} ≪ gap ${sigGap.toFixed(2)}`,
+      result: `${nextRev} pts · band: data ${d.toFixed(2)} vs gap ${g.toFixed(2)} · log ML ${p.logML != null ? p.logML.toFixed(2) : '—'}`,
       mathDetails: {
         params: [
-          { label: 'posterior mean', info: 'A kernel-weighted interpolation of the observed targets — smooth where the kernel says so.' },
-          { label: 'posterior variance', info: 'K∗∗ minus what the data explains; collapses to the noise σ_n at observations, grows in gaps.' },
-          { label: 'kernel = model', info: 'RBF is very smooth, Matérn-3/2 rougher, periodic repeats. The kernel encodes every prior assumption.' },
+          { label: 'posterior mean', info: 'A kernel-weighted interpolation of the observed targets, computed with a Cholesky factor of K+σ_n²I (two triangular solves, never an explicit inverse).' },
+          { label: 'posterior variance', info: 'K∗∗ minus what the data explain: it shrinks to about the noise level σ_n at an isolated observation (below it where neighbours also inform it) and grows in gaps — for kernels that decay with distance.' },
+          { label: 'kernel = model', info: `RBF ${KERNEL_FORMULA.rbf} is very smooth; Matérn-3/2 ${KERNEL_FORMULA.matern32} is rougher; periodic ${KERNEL_FORMULA.periodic} repeats every ${PERIOD}; linear ${KERNEL_FORMULA.linear} gives straight lines (the 0.02·σ_f² bias term lets the line's height vary; ℓ is unused).` },
+          { label: 'log marginal likelihood', info: 'log p(y|X) = −½yᵀ(K+σ_n²I)⁻¹y − Σ log Lᵢᵢ − (n/2) log 2π: data fit against complexity (Occam). Tuning ℓ, σ_f, σ_n to maximise it is how a GP "learns".' },
         ],
-        implication: 'No optimisation — just linear algebra. The (K+σ²I)⁻¹ inverse costs O(n³), which is why large-scale GPs need sparse approximations.',
+        implication: 'No optimisation for the posterior itself — just linear algebra. Factorising K+σ_n²I costs O(n³), which is why large-scale GPs need sparse approximations.',
       },
     });
   };
@@ -147,17 +124,29 @@ const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
 
   const applyPreset = (p: Preset) => {
     sim.stop(); narration.cancel();
-    setKid(p.kernel); setEll(p.ell); setSn(p.sn); setRevealed(0); setLastLog(null);
+    setKid(p.kernel); setEll(p.ell); setSf(p.sf); setSn(p.sn); setRevealed(0); setLastLog(null); setFit(null);
   };
-  const switchKernel = (k: KernelId) => { sim.stop(); narration.cancel(); setKid(k); setRevealed(0); setLastLog(null); };
+  const switchKernel = (k: KernelId) => { sim.stop(); narration.cancel(); setKid(k); setRevealed(0); setLastLog(null); setFit(null); };
+  const runFit = () => {
+    sim.stop();
+    const f = fitHyper(kid, XTR, YTR, { ell, sf, sn });
+    const from = gpPosterior(kid, ell, sf, sn, XTR, YTR).logML;
+    setEll(f.ell); setSf(f.sf); setSn(f.sn); setRevealed(XTR.length); setLastLog(null);
+    setFit({ ...f, from, kid });
+  };
 
-  const upper = XS.map((x, g) => ({ x, y: post.mean[g] + 2 * post.std[g] }));
-  const lower = XS.map((x, g) => ({ x, y: post.mean[g] - 2 * post.std[g] }));
-  const meanLine = XS.map((x, g) => ({ x, y: post.mean[g] }));
+  const upper = XS.map((x, g) => ({ x, y: (post.mean[g] ?? 0) + 2 * (post.std[g] ?? 0) }));
+  const lower = XS.map((x, g) => ({ x, y: (post.mean[g] ?? 0) - 2 * (post.std[g] ?? 0) }));
+  const meanLine = XS.map((x, g) => ({ x, y: post.mean[g] ?? 0 }));
   const yVals = [...upper.map((p) => p.y), ...lower.map((p) => p.y), ...obsY, ...samples.flat()];
   const ylo = Math.min(...yVals), yhi = Math.max(...yVals);
   const pad = (yhi - ylo) * 0.1 || 0.4;
   const range: [number, number] = [Math.max(-3.5, ylo - pad), Math.min(3.5, yhi + pad)];
+
+  const presetMatch = PRESETS.find((p) => p.kernel === kid && Math.abs(p.ell - ell) < 1e-6 && Math.abs(p.sf - sf) < 1e-6 && Math.abs(p.sn - sn) < 1e-6);
+  const fitNote = fit && fit.kid === kid
+    ? `Fitted by coordinate ascent on the slider grids (${fit.sweeps} sweeps, all ${XTR.length} points): ℓ=${fit.ell.toFixed(3)}, σ_f=${fit.sf.toFixed(2)}, σ_n=${fit.sn.toFixed(3)} · log ML ${fit.from != null ? fit.from.toFixed(2) : '—'} → ${fit.logML.toFixed(2)}.`
+    : null;
 
   return (
     <LabStage
@@ -166,22 +155,22 @@ const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
       narration={narration}
       stats={[
         { label: 'kernel', value: kid, color: ACCENT },
-        { label: 'ℓ', value: ell.toFixed(3) },
         { label: 'pts', value: `${revealed}/${XTR.length}`, color: DATA },
         { label: 'σ gap', value: sigGap.toFixed(3), color: BAND },
         { label: 'σ@data', value: nearData.toFixed(3) },
+        { label: 'log ML', value: logML != null ? logML.toFixed(2) : '—' },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, gpPython(kid, ell, sf, sn))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, gpPython(kid, ell, sf, sn, revealed))}
       grid={(
         <FunctionPlot
           width={580} height={440} domain={[0, 1]} range={range}
           series={[
-            ...samples.map((s) => ({ points: XC.map((x, g) => ({ x, y: s[g] })), color: SAMP, width: 1 })),
+            ...samples.map((s) => ({ points: XC.map((x, g) => ({ x, y: s[g] ?? 0 })), color: SAMP, width: 1 })),
             { points: upper, color: BAND, width: 1.4, dash: true },
             { points: lower, color: BAND, width: 1.4, dash: true },
             { points: meanLine, color: ACCENT, width: 2.6 },
           ]}
-          scatter={obsX.map((x, i) => ({ x, y: obsY[i], color: DATA, r: 3.6 }))}
+          scatter={obsX.map((x, i) => ({ x, y: obsY[i] ?? 0, color: DATA, r: 3.6 }))}
           xLabel="x" yLabel="f(x)"
         />
       )}
@@ -190,15 +179,15 @@ const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
         <Legend title="GP" items={[
           { color: DATA, label: 'observations' },
           { color: ACCENT, label: 'posterior mean' },
-          { color: BAND, label: '±2σ band' },
+          { color: BAND, label: '±2σ band of f' },
           { color: '#9a6fb0', label: 'sample functions' },
         ]} />
       )}
       rewardLabel="posterior σ across x"
       rewardValue={sigGap.toFixed(3)}
-      rewardSeries={XS.filter((_, i) => i % 4 === 0).map((_, i) => post.std[i * 4])}
+      rewardSeries={XS.filter((_, i) => i % 4 === 0).map((_, i) => post.std[i * 4] ?? 0)}
       lastLog={lastLog}
-      contextInsight={`A ${kid} kernel with lengthscale ℓ=${ell.toFixed(2)} defines a prior over functions. After ${revealed}/${XTR.length} observations the posterior std is ${nearData.toFixed(2)} near the data but ${sigGap.toFixed(2)} across the gap (x≈0.46) — uncertainty you get in closed form, no training. The mean is a kernel-weighted interpolation; the band collapses to the noise σ_n=${sn.toFixed(2)} at points. Change the kernel and the very shape of the uncertainty changes — in a GP, the kernel IS the model. Cost is O(n³) from the (K+σ²I)⁻¹ inverse.`}
+      contextInsight={`A ${kid} kernel k(x,x′) = ${KERNEL_FORMULA[kid]} with ℓ=${ell.toFixed(2)}, σ_f=${sf.toFixed(2)} defines a prior over functions. After ${revealed}/${XTR.length} observations the posterior std of f is ${nearData.toFixed(2)} beside the data (x≈${X_DATA.toFixed(2)}) and ${sigGap.toFixed(2)} in the gap (x≈${X_GAP.toFixed(2)}). ${revealed === XTR.length ? shapeSentence() : ''} ${logML != null ? `The log marginal likelihood of the revealed points is ${logML.toFixed(2)} — the objective the hyperparameters are tuned against.` : 'The log marginal likelihood needs at least one observation.'} In a GP, the kernel IS the model; the posterior is closed-form, with an O(n³) Cholesky factorisation.`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Gaussian Process" hint="A distribution over functions — exact Bayesian regression." />
@@ -209,6 +198,7 @@ const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
                 <AlgoPill key={k.id} active={kid === k.id} accent={ACCENT} onClick={() => switchKernel(k.id)}>{k.label}</AlgoPill>
               ))}
             </div>
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 7, lineHeight: 1.5 }}>k(x,x′) = {KERNEL_FORMULA[kid]}, r = |x − x′|</div>
           </div>
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Presets &amp; challenges</MonoLabel>
@@ -216,22 +206,23 @@ const GaussianProcessLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel
               {PRESETS.map((p) => (
                 <AlgoPill key={p.name} accent={DATA} onClick={() => applyPreset(p)}>{p.name}</AlgoPill>
               ))}
+              <AlgoPill accent={ACCENT} onClick={runFit}>fit ℓ, σ_f, σ_n (max log ML)</AlgoPill>
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 7, lineHeight: 1.5 }}>
-              {PRESETS.find((p) => p.kernel === kid && Math.abs(p.ell - ell) < 0.001)?.tip || 'Press Run to reveal points one at a time and watch the band collapse onto each.'}
+              {fitNote ?? presetMatch?.tip ?? 'Press Run to reveal points one at a time and watch the band collapse onto each.'}
             </div>
           </div>
-          <ParamSlider name="Lengthscale ℓ" value={ell.toFixed(3)} min={0.03} max={0.6} step={0.005} current={ell}
-            onChange={(v) => { setEll(v); if (!sim.isPlaying) { sim.stop(); } }} hint="how fast the function may wiggle" accent={ACCENT} />
-          <ParamSlider name="Signal σ_f" value={sf.toFixed(2)} min={0.3} max={2} step={0.05} current={sf}
-            onChange={(v) => setSf(v)} hint="prior amplitude of the function" accent={ACCENT} />
-          <ParamSlider name="Noise σ_n" value={sn.toFixed(3)} min={0.01} max={0.3} step={0.005} current={sn}
-            onChange={(v) => setSn(v)} hint="observation noise — the floor the band collapses to" accent={ACCENT} />
+          <ParamSlider name="Lengthscale ℓ" value={ell.toFixed(3)} min={ELL_RANGE.min} max={ELL_RANGE.max} step={ELL_RANGE.step} current={ell}
+            onChange={(v) => { setEll(v); setFit(null); }} hint={kid === 'linear' ? 'unused by the linear kernel' : 'how fast the function may wiggle'} accent={ACCENT} />
+          <ParamSlider name="Signal σ_f" value={sf.toFixed(2)} min={SF_RANGE.min} max={SF_RANGE.max} step={SF_RANGE.step} current={sf}
+            onChange={(v) => { setSf(v); setFit(null); }} hint="prior amplitude of the function" accent={ACCENT} />
+          <ParamSlider name="Noise σ_n" value={sn.toFixed(3)} min={SN_RANGE.min} max={SN_RANGE.max} step={SN_RANGE.step} current={sn}
+            onChange={(v) => { setSn(v); setFit(null); }} hint="observation noise — roughly the floor the band shrinks to at a point" accent={ACCENT} />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={120} max={1200} step={60} current={sim.speed} onChange={sim.setSpeed} hint="reveal interval" accent={ACCENT} />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ topic: 'Gaussian process regression', kernel: kid, lengthscale: ell, signalSigma: sf, noiseSigma: sn, pointsConditioned: revealed, posteriorStdGap: +sigGap.toFixed(3), posteriorStdAtData: +nearData.toFixed(3) }}
+      currentParams={{ topic: 'Gaussian process regression', kernel: kid, lengthscale: ell, signalSigma: sf, noiseSigma: sn, pointsConditioned: revealed, posteriorStdGap: +sigGap.toFixed(3), posteriorStdAtData: +nearData.toFixed(3), logMarginalLikelihood: logML != null ? +logML.toFixed(3) : null }}
       apiPanel={apiPanel}
     />
   );

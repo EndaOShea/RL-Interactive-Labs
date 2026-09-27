@@ -16,7 +16,7 @@ export const BAYES_CONTENT: LabContent = {
     },
     {
       heading: 'The base-rate fallacy',
-      body: 'A test that is 99% accurate sounds conclusive, yet for a rare disease most positive results are still false alarms. The reason is the base rate: if only 1 in 1000 people is sick, then in a population of 100,000 the ~100 true positives are swamped by the ~1000 false positives drawn from the huge healthy majority. The posterior P(D|+) can be well under 10% even with a very good test — ignoring the prior is the classic error.',
+      body: 'A test that is 99% accurate sounds conclusive, yet for a rare disease most positive results are still false alarms. The reason is the base rate: if only 1 in 1000 people is sick, then in a population of 100,000 the ~100 true positives are swamped by the ~1000 false positives drawn from the huge healthy majority. The posterior P(D|+) can be well under 10% even with a very good test — ignoring the prior is the classic error. Set the lab to prevalence 0.001 with sensitivity and specificity 0.99 and its exact per-100,000 table shows 99 true vs 999 false positives: P(D|+) ≈ 9%.',
       details: [
         { label: 'Rare disease', text: 'When P(D) is tiny, false positives from the large healthy group dominate the few true positives.' },
         { label: 'Why accuracy misleads', text: 'Headline accuracy hides the split between sensitivity and specificity and ignores prevalence entirely.' },
@@ -28,8 +28,8 @@ export const BAYES_CONTENT: LabContent = {
       body: 'Beliefs update one observation at a time: today’s posterior is tomorrow’s prior. For a Bernoulli process (a biased coin), a Beta(α, β) prior is conjugate — the posterior is again a Beta, with heads bumping α and tails bumping β. The posterior mean α/(α+β) tracks the empirical success rate, while the distribution tightens as evidence accumulates, shrinking the credible interval around the true rate.',
       details: [
         { label: 'Conjugate prior', text: 'Beta–Bernoulli: heads → α+1, tails → β+1. The posterior stays Beta, so updates are exact and cheap.' },
-        { label: 'Posterior mean', text: 'α/(α+β) — a prior-smoothed success rate; the prior acts like pseudo-counts.' },
-        { label: 'Credible interval', text: 'A range holding (say) 90% of posterior mass — it narrows as the data grows, unlike a frequentist CI.' },
+        { label: 'Posterior mean', text: 'α/(α+β) — a prior-smoothed success rate; a Beta(a, b) prior acts like a + b pseudo-flips. With a true p of 0.7, the stubborn Beta(20,20) needs about 120 real flips on average before its mean comes within 0.05 of p; the flat Beta(1,1) needs about 6.' },
+        { label: 'Credible interval', text: 'A range holding 90% of the posterior mass — a direct probability statement about p given the data (a frequentist confidence interval is a statement about the procedure). It narrows as data accumulate.' },
       ],
     },
   ],
@@ -43,11 +43,11 @@ export const DISTRIBUTIONS_CONTENT: LabContent = {
   sections: [
     {
       heading: 'PMFs, PDFs, mean & variance',
-      body: 'A random variable’s law is described by a probability mass function (discrete — pmf(k) gives an actual probability) or a probability density function (continuous — pdf(x) gives a density that integrates to 1). The mean E[X] is the distribution’s centre of mass and the variance Var(X)=E[(X−μ)²] its spread. Entropy measures uncertainty: it is maximal for a uniform law and shrinks as the distribution concentrates.',
+      body: 'A random variable’s law is described by a probability mass function (discrete — pmf(k) gives an actual probability) or a probability density function (continuous — pdf(x) gives a density that integrates to 1). The mean E[X] is the distribution’s centre of mass and the variance Var(X)=E[(X−μ)²] its spread. Entropy measures uncertainty: it is maximal for a uniform law and shrinks as the distribution concentrates. The lab reports it in nats (natural log); for a density it is the differential entropy, which can be negative.',
       details: [
         { label: 'PMF vs PDF', text: 'Discrete pmf sums to 1 and reads off probabilities; continuous pdf integrates to 1 and gives densities, not probabilities.' },
-        { label: 'Mean & variance', text: 'E[X] is the balance point; Var(X) is the average squared distance from it — the scale of fluctuations.' },
-        { label: 'Entropy', text: 'Expected surprise −Σ p log p (or −∫ f log f); larger = flatter/less predictable.' },
+        { label: 'Mean & variance', text: 'E[X] is the balance point; Var(X) is the average squared distance from it — the scale of fluctuations. The sample mean and variance converge to them as you draw more samples.' },
+        { label: 'Entropy', text: 'Expected surprise −Σ p ln p (or −∫ f ln f), in nats; larger = flatter/less predictable. A Uniform on [0,1] has 0 nats; a Normal with σ = 1 has ½ln(2πe) ≈ 1.419.' },
       ],
     },
     {
@@ -61,7 +61,7 @@ export const DISTRIBUTIONS_CONTENT: LabContent = {
     },
     {
       heading: 'How the families connect (and the LLN)',
-      body: 'The families are a web, not a list. A sum of n Bernoulli(p) trials is Binomial(n,p); as n→∞ with np fixed, Binomial → Poisson(λ=np) (the rare-event limit); and by the Central Limit Theorem both Binomial and Poisson approach a Normal once their counts are large. Drawing samples makes this concrete: by the Law of Large Numbers, an empirical histogram of i.i.d. draws converges to the true pmf/pdf as the sample size grows.',
+      body: 'The families are a web, not a list. A sum of n Bernoulli(p) trials is Binomial(n,p); as n→∞ with np fixed, Binomial → Poisson(λ=np) (the rare-event limit); and by the Central Limit Theorem both Binomial and Poisson approach a Normal once their counts are large. Drawing samples makes this concrete: by the Law of Large Numbers, an empirical histogram of i.i.d. draws converges to the true pmf/pdf as the sample size grows. Switch the lab to “sum of k draws” to see the CLT: the histogram of sums approaches N(kμ, kσ²) as k grows — slowly for skewed families such as the Exponential and Geometric.',
       details: [
         { label: 'Bernoulli → Binomial', text: 'A Binomial is the sum of n independent Bernoulli trials.' },
         { label: 'Binomial → Poisson', text: 'Many trials, tiny success prob, fixed mean λ=np — the rare-event limit.' },
@@ -97,10 +97,10 @@ export const MCMC_CONTENT: LabContent = {
     },
     {
       heading: 'Step size, mixing & burn-in',
-      body: 'The proposal width σ is the central tuning knob. Too small and almost every proposal is accepted but the chain crawls, exploring slowly with highly correlated samples (poor mixing). Too large and most proposals land in near-zero density and are rejected, so the chain stalls in place. A healthy acceptance rate sits roughly in the 20–50% range. The early samples also depend on where you started, so a burn-in prefix is discarded before averaging.',
+      body: 'The proposal width σ is the central tuning knob. Too small and almost every proposal is accepted but the chain crawls, exploring slowly with highly correlated samples (poor mixing). Too large and most proposals land in near-zero density and are rejected, so the chain stalls in place. A healthy acceptance rate sits roughly in the 20–50% range (for a single Gaussian target of std s it is (2/π)·arctan(2s/σ), about 44% at σ ≈ 2.4s). The early samples also depend on where you started, so a burn-in prefix is discarded before averaging — the lab starts the chain far out in the tail so you can see that transient.',
       details: [
         { label: 'σ too small', text: 'High acceptance but tiny steps — a slow random walk with strong autocorrelation between samples.' },
-        { label: 'σ too large', text: 'Big jumps into low density are mostly rejected; the chain sticks and effective sample size collapses.' },
+        { label: 'σ too large', text: 'Big jumps into low density are mostly rejected; the chain repeats its state for many iterations at a time.' },
         { label: 'Burn-in', text: 'Discard the initial transient while the chain forgets its start before using the samples.' },
       ],
     },

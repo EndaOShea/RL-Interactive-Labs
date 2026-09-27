@@ -78,6 +78,32 @@ export function cholesky(A: Mat, jitter = 1e-9): Mat {
   }
   return L;
 }
+/** Solve L·x = b for a lower-triangular L (forward substitution). */
+export function forwardSub(L: Mat, b: Vec): Vec {
+  const n = L.length;
+  const x = new Array(n).fill(0);
+  for (let i = 0; i < n; i++) {
+    const row = L[i] ?? [];
+    let s = b[i] ?? 0;
+    for (let k = 0; k < i; k++) s -= (row[k] ?? 0) * x[k];
+    x[i] = s / (row[i] || 1e-300);
+  }
+  return x;
+}
+/** Solve Lᵀ·x = b for a lower-triangular L (back substitution on the transpose). */
+export function backSubT(L: Mat, b: Vec): Vec {
+  const n = L.length;
+  const x = new Array(n).fill(0);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i] ?? 0;
+    for (let k = i + 1; k < n; k++) s -= (L[k]?.[i] ?? 0) * x[k];
+    x[i] = s / (L[i]?.[i] || 1e-300);
+  }
+  return x;
+}
+/** Solve A·x = b from the Cholesky factor L of A (A = L·Lᵀ) — no explicit inverse. */
+export const cholSolve = (L: Mat, b: Vec): Vec => backSubT(L, forwardSub(L, b));
+
 /** Sample from N(mean, cov) given the Cholesky factor L of cov: mean + L·z. */
 export function mvnSample(mean: Vec, L: Mat, r: () => number): Vec {
   const z = mean.map(() => gaussFrom(r));
