@@ -22,11 +22,12 @@ The app is now a small multi-page platform under `react-router-dom`. **The RL co
 `App.tsx`, `components/TheoryLabs.tsx`, `components/rlPython.ts`, `components/stage/*`,
 `constants.ts`, and the RL parts of `types.ts` — is separate from the new areas: they import its
 reusable, generic pieces (`primitives.tsx`, the exported `LiveMath`, `ApiKeyPanel`, `services/*`)
-read-only, and the add-a-lab / add-an-area steps below touch none of it. It is **not frozen** —
-`TheoryLabs.tsx`, `constants.ts` and `components/stage/*` have all been edited since the areas
-were split out (the theme-only light-mode edits are described under **Theming (light / dark
-mode)** below) — but `primitives.tsx` and `LiveMath` also render the new-area labs (through
-`LabStage`), so a change there changes those labs too.
+read-only, and the add-a-lab / add-an-area steps below touch none of it. **Treat the RL code as
+frozen by default.** The owner has approved edits to it twice: the theme-only light-mode work
+(see **Theming (light / dark mode)** below) and the 2026-09 technique-audit correctness fixes
+(which also moved the RL Python export builders into `components/rlPython.ts`). Ask before
+changing it for any other reason. `primitives.tsx` and `LiveMath` also render the new-area labs
+(through `LabStage`), so a change there changes those labs too.
 
 - **Routing** — `index.tsx` renders `AppRouter.tsx`: `/` → `catalog/HomeCatalog` (scrollable
   catalog), `/rl` → the RL `<App/>`, `/<category>/:labId?` → `components/labkit/AreaHost`
