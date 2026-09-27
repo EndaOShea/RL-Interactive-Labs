@@ -18,7 +18,7 @@ export const GD_CONTENT: LabContent = {
       heading: 'Learning rate, momentum & local minima',
       body: 'The learning rate α sets the step size: too small and convergence crawls, too large and the iterate overshoots and diverges. Momentum keeps a running velocity (v ← βv − α∇f), smoothing the trajectory and carrying the point across shallow dips and flat plateaus. Convex functions have a single minimum; non-convex ones (double-well, wavy) have many, and where you land depends on the start point and momentum.',
       details: [
-        { label: 'α too large', text: 'Steps overshoot the minimum and the value climbs — divergence.' },
+        { label: 'α too large', text: 'Near a minimum each step multiplies the error by 1 − α·f″, so plain GD overshoots and diverges once α > 2/f″ (with momentum β the limit is 2(1+β)/f″). On x² that is α > 1 — the lab’s "divergence" preset uses α = 1.1.' },
         { label: 'Momentum β', text: 'Accumulated velocity helps escape shallow local minima and dampens zig-zagging in narrow valleys.' },
         { label: 'Convex vs non-convex', text: 'Convex → any descent finds the global min. Non-convex → GD only guarantees a local min.' },
       ],
@@ -27,8 +27,8 @@ export const GD_CONTENT: LabContent = {
       heading: 'Adaptive & second-order optimisers',
       body: 'Plain GD uses one global step size; modern optimisers adapt it. RMSProp divides the step by √(running mean of g²), so steep directions are damped and flat ones amplified. Adam combines this second moment with a momentum-like first moment (and bias-corrects both), giving the de-facto default for deep learning. Newton’s method goes further and uses curvature: x ← x − f′(x)/f″(x). On an exact quadratic that lands on the minimum in a single step, but it needs the Hessian f″ to be positive-definite — near a maximum (f″<0) Newton steps the wrong way.',
       details: [
-        { label: 'RMSProp', text: 'Per-coordinate step α·g/√(s+ε) with s an EMA of g² — scale-free, good for ill-conditioned losses.' },
-        { label: 'Adam', text: 'First moment m (momentum) + second moment v (RMSProp) with bias correction; robust default α≈1e-3.' },
+        { label: 'RMSProp', text: 'Per-coordinate step α·g/(√s + ε) with s an EMA of g² — scale-free, good for ill-conditioned losses and flat plateaus.' },
+        { label: 'Adam', text: 'First moment m (momentum) + second moment s (RMSProp) with bias correction, step α·m̂/(√ŝ + ε); robust default α≈1e-3.' },
         { label: 'Newton', text: 'Second-order: divides by curvature f″. One-step exact on quadratics; expensive and unsafe where f″≤0.' },
       ],
     },
@@ -45,7 +45,7 @@ export const TAYLOR_CONTENT: LabContent = {
       heading: 'Taylor approximation',
       body: 'A Taylor series rewrites a smooth function as an infinite polynomial about a centre a: f(x) = Σ fⁿ(a)/n!·(x−a)ⁿ. Truncating at degree n gives a polynomial that matches f and its first n derivatives exactly at a, and hugs the curve more widely as n grows. Polynomials are cheap to evaluate, which is why approximations underpin so much numerical computing.',
       details: [
-        { label: 'Coefficients', text: 'The n-th coefficient is fⁿ(a)/n! — the n-th derivative at the centre, scaled by 1/n!.' },
+        { label: 'Coefficients', text: 'The n-th coefficient is fⁿ(a)/n! — the n-th derivative at the centre, scaled by 1/n!. The lab computes them exactly: closed forms, or recurrences from tanh′ = 1 − tanh² and (1+25x²)·f = 1 — never by numerical differentiation.' },
         { label: 'Degree n', text: 'Higher degree → tighter fit over a wider interval (inside the radius of convergence).' },
         { label: 'Centre a', text: 'The expansion is most accurate near a and degrades as you move away.' },
       ],
@@ -65,6 +65,7 @@ export const TAYLOR_CONTENT: LabContent = {
       details: [
         { label: 'Rational P/Q', text: 'Numerator and denominator polynomials fit to the Taylor coefficients; the denominator captures poles.' },
         { label: 'Beats the polynomial', text: 'Same coefficient data, but the rational form extends the accurate range past the Taylor radius.' },
+        { label: 'Singular orders', text: 'When the [m/m] linear system for Q is singular — 1/(1−x) is already rational, and even functions like cos skip orders — the approximant equals a lower-order one; the lab then uses the highest solvable order and says so.' },
         { label: 'Used in', text: 'Special-function evaluation, matrix-exponential scaling-and-squaring, and reduced-order modelling.' },
       ],
     },
@@ -88,7 +89,7 @@ export const LINTRANSFORM_CONTENT: LabContent = {
     },
     {
       heading: 'Eigenvectors, eigenvalues & their role',
-      body: 'An eigenvector v satisfies Mv = λv — the map only stretches it by λ without changing its direction. Real eigenvectors are the special axes of the transform; rotations have complex eigenvalues (no fixed real direction). These are the same axes PCA finds in a covariance matrix (directions of maximum variance), and the eigenvalues of a system matrix govern stability: a linear recurrence xₜ₊₁ = M xₜ grows if any |λ|>1 and decays if all |λ|<1.',
+      body: 'An eigenvector v satisfies Mv = λv — the map only stretches it by λ without changing its direction. Real eigenvectors are the special axes of the transform; rotations have complex eigenvalues (no fixed real direction), and a shear has a repeated eigenvalue with only ONE eigen-direction (a defective matrix). These are the same axes PCA finds in a covariance matrix (directions of maximum variance), and the eigenvalues of a system matrix govern stability: a linear recurrence xₜ₊₁ = M xₜ grows if any |λ|>1 and decays if all |λ|<1.',
       details: [
         { label: 'Mv = λv', text: 'Eigen-directions are stretched, not rotated; λ is the stretch factor.' },
         { label: 'PCA', text: 'Principal components are the eigenvectors of the covariance matrix; explained variance ∝ eigenvalue.' },
@@ -97,7 +98,7 @@ export const LINTRANSFORM_CONTENT: LabContent = {
     },
     {
       heading: 'SVD, singular values & conditioning',
-      body: 'Every matrix factors as M = U Σ Vᵀ — a rotation (Vᵀ), an axis-aligned stretch by the singular values σ₁≥σ₂≥0 (Σ), then another rotation (U). Geometrically the unit circle maps to an ellipse whose semi-axis lengths are exactly the singular values, oriented along the columns of U. Unlike eigenvalues, singular values are always real and ≥0 and exist for any matrix — even rectangular ones, and even when the eigenvalues are complex (a pure rotation has complex λ but singular values all 1). The ratio κ = σ₁/σ₂ is the condition number: large κ means the map is nearly singular and solving with it amplifies noise. SVD is the engine behind PCA, low-rank/least-squares approximation (keep the top-k σ) and the Moore–Penrose pseudo-inverse.',
+      body: 'Every matrix factors as M = U Σ Vᵀ — a rotation (Vᵀ), an axis-aligned stretch by the singular values σ₁≥σ₂≥0 (Σ), then another rotation (U). (U and V are orthogonal; when det M < 0 one of them is a reflection — the lab’s Run keeps both as rotations and folds the sign into the stretch, scaling the second axis through 0 to −σ₂.) Geometrically the unit circle maps to an ellipse whose semi-axis lengths are exactly the singular values, oriented along the columns of U. Unlike eigenvalues, singular values are always real and ≥0 and exist for any matrix — even rectangular ones, and even when the eigenvalues are complex (a pure rotation has complex λ but singular values all 1). The ratio κ = σ₁/σ₂ is the condition number: large κ means the map is nearly singular and solving with it amplifies noise. SVD is the engine behind PCA, low-rank/least-squares approximation (keep the top-k σ) and the Moore–Penrose pseudo-inverse.',
       details: [
         { label: 'M = U Σ Vᵀ', text: 'Rotate → stretch by σ → rotate. The σ are the ellipse semi-axes the unit circle maps to.' },
         { label: 'Condition number κ', text: 'κ = σ₁/σ₂. κ≈1 is well-conditioned (rotation/uniform scale); κ≫1 is near-singular and unstable.' },
@@ -125,7 +126,7 @@ export const DERIVATIVES_CONTENT: LabContent = {
     },
     {
       heading: 'Known derivatives & convergence',
-      body: "Each function here has a closed-form derivative, so the exact tangent slope is known and we can watch the numeric secant chase it: x² → 2x, x³−x → 3x²−1, sin x → cos x, eˣ → eˣ. The forward-difference error is governed by a Taylor expansion: f(x+dx) = f(x) + f′(x)·dx + ½f″(x)·dx² + …, so the secant slope overshoots the true derivative by about ½·f″(x)·dx. That means the error is roughly LINEAR in dx — halve dx and the error roughly halves — which is exactly what the |error| chip shows as you drive dx toward 0.",
+      body: "Each function here has a closed-form derivative, so the exact tangent slope is known and we can watch the numeric secant chase it: x² → 2x, x³−x → 3x²−1, sin x → cos x, eˣ → eˣ. The forward-difference error is governed by a Taylor expansion: f(x+dx) = f(x) + f′(x)·dx + ½f″(x)·dx² + …, so the secant slope overshoots the true derivative by about ½·f″(x)·dx. That means the error is roughly LINEAR in dx — shrink dx tenfold and the error shrinks tenfold (slope 1 on the lab's log–log error plot; slope 2 for the central difference) — until round-off takes over: on these defaults the forward error bottoms out between dx ≈ 1e-10 and 1e-8 and the central error near dx ≈ 1e-6, then climbs again (for x² the central difference has no truncation error at all, so only round-off remains).",
       details: [
         { label: 'Closed forms', text: 'Power rule (xⁿ → n·xⁿ⁻¹), the trig pair (sin↔cos), and eˣ — the self-derivative — cover the four pickers.' },
         { label: 'Truncation error', text: 'Forward difference error ≈ ½·f″(x)·dx (first-order). A centred difference [f(x+dx)−f(x−dx)]/2dx is second-order (∝ dx²) and far more accurate.' },
@@ -135,7 +136,7 @@ export const DERIVATIVES_CONTENT: LabContent = {
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'Differentiability is local & not guaranteed', description: 'The tangent slope only exists where the curve is smooth; at a kink or jump the left and right secants disagree and no single derivative exists (e.g. |x| at 0, or a ReLU at 0).', recommendation: 'Check smoothness before differentiating; for non-smooth functions use subgradients or smooth surrogates (softplus for ReLU) where a true derivative is required.' },
-    { category: 'METHODOLOGY', title: 'Finite-difference step size', description: 'A finite-difference derivative trades truncation error (∝ dx, too large a step) against floating-point round-off (∝ 1/dx, too small a step), so error bottoms out at an intermediate dx rather than at dx→0.', recommendation: 'Use a centred difference and a step near √ε·|x| (≈1e-6 in double precision), or prefer exact analytic / automatic differentiation when available.' },
+    { category: 'METHODOLOGY', title: 'Finite-difference step size', description: 'A finite-difference derivative trades truncation error (∝ dx, or dx² centred — too large a step) against floating-point round-off (∝ 1/dx — too small a step), so error bottoms out at an intermediate dx rather than at dx→0. Sweep dx in the lab to see it.', recommendation: 'Use a centred difference with a step near ε^(1/3)·|x| (≈ 6e-6 in double precision; a forward difference wants ≈ √ε·|x| ≈ 1.5e-8), or prefer exact analytic / automatic differentiation when available.' },
   ],
 };
 
@@ -143,25 +144,26 @@ export const CHAINRULE_CONTENT: LabContent = {
   sections: [
     {
       heading: 'The chain rule: derivative as a product',
-      body: 'A composite function feeds its output through a chain of simpler maps: x → u → … → y. The chain rule says the derivative of the whole thing is the PRODUCT of the local derivatives along that path. For y(u(x)) it is dy/dx = (dy/du)·(du/dx); for a three-link chain y(v(u(x))) it is dy/dx = (dy/dv)·(dv/du)·(du/dx). Each link is differentiated on its own — treating its input as the variable — and then everything multiplies.',
+      body: 'A composite function feeds its output through a chain of simpler maps: x → u → … → y. The chain rule says the derivative of the whole thing is the PRODUCT of the local derivatives along that path. For y(u(x)) it is dy/dx = (dy/du)·(du/dx); for a three-link chain y(v(u(x))) it is dy/dx = (dy/dv)·(dv/du)·(du/dx). Each link is differentiated on its own — treating its input as the variable — and then everything multiplies. When x reaches y along SEVERAL paths (a value used twice — a fan-out), dy/dx is the SUM of the path products: for y = x·u with u = sin x, dy/dx = ∂y/∂x + ∂y/∂u·du/dx = sin x + x·cos x — the product rule falls out.',
       details: [
-        { label: 'Local derivative', text: 'Differentiate one link in isolation, e.g. d(sin u)/du = cos u, evaluated at that link’s input value.' },
+        { label: 'Local derivative', text: 'Differentiate one link in isolation, e.g. d(sin u)/du = cos u, evaluated at that link’s input value (holding a node’s other inputs fixed gives a partial ∂).' },
         { label: 'Multiply the path', text: 'Walk x → y and multiply every local derivative you cross; order does not matter for the product, only that you include each link once.' },
-        { label: 'Evaluate at a point', text: 'Each factor is a number once you fix x₀: the forward pass fills in u, v, …, then the local derivatives are read off and multiplied.' },
+        { label: 'Sum over paths', text: 'If x fans out and the routes re-join, add the product of every x → y path — the fan-out and fork presets show two paths summed.' },
+        { label: 'Evaluate at a point', text: 'Each factor is a number once you fix x₀: the forward pass fills in u, v, …, then the local derivatives are read off and combined.' },
       ],
     },
     {
       heading: 'Forward pass then backward product',
-      body: 'Computing dy/dx is a two-sweep process. The forward sweep evaluates each node’s value (u = x², v = −u, …). The backward sweep evaluates each link’s local derivative at the value that flowed into it, then multiplies them. This is exactly what reverse-mode automatic differentiation (backpropagation) does: forward to get activations, backward to multiply local Jacobians. A finite-difference check, [f(x+h) − f(x−h)]/2h on the whole composite, must agree with the product — and in this lab it does, to within tiny discretisation error.',
+      body: 'Computing dy/dx is a two-sweep process. The forward sweep evaluates each node’s value (u = x², v = −u, …). The backward sweep evaluates each link’s local derivative at the value that flowed into it, then multiplies them. This is exactly what reverse-mode automatic differentiation (backpropagation) does: forward to get activations, backward to multiply local Jacobians. A finite-difference check, [f(x+h) − f(x−h)]/2h on the whole composite, must agree with the chain-rule value — and in this lab it does, to within tiny discretisation error.',
       details: [
         { label: 'Forward = values', text: 'Each node stores its numeric output; later links need these inputs to evaluate their local slopes.' },
-        { label: 'Backward = derivatives', text: 'Each edge carries d(out)/d(in) at its input value; the running product is dy/dx.' },
-        { label: 'Numeric cross-check', text: 'A central finite difference of the full function confirms the analytic product — realism, not a mocked number.' },
+        { label: 'Backward = derivatives', text: 'Each edge carries ∂(out)/∂(in) at its input value; seeding ∂y/∂y = 1 and pushing back along every edge (adding where paths meet) gives dy/dx — the lab shows this backprop adjoint next to the sum of paths.' },
+        { label: 'Numeric cross-check', text: 'A central finite difference of the full function confirms the analytic value — realism, not a mocked number.' },
       ],
     },
     {
       heading: 'Why it powers backprop',
-      body: 'A neural network is one giant composite: loss(softmax(W₂·act(W₁·x))). Training needs ∂loss/∂each-weight, and the chain rule supplies every one of them as a product of local derivatives. Reverse-mode autodiff multiplies those local Jacobians from the loss back to the parameters in a single sweep, reusing shared sub-paths. The same product structure explains vanishing and exploding gradients: multiply many factors below 1 and the gradient decays to nothing; multiply many above 1 and it blows up.',
+      body: 'A neural network is one giant composite: loss(softmax(W₂·act(W₁·x))). Training needs ∂loss/∂each-weight, and the chain rule supplies every one of them as a product of local derivatives. Reverse-mode autodiff multiplies those local Jacobians from the loss back to the parameters in a single sweep, reusing shared sub-paths and ADDING the contributions wherever a value feeds several later nodes. The same product structure explains vanishing and exploding gradients: multiply many factors below 1 and the gradient decays to nothing; multiply many above 1 and it blows up.',
       details: [
         { label: 'Backpropagation', text: 'The chain rule applied to a computation graph; each layer contributes one local Jacobian factor.' },
         { label: 'Vanishing / exploding', text: 'dy/dx is a product over depth — repeated small factors vanish, repeated large factors explode.' },
@@ -204,6 +206,15 @@ export const MATMUL_CONTENT: LabContent = {
         { label: 'det(A)', text: 'For a square map, |det| is the area/volume scale; det<0 flips orientation; det=0 collapses dimensions (singular).' },
       ],
     },
+    {
+      heading: 'Matrix · matrix = composing maps',
+      body: 'Multiplying matrices composes their maps. Applying A and then B sends x to B(Ax), and that is the same point as the single matrix BA applied to x — (BA)ᵢⱼ = Σₖ Bᵢₖ Aₖⱼ, so column j of BA is B applied to column j of A. The matrix written on the RIGHT acts first. Order matters: AB (B first, then A) is generally a different map, so AB ≠ BA. The lab’s composition view draws both chains and the unit square under BA and AB.',
+      details: [
+        { label: 'B(Ax) = (BA)x', text: 'Associativity: composing first or applying step by step lands on the same point.' },
+        { label: 'AB ≠ BA', text: 'A shear or a non-uniform scale does not commute with a rotation-scaling; two rotation-scalings do. ‖AB − BA‖ measures the difference.' },
+        { label: 'det(BA) = det B · det A', text: 'Area scales multiply, in either order — even when the maps themselves differ.' },
+      ],
+    },
   ],
   lifecycle: [
     { category: 'CONCEPT', title: 'Shape compatibility', description: 'A (m×n)·(n) works but (m×n)·(k) with k≠n is undefined; mismatched inner dimensions are the most common matrix bug.', recommendation: 'Track shapes explicitly: (m×n)·(n×p) → (m×p). Print or assert tensor shapes before every matmul in a model.' },
@@ -219,7 +230,7 @@ export const CONVEX_CONTENT: LabContent = {
       details: [
         { label: 'Convex f', text: 'One global minimum; any descent path reaches it. f″ ≥ 0 everywhere (e.g. f(x)=x², f″=2).' },
         { label: 'Non-convex f', text: 'Multiple local minima and maxima; f″ changes sign. Descent only guarantees a local minimum.' },
-        { label: 'Basin of attraction', text: 'The set of starts that flow to a given minimum. Convex = one basin; non-convex = many.' },
+        { label: 'Basin of attraction', text: 'The set of starts that flow to a given minimum. Convex = one basin; non-convex = many. The lab shades each basin under the curve by running the same descent from 241 starts.' },
       ],
     },
     {
@@ -228,7 +239,7 @@ export const CONVEX_CONTENT: LabContent = {
       details: [
         { label: 'Local, not global', text: 'GD stops wherever f′≈0; on a non-convex surface that is usually a local, not the global, minimum.' },
         { label: 'Multi-start', text: 'Running many starts and keeping the best is a standard way to hedge against a bad basin.' },
-        { label: 'Learning rate α', text: 'A larger α can hop between ripples (sometimes escaping a poor basin) but too large overshoots and diverges.' },
+        { label: 'Learning rate α', text: 'Near a minimum each step multiplies the error by 1 − α·f″. Here f″ ≈ 18 at every minimum, so the basins are identical for every α up to 0.105; at α ≥ 2/f″ ≈ 0.109 descent overshoots every minimum and only stops if it lands within tolerance by chance (grey shading).' },
       ],
     },
     {
@@ -251,16 +262,16 @@ export const EIGENSVD_CONTENT: LabContent = {
   sections: [
     {
       heading: 'Eigenvalues & the characteristic equation',
-      body: 'An eigenvector of a square matrix A is a direction the map only stretches: A·v = λ·v, with the scalar λ its eigenvalue. For a 2×2 matrix the eigenvalues are the roots of the characteristic equation λ² − t·λ + det = 0, where t = trace = a+d and det = ad−bc. The discriminant disc = t² − 4·det decides everything: disc ≥ 0 gives two real eigenvalues λ = (t ± √disc)/2, each with a real eigenvector found by solving (A − λI)v = 0; disc < 0 gives a complex conjugate pair, meaning A rotates the plane and has no real invariant axis.',
+      body: 'An eigenvector of a square matrix A is a direction the map only stretches: A·v = λ·v, with the scalar λ its eigenvalue. For a 2×2 matrix the eigenvalues are the roots of the characteristic equation λ² − t·λ + det = 0, where t = trace = a+d and det = ad−bc. The discriminant disc = t² − 4·det decides everything: disc > 0 gives two real eigenvalues λ = (t ± √disc)/2, each with its own real eigenvector found by solving (A − λI)v = 0; disc = 0 gives one repeated λ = t/2 — either A = λI (every direction is an eigenvector) or a defective matrix such as a shear, with a single eigen-direction; disc < 0 gives a complex conjugate pair α ± βi, meaning A turns the plane and has no real invariant axis.',
       details: [
         { label: 'A v = λ v', text: 'Eigen-directions are scaled, not rotated; λ is the stretch (negative λ flips, |λ|>1 grows).' },
         { label: 'trace & det', text: 'Eigenvalues sum to the trace (a+d) and multiply to the determinant (ad−bc).' },
-        { label: 'disc < 0 ⇒ rotation', text: 'A complex pair means no real fixed direction — every vector turns. A pure rotation is the cleanest example.' },
+        { label: 'disc < 0 ⇒ rotation', text: 'A complex pair α ± βi means no real fixed direction — every vector turns. |λ| = √det is the scaling and arg λ = atan2(β, α) the turning angle (in a suitable basis); a pure rotation by θ has λ = cos θ ± i sin θ.' },
       ],
     },
     {
       heading: 'The SVD: rotate → scale → rotate',
-      body: 'Every matrix — even one with complex eigenvalues — factors as A = U Σ Vᵀ. Read right-to-left this is a rotation Vᵀ, then an axis-aligned stretch by the singular values σ₁ ≥ σ₂ ≥ 0 in Σ, then another rotation U. Concretely the unit circle maps to an ellipse whose semi-axis lengths are exactly σ₁ and σ₂, oriented along the columns of U. The σ are the square roots of the eigenvalues of the symmetric matrix AᵀA, whose eigenvectors are the columns of V; each left vector is uᵢ = A·vᵢ / σᵢ. Singular values are always real and non-negative and exist for any matrix, which is why the SVD is more universal than the eigen-decomposition.',
+      body: 'Every matrix — even one with complex eigenvalues — factors as A = U Σ Vᵀ. Read right-to-left this is a rotation Vᵀ, then an axis-aligned stretch by the singular values σ₁ ≥ σ₂ ≥ 0 in Σ, then another rotation U (when det A < 0 one of U, V is a reflection; the lab’s Run animation keeps both as rotations and scales the second axis through 0 to −σ₂ instead). Concretely the unit circle maps to an ellipse whose semi-axis lengths are exactly σ₁ and σ₂, oriented along the columns of U. The σ are the square roots of the eigenvalues of the symmetric matrix AᵀA, whose eigenvectors are the columns of V; each left vector is uᵢ = A·vᵢ / σᵢ. Singular values are always real and non-negative and exist for any matrix, which is why the SVD is more universal than the eigen-decomposition.',
       details: [
         { label: 'A = U Σ Vᵀ', text: 'Vᵀ rotates the orthonormal pre-image axes onto the standard axes, Σ scales by σ, U rotates onto the ellipse.' },
         { label: 'σᵢ = √eig(AᵀA)', text: 'Singular values come from the symmetric, positive-semidefinite Gram matrix AᵀA — so they are always real and ≥ 0.' },

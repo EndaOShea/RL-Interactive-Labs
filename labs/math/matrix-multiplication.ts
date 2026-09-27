@@ -45,3 +45,17 @@ export const colsOf = (A: Mat2): { c1: Vec2; c2: Vec2 } => ({
   c1: [A[0], A[2]],
   c2: [A[1], A[3]],
 });
+
+/** Matrix product P·Q (apply Q first, then P): (PQ)ᵢⱼ = Σₖ Pᵢₖ Qₖⱼ. */
+export const matMul = (P: Mat2, Q: Mat2): Mat2 => [
+  P[0] * Q[0] + P[1] * Q[2], P[0] * Q[1] + P[1] * Q[3],
+  P[2] * Q[0] + P[3] * Q[2], P[2] * Q[1] + P[3] * Q[3],
+];
+
+/** Largest absolute entry of P − Q (0 ⇔ equal). */
+export const maxAbsDiff = (P: Mat2, Q: Mat2): number =>
+  Math.max(Math.abs(P[0] - Q[0]), Math.abs(P[1] - Q[1]), Math.abs(P[2] - Q[2]), Math.abs(P[3] - Q[3]));
+
+/** Images of the unit square's corners (0,0),(1,0),(1,1),(0,1) under A — its basis-image parallelogram. */
+export const unitSquareImage = (A: Mat2): Vec2[] =>
+  ([[0, 0], [1, 0], [1, 1], [0, 1]] as Vec2[]).map((p) => matVec(A, p));

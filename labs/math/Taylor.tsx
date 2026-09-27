@@ -10,155 +10,47 @@ import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { taylorPython } from './python';
 import { useTheme } from '../../utils/theme';
+import {
+  TAYLOR_FNS, TaylorFn, TaylorFnDef, PadeFit, padeDiag, padeEval, padeCurve, padeOrder, taylorEval,
+  radiusCase, RadiusCase, TAYLOR_MAX_CAP,
+} from './taylor-series';
 
 const ACCENT = '#22d3ee';
 const APPROX = '#fbbf24';
 const PADE = '#a78bfa';
 
-type Fn = 'sin' | 'cos' | 'exp' | 'geom' | 'log' | 'tanh' | 'runge';
+type Fn = TaylorFn;
 type Mode = 'taylor' | 'pade';
 
-interface FnDef {
-  label: string;
-  f: (x: number) => number;
-  /** k-th Taylor coefficient about centre a:  fⁿ(a)/n!  */
-  coef: (k: number, a: number) => number;
-  domain: [number, number];
-  roc: string;
-  note: string;
-}
+const fmtE = (v: number) => (Number.isFinite(v) ? v.toExponential(2) : 'undefined (pole)');
+const fmtD = (v: number) => (Number.isFinite(v) ? v.toFixed(3) : '∞');
 
-const fact = (n: number) => { let r = 1; for (let i = 2; i <= n; i++) r *= i; return r; };
-
-// numerical k-th derivative for functions without a tidy closed coefficient (tanh, runge)
-const numDeriv = (g: (x: number) => number, x: number, k: number, h = 0.02): number => {
-  if (k === 0) return g(x);
-  return (numDeriv(g, x + h, k - 1, h) - numDeriv(g, x - h, k - 1, h)) / (2 * h);
-};
-
-const FNS: Record<Fn, FnDef> = {
-  sin: {
-    label: 'sin x',
-    f: Math.sin,
-    coef: (k, a) => {
-      const d = [Math.sin(a), Math.cos(a), -Math.sin(a), -Math.cos(a)][k % 4];
-      return d / fact(k);
-    },
-    domain: [-7, 7],
-    roc: 'entire real line (R = ∞)',
-    note: 'sin is entire — its Taylor series converges everywhere, though far from a you need many terms.',
-  },
-  cos: {
-    label: 'cos x',
-    f: Math.cos,
-    coef: (k, a) => {
-      const d = [Math.cos(a), -Math.sin(a), -Math.cos(a), Math.sin(a)][k % 4];
-      return d / fact(k);
-    },
-    domain: [-7, 7],
-    roc: 'entire real line (R = ∞)',
-    note: 'cos is entire; its even-powered series is the backbone of countless approximations.',
-  },
-  exp: {
-    label: 'eˣ',
-    f: Math.exp,
-    coef: (k, a) => Math.exp(a) / fact(k),
-    domain: [-3, 3],
-    roc: 'entire real line (R = ∞)',
-    note: 'eˣ equals its own derivative, so every coefficient is eᵃ/n! — the series converges everywhere.',
-  },
-  geom: {
-    label: '1/(1−x)',
-    f: (x) => 1 / (1 - x),
-    coef: (k, a) => 1 / (1 - a) ** (k + 1),
-    domain: [-2, 0.95],
-    roc: '|x − a| < |1 − a| — DIVERGES at and beyond x = 1',
-    note: 'The geometric series. Its radius of convergence is finite: about a=0 it only converges for |x|<1 and blows up at the pole x=1.',
-  },
-  log: {
-    label: 'ln(1+x)',
-    f: (x) => Math.log(1 + x),
-    coef: (k, a) => (k === 0 ? Math.log(1 + a) : ((-1) ** (k - 1)) / (k * (1 + a) ** k)),
-    domain: [-0.9, 3],
-    roc: '−1 < x ≤ 1 about a=0 (R = 1)',
-    note: 'ln(1+x) has a singularity at x=−1, so about a=0 its series only converges on (−1, 1].',
-  },
-  tanh: {
-    label: 'tanh x',
-    f: Math.tanh,
-    coef: (k, a) => numDeriv(Math.tanh, a, k) / fact(k),
-    domain: [-3.4, 3.4],
-    roc: '|x − a| < π/2 about a=0 (poles at ±iπ/2)',
-    note: 'tanh saturates to ±1. Its series about 0 only converges for |x|<π/2 because of complex poles at ±iπ/2 — a finite radius even though tanh is bounded and smooth on the real line.',
-  },
-  runge: {
-    label: '1/(1+25x²)',
-    f: (x) => 1 / (1 + 25 * x * x),
-    coef: (k, a) => numDeriv((x) => 1 / (1 + 25 * x * x), a, k) / fact(k),
-    domain: [-1, 1],
-    roc: '|x − a| < 1/5 about a=0 (poles at ±i/5)',
-    note: "Runge's function: a smooth bell with complex poles at ±i/5, so its series about 0 only converges on |x|<0.2. High-degree polynomial fits oscillate wildly near the edges — the classic Runge phenomenon.",
-  },
-};
-
-const MAX_CAP = 10;
-
-// Build the [m/m] Padé approximant from Taylor coefficients c[0..2m].
-function padeCoeffs(c: number[], m: number): { a: number[]; b: number[] } | null {
-  if (m < 1 || c.length < 2 * m + 1) return null;
-  // Solve A·b = rhs for denominator b[1..m] (b0 = 1).
-  const A: number[][] = [];
-  const rhs: number[] = [];
-  for (let i = 0; i < m; i++) {
-    const row: number[] = [];
-    for (let j = 0; j < m; j++) {
-      const idx = m + i - j;
-      row.push(idx >= 0 && idx < c.length ? c[idx] : 0);
-    }
-    A.push(row);
-    rhs.push(-(c[m + i + 1] ?? 0));
-  }
-  const b = solveLinear(A, rhs);
-  if (!b) return null;
-  const bb = [1, ...b];
-  const a: number[] = [];
-  for (let i = 0; i <= m; i++) {
-    let s = 0;
-    for (let k = 0; k <= Math.min(i, m); k++) s += (c[i - k] ?? 0) * bb[k];
-    a.push(s);
-  }
-  return { a, b: bb };
-}
-
-// tiny Gaussian-elimination solver for small systems
-function solveLinear(A: number[][], rhs: number[]): number[] | null {
-  const n = rhs.length;
-  const M = A.map((row, i) => [...row, rhs[i]]);
-  for (let col = 0; col < n; col++) {
-    let piv = col;
-    for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
-    if (Math.abs(M[piv][col]) < 1e-12) return null;
-    [M[col], M[piv]] = [M[piv], M[col]];
-    for (let r = 0; r < n; r++) {
-      if (r === col) continue;
-      const f = M[r][col] / M[col][col];
-      for (let k = col; k <= n; k++) M[r][k] -= f * M[col][k];
-    }
-  }
-  return M.map((row, i) => row[n] / row[i]);
-}
+const whereText = (w: RadiusCase, dist: number, R: number) => (w === 'inside'
+  ? `inside the radius of convergence (|x − a| = ${dist.toFixed(2)} < R = ${fmtD(R)})`
+  : w === 'boundary'
+    ? `exactly on the circle of convergence (|x − a| = R = ${fmtD(R)})`
+    : `beyond the radius of convergence (|x − a| = ${dist.toFixed(2)} > R = ${fmtD(R)})`);
 
 // INTRO narration: paraphrase the Context + the live formula in plain English (for the ear).
-function introNarration(fn: Fn, mode: Mode, def: FnDef): string {
-  const entire = fn === 'sin' || fn === 'cos' || fn === 'exp';
+function introNarration(mode: Mode, def: TaylorFnDef, a: number): string {
+  const entire = !Number.isFinite(def.radius(a));
   const radius = entire
     ? `${def.label} is an entire function, so its series converges over the whole real line — you just need more terms far from the centre.`
-    : `${def.label} has a finite radius of convergence: ${def.roc}. Beyond it, adding terms makes the approximation worse, not better.`;
+    : `${def.label} has a finite radius of convergence about this centre: ${def.radiusText(a)}. Beyond it the series diverges, so adding terms makes the approximation worse, not better.`;
   if (mode === 'pade') {
-    return `The challenge here: approximate ${def.label} far from the centre, out where a plain polynomial gives up. A Padé approximant replaces the truncated polynomial with a ratio of two polynomials, P over Q, matched to the same Taylor coefficients. Because the denominator can vanish, it can model the function's poles, so it often stays accurate far past where the plain series diverges. ${radius} Watch the purple rational curve track ${def.label} where a polynomial would run off. Rational approximants like this power special-function libraries, control theory and reduced-order modelling.`;
+    return `The challenge here: approximate ${def.label} far from the centre, out where a plain polynomial gives up. A Padé approximant replaces the truncated polynomial with a ratio of two polynomials, P over Q, matched to the same Taylor coefficients. Because the denominator can vanish, it can model the function's poles, so it can stay accurate past where the plain series diverges. ${radius} Watch the purple rational curve against the true ${def.label}. Rational approximants like this power special-function libraries, control theory and reduced-order modelling.`;
   }
-  return `The challenge here: replace the curve ${def.label} with a simple polynomial that is cheap to compute, and see how far from the centre it stays faithful. A Taylor series does this by summing f-of-n at a, over n factorial, times x minus a to the n. Truncating at degree n matches the function and its first n derivatives exactly at a, and hugs the curve more widely as n grows. ${radius} Watch the gold polynomial snap onto the true curve as the degree climbs, and the error trace fall. Taylor expansions underpin numerical computing and justify gradient descent and Newton's method, which are just first- and second-order Taylor models of a loss.`;
+  return `The challenge here: replace the curve ${def.label} with a simple polynomial that is cheap to compute, and see how far from the centre it stays faithful. A Taylor series does this by summing f-of-n at a, over n factorial, times x minus a to the n. Truncating at degree n matches the function and its first n derivatives exactly at a. ${radius} Watch the gold polynomial against the true curve as the degree climbs, and the error trace at the eval point. Taylor expansions underpin numerical computing and justify gradient descent and Newton's method, which are just first- and second-order Taylor models of a loss.`;
 }
+
+interface Preset { name: string; fn: Fn; mode: Mode; a: number; evalX: number; tip: string; }
+const PRESETS: Preset[] = [
+  { name: 'sin · re-centre', fn: 'sin', mode: 'taylor', a: 3, evalX: 5, tip: 'Centre a = 3 is 2 away from x = 5 instead of 5, so the remainder shrinks like 2ⁿ/n! rather than 5ⁿ/n! — far fewer terms for the same accuracy.' },
+  { name: 'geometric pole', fn: 'geom', mode: 'taylor', a: 0, evalX: 0.9, tip: 'x = 0.9 is inside R = 1 but next to the pole at x = 1: the error only shrinks ×0.9 per extra term.' },
+  { name: 'Padé beats the pole', fn: 'geom', mode: 'pade', a: 0, evalX: 0.9, tip: '1/(1−x) is itself rational, so from degree 2 Padé[1/1] reproduces it exactly — its denominator 1 − x is the pole. Higher [m/m] systems are singular and reduce to [1/1].' },
+  { name: 'Runge edges', fn: 'runge', mode: 'taylor', a: 0, evalX: 0.8, tip: 'R = 0.2 (poles at ±i/5) and x = 0.8 is 4R away: every two degrees multiply the error by 25x² = 16.' },
+  { name: 'tanh saturation', fn: 'tanh', mode: 'pade', a: 0, evalX: 2.5, tip: 'x = 2.5 is beyond tanh’s radius π/2, where the Taylor error grows with degree (23.6 at n = 8); from [1/1] on the Padé error from the same coefficients falls with every order: 1.5 → 0.18 → 0.025 → 0.002 at [4/4].' },
+];
 
 const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const isLight = useTheme() === 'light';
@@ -169,125 +61,130 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [maxDeg, setMaxDeg] = useState(8);
   const [n, setN] = useState(0);
   const [evalX, setEvalX] = useState(2);
-  const [errSeries, setErrSeries] = useState<number[]>([]);
+  const [presetName, setPresetName] = useState<string | null>(null);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-  const def = FNS[fn];
+  const def = TAYLOR_FNS[fn];
+  const cap = Math.min(TAYLOR_MAX_CAP, maxDeg);
 
-  // Taylor coefficients about a, up to a generous degree (also feeds Padé).
-  const coefAt = (deg: number) => {
-    const c: number[] = [];
-    for (let k = 0; k <= deg; k++) c.push(def.coef(k, a));
-    return c;
+  // Exact Taylor coefficients about a (closed form or exact recurrence), up to the lab's cap.
+  const coefs = useMemo(() => def.coeffs(a, TAYLOR_MAX_CAP), [def, a]);
+  // Padé [m/m], m = ⌊deg/2⌋, from the first 2m+1 of the same coefficients.
+  const fitFor = (deg: number): PadeFit => {
+    const m = padeOrder(deg);
+    return padeDiag(coefs.slice(0, 2 * m + 1), m);
+  };
+  const approxAt = (x: number, deg: number) => (mode === 'pade'
+    ? padeEval(fitFor(deg), a, x)
+    : taylorEval(coefs, a, deg, x));
+  const errAt = (deg: number) => Math.abs(def.f(evalX) - approxAt(evalX, deg));
+  const labelFor = (deg: number) => {
+    if (mode !== 'pade') return `T${deg}, n=${deg}`;
+    const fit = fitFor(deg);
+    return fit.m < fit.requested
+      ? `Padé[${fit.m}/${fit.m}] (the [${fit.requested}/${fit.requested}] system is singular)`
+      : `Padé[${fit.m}/${fit.m}]`;
   };
 
-  const taylorAt = (x: number, deg: number) => {
-    let s = 0;
-    for (let k = 0; k <= deg; k++) s += def.coef(k, a) * (x - a) ** k;
-    return s;
-  };
-
-  // Padé[m/m] about a, built from degree-2m Taylor coefficients (m = floor(n/2)).
-  const padeFor = (deg: number) => {
-    const m = Math.max(1, Math.floor(deg / 2));
-    const c = coefAt(2 * m);
-    return { m, pc: padeCoeffs(c, m) };
-  };
-
-  const padeEval = (x: number, pc: { a: number[]; b: number[] }) => {
-    const dx = x - a;
-    let num = 0, den = 0;
-    for (let i = 0; i < pc.a.length; i++) num += pc.a[i] * dx ** i;
-    for (let i = 0; i < pc.b.length; i++) den += pc.b[i] * dx ** i;
-    return Math.abs(den) < 1e-9 ? NaN : num / den;
-  };
-
-  const approxAt = (x: number, deg: number) => {
-    if (mode === 'pade') {
-      const { pc } = padeFor(deg);
-      if (pc) { const y = padeEval(x, pc); if (Number.isFinite(y)) return y; }
-    }
-    return taylorAt(x, deg);
-  };
+  const R = def.radius(a);
+  const dist = Math.abs(evalX - a);
+  const where = radiusCase(R, dist);
 
   const data = useMemo(() => {
     const [lo, hi] = def.domain;
-    const N = 201;
-    const truePts: { x: number; y: number }[] = [];
-    const approxPts: { x: number; y: number }[] = [];
+    const N = 401;
+    const xs: number[] = [];
+    for (let i = 0; i < N; i++) xs.push(lo + (i / (N - 1)) * (hi - lo));
+    const truePts = xs.map((x) => ({ x, y: def.f(x) }));
+    const approxPts = mode === 'pade'
+      ? padeCurve(fitFor(n), a, xs)
+      : xs.map((x) => ({ x, y: taylorEval(coefs, a, n, x) }));
     let mn = Infinity, mx = -Infinity;
-    for (let i = 0; i < N; i++) {
-      const x = lo + (i / (N - 1)) * (hi - lo);
-      const yt = def.f(x);
-      const ya = approxAt(x, n);
-      truePts.push({ x, y: yt });
-      approxPts.push({ x, y: ya });
-      if (Number.isFinite(yt)) { mn = Math.min(mn, yt); mx = Math.max(mx, yt); }
-    }
+    for (const p of truePts) if (Number.isFinite(p.y)) { mn = Math.min(mn, p.y); mx = Math.max(mx, p.y); }
     const pad = (mx - mn) * 0.15 || 1;
     return { truePts, approxPts, range: [mn - pad, mx + pad] as [number, number] };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fn, a, n, mode]);
+  }, [fn, a, n, mode, coefs]);
 
-  const err = Math.abs(def.f(evalX) - approxAt(evalX, n));
+  // |error| at the eval point for every degree reached so far (0..n) — the real trace.
+  const errSeries = useMemo(() => Array.from({ length: n + 1 }, (_, k) => errAt(k)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fn, a, n, mode, evalX, coefs]);
+  const err = errSeries[errSeries.length - 1] ?? errAt(n);
 
-  const reset = () => { sim.stop(); narration.cancel(); setN(0); setErrSeries([]); setLastLog(null); };
-
-  const methodLabel = mode === 'pade' ? `Padé[${Math.max(1, Math.floor(n / 2))}/${Math.max(1, Math.floor(n / 2))}]` : `Tₙ, n=${n}`;
+  const reset = () => { sim.stop(); narration.cancel(); setN(0); setLastLog(null); };
 
   const step = () => {
-    const cap = Math.min(MAX_CAP, maxDeg);
     const nn = Math.min(cap, n + 1);
     setN(nn);
-    const e = Math.abs(def.f(evalX) - approxAt(evalX, nn));
-    setErrSeries((s) => [...s, e].slice(-60));
-
-    const m = Math.max(1, Math.floor(nn / 2));
+    const approx = approxAt(evalX, nn);
+    const e = Math.abs(def.f(evalX) - approx);
+    const eT = Math.abs(def.f(evalX) - taylorEval(coefs, a, nn, evalX));
+    const errs = Array.from({ length: nn + 1 }, (_, k) => errAt(k));
+    let bestN = 0;
+    errs.forEach((v, k) => { if (v < (errs[bestN] ?? Infinity)) bestN = k; });
+    const best = errs[bestN] ?? e;
+    const fit = mode === 'pade' ? fitFor(nn) : null;
+    const label = labelFor(nn);
 
     // INTRO: explain the method + voice the live formula once per function/mode.
-    narration.narratePhase(`run:${fn}:${mode}`, introNarration(fn, mode, def));
-    // CONCLUSION: interpret the final accuracy versus the radius of convergence.
+    narration.narratePhase(`run:${fn}:${mode}`, introNarration(mode, def, a));
+    // CONCLUSION: interpret the final accuracy against the radius of convergence about a.
     if (nn >= cap) {
-      const insideRadius = e < 0.05;
-      narration.narratePhase(`done:${fn}:${mode}`, mode === 'pade'
-        ? `At the highest order the rational approximant settles. Because its denominator can model the function's poles, Padé stays accurate out where the plain Taylor series would diverge — here the error at the eval point is around ${e.toExponential(1)}.`
-        : insideRadius
-          ? `At the highest degree the polynomial hugs the curve and the error at the eval point is tiny, about ${e.toExponential(1)}. The eval point sits inside the radius of convergence, so every extra term helps.`
-          : `Adding terms is not closing the gap — the error stays around ${e.toExponential(1)}. The eval point lies beyond the radius of convergence, so the Taylor series cannot reach it no matter how many terms you add; re-centre, or switch to Padé.`);
+      let done: string;
+      if (mode === 'pade') {
+        done = `At the highest order, ${label} is off by ${fmtE(e)} at x = ${evalX.toFixed(2)}, against ${fmtE(eT)} for the degree-${nn} Taylor polynomial built from the same coefficients. ${e < eT ? 'The rational form wins here' : 'Here the polynomial is at least as accurate'}; the eval point is ${whereText(where, dist, R)}.${e < 1e-12 ? ' The approximant reproduces the function to rounding error.' : ''}`;
+      } else if (where === 'inside') {
+        done = e < 1e-3
+          ? `At degree ${nn} the polynomial hugs the curve: the error at x = ${evalX.toFixed(2)} is about ${fmtE(e)}. The eval point is ${whereText(where, dist, R)}, so every extra term helps.`
+          : `At degree ${nn} the error at x = ${evalX.toFixed(2)} is still ${fmtE(e)}. The eval point is ${whereText(where, dist, R)}, so the series does converge there — it just needs more terms this far from the centre. ${nn < TAYLOR_MAX_CAP ? 'Raise the max degree, or move the centre a closer to x.' : 'Move the centre a closer to x.'}`;
+      } else if (where === 'boundary') {
+        done = `The eval point sits ${whereText(where, dist, R)}. There the terms stop shrinking geometrically, so any convergence is painfully slow: the error at degree ${nn} is ${fmtE(e)}.`;
+      } else {
+        done = `The eval point lies ${whereText(where, dist, R)}, set by ${def.singularity}. The series diverges there, so no number of terms can reach f(x): the error is ${fmtE(e)} at degree ${nn}${bestN < nn && best < e ? `, up from its best of ${fmtE(best)} at degree ${bestN}` : ''}. Re-centre a closer to x, or switch to Padé.`;
+      }
+      narration.narratePhase(`done:${fn}:${mode}`, done);
     }
 
     setLastLog({
       algorithm: mode === 'pade' ? `Padé approximant · ${def.label}` : `Taylor series · ${def.label}`,
       stepDescription: mode === 'pade'
-        ? `Fit the [${m}/${m}] rational approximant to the degree-${nn} Taylor data`
-        : `Add the degree-${nn} term of the expansion about a`,
-      formula: mode === 'pade' ? 'R(x) = P_m(x) / Q_m(x),  matched to Σ fⁿ(a)/n!·(x−a)ⁿ' : 'f(x) ≈ Σₙ fⁿ(a)/n! · (x−a)ⁿ',
+        ? `Fit ${label} to the ${2 * (fit?.m ?? 0) + 1} Taylor coefficients c_0..c_${2 * (fit?.m ?? 0)} about a (degree-${nn} data)`
+        : `Add the degree-${nn} term c_${nn}·(x−a)^${nn} of the expansion about a`,
+      formula: mode === 'pade' ? 'R(x) = P_m(x−a) / Q_m(x−a),  P − Q·Σ cₖ(x−a)ᵏ = O((x−a)^(2m+1))' : 'Tₙ(x) = Σₖ₌₀ⁿ f⁽ᵏ⁾(a)/k! · (x−a)ᵏ',
       variables: {
-        ...(mode === 'pade' ? { 'order m' : m } : { n: nn }),
+        ...(mode === 'pade' ? { 'order m': fit?.m ?? 0 } : { n: nn }),
         a,
         'eval x': evalX,
         'f(x)': def.f(evalX),
-        [mode === 'pade' ? 'R(x)' : 'Tₙ(x)']: approxAt(evalX, nn),
+        [mode === 'pade' ? 'R(x)' : 'Tₙ(x)']: approx,
         '|error|': e,
+        ...(mode === 'pade' ? { '|Tₙ error|': eT } : {}),
+        R: Number.isFinite(R) ? +R.toFixed(4) : '∞',
+        '|x − a|': +dist.toFixed(4),
       },
-      result: `${orderLabel}: error at x=${evalX.toFixed(2)} is ${e.toExponential(2)}`,
+      result: `${label}: error at x=${evalX.toFixed(2)} is ${fmtE(e)}`,
       mathDetails: {
         params: mode === 'pade'
           ? [
-            { label: 'rational form', info: 'A Padé approximant is a ratio of polynomials P/Q matched to the Taylor coefficients — often far more accurate than a polynomial of the same total degree.' },
-            { label: 'poles', info: 'The denominator Q can model the function’s poles, so Padé can converge past a singularity where the raw Taylor series diverges (e.g. 1/(1−x), tanh).' },
-            { label: 'convergence', info: `${def.label}: Taylor converges on ${def.roc}; Padé typically extends the useful range.` },
+            { label: 'rational form', info: `Q (q₀ = 1) solves the ${fit?.m ?? 0}×${fit?.m ?? 0} Toeplitz system Σⱼ qⱼ c_{m+i−j} = 0; then pᵢ = Σₖ c_{i−k} qₖ. ${fit && fit.m < fit.requested ? `The [${fit.requested}/${fit.requested}] system is singular here, so the highest solvable order [${fit.m}/${fit.m}] is used.` : 'The system is non-singular at this order.'}` },
+            { label: 'poles', info: 'Where Q vanishes the approximant has a pole (the curve breaks there) — this is how Padé can model a singularity that stops the Taylor series.' },
+            { label: 'convergence', info: `${def.label}: ${def.radiusText(a)}. The eval point is ${whereText(where, dist, R)}.` },
           ]
           : [
             { label: 'centre a', info: 'The expansion point: the polynomial matches f and its first n derivatives exactly at a.' },
-            { label: 'degree n', info: 'More terms hug the curve over a wider interval — until you hit the radius of convergence.' },
-            { label: 'convergence', info: `${def.label}: converges on ${def.roc}.` },
+            { label: 'coefficients', info: fn === 'tanh'
+              ? 'tanh: exact recurrence from tanh′ = 1 − tanh² — (k+1)·c_{k+1} = [k=0] − Σ_{i+j=k} cᵢcⱼ.'
+              : fn === 'runge'
+                ? 'Runge: exact recurrence from (1+25x²)·f = 1 — c_k = −(50a·c_{k−1} + 25·c_{k−2})/(1+25a²).'
+                : 'Closed form f⁽ᵏ⁾(a)/k! for this function (no numerical differentiation).' },
+            { label: 'convergence', info: `${def.label}: ${def.radiusText(a)}. The eval point is ${whereText(where, dist, R)}.` },
           ],
-        implication: nn >= cap
-          ? `At the max ${mode === 'pade' ? 'order' : 'degree'} the approximation is as tight as it gets here. ${def.note}`
-          : mode === 'pade'
-            ? 'Each higher Padé order adds a numerator+denominator term; near a pole this beats a same-degree polynomial.'
-            : 'Each extra term reduces the error inside the radius of convergence; outside it, adding terms can make things worse.',
+        implication: where === 'inside'
+          ? 'Inside the radius every extra term shrinks the remainder (eventually geometrically); how fast depends on |x − a| relative to R.'
+          : where === 'boundary'
+            ? 'On the circle of convergence the terms do not shrink geometrically — convergence is at best very slow.'
+            : 'Beyond the radius the terms grow, so the Taylor series diverges at x — a Padé approximant or a new centre is needed.',
       },
     });
     if (nn >= cap) sim.pause();
@@ -295,25 +192,25 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
 
   const sim = useSimLoop(step, { initialSpeed: 320 });
 
+  const clampTo = (v: number, d: [number, number]) => Math.max(d[0] + 0.2, Math.min(d[1] - 0.2, v));
+
   const switchFn = (f: Fn) => {
-    setFn(f); sim.stop(); narration.cancel(); setN(0); setErrSeries([]); setLastLog(null);
-    if (f === 'geom' || f === 'log' || f === 'tanh' || f === 'runge') setA(0);
+    const nd = TAYLOR_FNS[f];
+    setFn(f); sim.stop(); narration.cancel(); setN(0); setLastLog(null); setPresetName(null);
+    setA(f === 'geom' || f === 'log' || f === 'tanh' || f === 'runge' ? 0 : clampTo(a, nd.domain));
+    setEvalX(+clampTo(evalX, nd.domain).toFixed(2));
   };
 
-  const switchMode = (md: Mode) => { setMode(md); sim.stop(); narration.cancel(); setN(0); setErrSeries([]); setLastLog(null); };
+  const switchMode = (md: Mode) => { setMode(md); sim.stop(); narration.cancel(); setN(0); setLastLog(null); setPresetName(null); };
 
-  interface Preset { name: string; fn: Fn; mode: Mode; a: number; evalX: number; tip: string; }
-  const PRESETS: Preset[] = [
-    { name: 'sin · re-centre', fn: 'sin', mode: 'taylor', a: 3, evalX: 5, tip: 'Move the centre to a=3 to fit sin near x=5 with few terms.' },
-    { name: 'geometric pole', fn: 'geom', mode: 'taylor', a: 0, evalX: 0.9, tip: 'Watch the series strain as the eval point nears the pole at x=1.' },
-    { name: 'Padé beats the pole', fn: 'geom', mode: 'pade', a: 0, evalX: 0.9, tip: 'The Padé denominator captures the pole — far tighter than Taylor here.' },
-    { name: 'Runge edges', fn: 'runge', mode: 'taylor', a: 0, evalX: 0.8, tip: 'Tiny radius (0.2): high-degree Taylor blows up toward the edges.' },
-    { name: 'tanh saturation', fn: 'tanh', mode: 'pade', a: 0, evalX: 2.5, tip: 'Padé tracks the ±1 plateau where the Taylor polynomial runs off.' },
-  ];
   const applyPreset = (p: Preset) => {
     sim.stop(); narration.cancel();
-    setFn(p.fn); setMode(p.mode); setA(p.a); setEvalX(p.evalX); setN(0); setErrSeries([]); setLastLog(null);
+    setFn(p.fn); setMode(p.mode); setA(p.a); setEvalX(p.evalX); setN(0); setLastLog(null); setPresetName(p.name);
   };
+  const activePreset = PRESETS.find((p) => p.name === presetName) ?? null;
+
+  const methodLabel = labelFor(n);
+  const orderNow = mode === 'pade' ? fitFor(n).m : n;
 
   return (
     <LabStage
@@ -322,11 +219,12 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       narration={narration}
       stats={[
         { label: 'fn', value: def.label, color: ACCENT },
-        { label: mode === 'pade' ? 'order' : 'n', value: mode === 'pade' ? Math.max(1, Math.floor(n / 2)) : n, color: mode === 'pade' ? PADE : APPROX },
+        { label: mode === 'pade' ? 'order' : 'n', value: mode === 'pade' ? `${orderNow}/${orderNow}` : n, color: mode === 'pade' ? PADE : APPROX },
         { label: 'a', value: a.toFixed(2) },
-        { label: 'err', value: err.toExponential(1) },
+        { label: 'R', value: fmtD(R) },
+        { label: 'err', value: Number.isFinite(err) ? err.toExponential(1) : 'pole', color: where === 'outside' && mode === 'taylor' ? (isLight ? 'var(--bad)' : '#f87171') : undefined },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, taylorPython(fn, mode))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, taylorPython(fn, mode, a, evalX, cap))}
       grid={(
         <FunctionPlot
           width={580} height={440} domain={def.domain} range={data.range}
@@ -349,11 +247,11 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           { color: GOOD, label: 'centre a' },
         ]} />
       )}
-      rewardLabel="|ERROR| AT EVAL"
-      rewardValue={err.toExponential(1)}
-      rewardSeries={errSeries.map((e) => -Math.log10(e + 1e-12))}
+      rewardLabel="|ERROR| AT EVAL · LOG₁₀ TRACE"
+      rewardValue={Number.isFinite(err) ? err.toExponential(1) : 'pole'}
+      rewardSeries={errSeries.map((e) => Math.log10(Math.max(e, 1e-16)))}
       lastLog={lastLog}
-      contextInsight={`${mode === 'pade' ? 'Padé approximant' : `Degree-${n} Taylor polynomial`} of ${def.label} about a=${a.toFixed(2)}. ${def.note} Radius of convergence: ${def.roc}. ${mode === 'pade' ? 'A rational P/Q can track poles the polynomial cannot.' : 'Press Run to grow n and watch the gold approximation snap onto the curve.'}`}
+      contextInsight={`${mode === 'pade' ? methodLabel : `Degree-${n} Taylor polynomial`} of ${def.label} about a=${a.toFixed(2)}. ${def.note} About this centre: ${def.radiusText(a)}; the eval point x = ${evalX.toFixed(2)} is ${whereText(where, dist, R)}. ${mode === 'pade' ? 'A rational P/Q can track poles the polynomial cannot.' : 'Press Run to grow n and watch the gold approximation against the curve.'}`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Taylor &amp; Padé" hint="Polynomial / rational approximation about a centre a." />
@@ -367,8 +265,8 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Function</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {(Object.keys(FNS) as Fn[]).map((f) => (
-                <AlgoPill key={f} active={fn === f} accent={ACCENT} onClick={() => switchFn(f)}>{FNS[f].label}</AlgoPill>
+              {(Object.keys(TAYLOR_FNS) as Fn[]).map((f) => (
+                <AlgoPill key={f} active={fn === f} accent={ACCENT} onClick={() => switchFn(f)}>{TAYLOR_FNS[f].label}</AlgoPill>
               ))}
             </div>
           </div>
@@ -376,21 +274,21 @@ const TaylorLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             <MonoLabel style={{ marginBottom: 9 }}>Presets &amp; challenges</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {PRESETS.map((p) => (
-                <AlgoPill key={p.name} accent={GOOD} onClick={() => applyPreset(p)}>{p.name}</AlgoPill>
+                <AlgoPill key={p.name} active={presetName === p.name} accent={GOOD} onClick={() => applyPreset(p)}>{p.name}</AlgoPill>
               ))}
             </div>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', marginTop: 7, lineHeight: 1.5 }}>
-              {PRESETS.find((p) => p.fn === fn && p.mode === mode)?.tip || 'Pick a preset, then press Run to grow the order and hear the error shrink.'}
+              {activePreset?.tip || 'Pick a preset, then press Run to grow the order and hear the error shrink.'}
             </div>
           </div>
-          <ParamSlider name="Centre a" value={a.toFixed(2)} min={def.domain[0] + 0.2} max={def.domain[1] - 0.2} step={0.1} current={a} onChange={(v) => { setA(v); }} hint="expansion point" accent={ACCENT} />
-          <ParamSlider name="Max degree" value={String(Math.min(MAX_CAP, maxDeg))} min={1} max={MAX_CAP} step={1} current={maxDeg} onChange={(v) => { setMaxDeg(v); if (n > v) setN(v); }} hint="terms to grow to" accent={ACCENT} />
-          <ParamSlider name="Eval point" value={evalX.toFixed(2)} min={def.domain[0] + 0.2} max={def.domain[1] - 0.2} step={0.1} current={evalX} onChange={setEvalX} hint="where error is measured" accent={ACCENT} />
+          <ParamSlider name="Centre a" value={a.toFixed(2)} min={def.domain[0] + 0.2} max={def.domain[1] - 0.2} step={0.1} current={a} onChange={(v) => { setA(v); setPresetName(null); }} hint={`expansion point · ${def.radiusText(a)}`} accent={ACCENT} />
+          <ParamSlider name="Max degree" value={String(cap)} min={1} max={TAYLOR_MAX_CAP} step={1} current={maxDeg} onChange={(v) => { setMaxDeg(v); if (n > v) setN(v); }} hint="terms to grow to" accent={ACCENT} />
+          <ParamSlider name="Eval point" value={evalX.toFixed(2)} min={def.domain[0] + 0.2} max={def.domain[1] - 0.2} step={0.1} current={evalX} onChange={(v) => { setEvalX(v); setPresetName(null); }} hint={`where error is measured · ${where === 'inside' ? 'inside R' : where === 'boundary' ? 'on |x−a| = R' : 'beyond R'}`} accent={ACCENT} />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={80} max={600} step={20} current={sim.speed} onChange={sim.setSpeed} hint="term interval" accent={ACCENT} />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ topic: 'Taylor & Padé approximation', fn: def.label, mode, centre: a, degree: n, evalX, error: +err.toExponential(3) }}
+      currentParams={{ topic: 'Taylor & Padé approximation', fn: def.label, mode, centre: a, degree: n, ...(mode === 'pade' ? { padeOrder: orderNow } : {}), evalX, radius: Number.isFinite(R) ? +R.toFixed(4) : 'infinite', evalPoint: where, error: Number.isFinite(err) ? +err.toExponential(3) : 'pole' }}
       apiPanel={apiPanel}
     />
   );
