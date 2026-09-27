@@ -7,7 +7,8 @@ export const TRUTH_TABLE_CONTENT: LabContent = {
       body: 'A propositional formula combines boolean variables with connectives. Its truth table lists the result for every assignment of the variables — 2ⁿ rows for n variables — completely defining the formula\'s meaning.',
       details: [
         { label: 'Connectives', text: '¬ not, ∧ and, ∨ or, ⊕ xor, → implies, ↔ iff.' },
-        { label: 'Implication', text: 'A → B is false only when A is true and B is false (vacuously true otherwise).' },
+        { label: 'Precedence', text: 'Tightest first: ¬, ∧, ⊕, ∨, →, ↔. So A ∨ B → C reads (A ∨ B) → C, and ¬A ∧ B reads (¬A) ∧ B. The lab prints the parse fully parenthesised under the formula.' },
+        { label: 'Implication', text: 'A → B is false only when A is true and B is false (vacuously true otherwise). Chains group to the right: A → B → C means A → (B → C).' },
       ],
     },
     {
@@ -15,6 +16,7 @@ export const TRUTH_TABLE_CONTENT: LabContent = {
       body: 'A formula is a tautology if it is true in every row, a contradiction if false in every row, and satisfiable if true in at least one. Validity and satisfiability are dual: φ is valid iff ¬φ is unsatisfiable.',
       details: [
         { label: 'Tautology', text: 'e.g. (A→B) ∧ (B→C) → (A→C) — true for all inputs.' },
+        { label: 'TYPE readout', text: 'The lab reports SATISFIABLE for formulas true in some rows but not all (contingent) — a tautology is satisfiable too, but it is reported as TAUTOLOGY.' },
         { label: 'Equivalence', text: 'Two formulas are equivalent iff they share a truth table (e.g. De Morgan).' },
       ],
     },
@@ -55,16 +57,17 @@ export const DPLL_CONTENT: LabContent = {
     },
     {
       heading: 'Pure literals & clause learning',
-      body: 'Two optional rules sharpen the search. Pure-literal elimination spots a variable that appears with only one polarity among the still-unsatisfied clauses: assigning it that way can never hurt, so it is fixed without branching. Clause learning (the heart of CDCL) analyses each conflict and records a "no-good" clause that blocks the partial assignment that caused it, so the solver never re-enters the same dead end — this is what lets real solvers scale to millions of variables.',
+      body: 'Two optional rules sharpen the search. Pure-literal elimination spots a variable that appears with only one polarity among the still-unsatisfied clauses: assigning it that way can never hurt, so it is fixed without branching. Clause learning (the heart of CDCL) turns each conflict into a new clause. Every propagated literal remembers the clause that forced it (its reason — together they form the implication graph); on a conflict the solver resolves the falsified clause backwards against those reasons until exactly one literal from the conflict\'s decision level remains, the first unique implication point (1-UIP). That learned clause is added to the formula, so it takes part in every later propagation, and the solver backjumps straight to the clause\'s assertion level — skipping every decision that played no part — where the clause is unit and immediately forces the flipped literal.',
       details: [
-        { label: 'Pure literal', text: 'One-polarity variable → set it to satisfy its clauses; removes it from the problem.' },
-        { label: 'No-good (CDCL)', text: 'A learned clause derived from a conflict; added to the formula to prune future search.' },
-        { label: 'Non-chronological backtracking', text: 'Real CDCL jumps back to the decision that actually caused the conflict, not just the last one.' },
+        { label: 'Pure literal', text: 'One-polarity variable → set it to satisfy its clauses; removes it from the problem. With learning on it has no reason clause, so it opens its own decision level, like a decision.' },
+        { label: 'Learned clause (1-UIP)', text: 'Implied by the formula (derived by resolution), falsified by the current trail, and containing exactly one literal of the conflict level.' },
+        { label: 'Backjumping', text: 'Jump to the second-highest decision level in the learned clause, not merely the last decision — try the Backjump payoff challenge with learning on and off.' },
+        { label: 'Needs unit propagation', text: 'The implication graph is built from propagation reasons, so switching learning on also switches unit propagation on.' },
       ],
     },
   ],
   lifecycle: [
-    { category: 'METHODOLOGY', title: 'From DPLL to CDCL', description: 'Real solvers add clause learning (CDCL), good branching heuristics (VSIDS) and restarts.', recommendation: 'Use a production solver (MiniSat, Glucose, z3) for real problems; DPLL is the conceptual core.' },
+    { category: 'METHODOLOGY', title: 'From DPLL to CDCL', description: 'The lab\'s learning mode is CDCL-lite: 1-UIP learning and non-chronological backjumping, but with a fixed lowest-variable, True-first branching order and no restarts, clause deletion or watched literals. Production solvers add VSIDS-style branching, restarts, learned-clause management and two-watched-literal propagation.', recommendation: 'Use a production solver (MiniSat, Glucose, CaDiCaL, z3) for real problems; DPLL + clause learning is the conceptual core.' },
     { category: 'DEPLOYMENT', title: 'Encoding matters', description: 'How you translate a problem into CNF hugely affects solve time.', recommendation: 'Invest in compact, propagation-friendly encodings.' },
   ],
 };
