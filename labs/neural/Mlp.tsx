@@ -9,7 +9,7 @@ import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
-import { MLP, Act, Optimizer, DatasetKind, makeDataset } from './mlp';
+import { MLP, Act, Optimizer, DatasetKind, makeDataset, LEAKY_ALPHA } from './mlp';
 import { mlpPython } from './python';
 
 const ACCENT = '#2dd4bf';
@@ -27,13 +27,23 @@ const ACT_NOTE: Record<Act, string> = {
   relu: 'ReLU: max(0,x) — sparse, fast, no vanishing gradient for x>0 (but dead units).',
   tanh: 'tanh: smooth, zero-centred (−1..1).',
   sigmoid: 'sigmoid: 0..1, but saturates and can vanish gradients.',
-  leaky: 'Leaky ReLU: small negative slope (0.1x) keeps dead units alive.',
-  gelu: 'GELU: smooth gated curve used in Transformers.',
+  leaky: `Leaky ReLU: small negative slope (${LEAKY_ALPHA}x) keeps dead units alive.`,
+  gelu: 'GELU: smooth gated curve x·Φ(x) used in Transformers (tanh approximation, exact derivative).',
 };
 const OPT_NOTE: Record<Optimizer, string> = {
   sgd: 'SGD: plain gradient step W ← W − α·g.',
   momentum: 'Momentum: v ← βv + g; W ← W − α·v — accelerates along consistent slopes.',
-  adam: 'Adam: per-weight adaptive step from 1st/2nd gradient moments — fast, robust to α.',
+  adam: 'Adam: W ← W − α·m̂/(√v̂+ε) from bias-corrected 1st/2nd gradient moments — each weight moves by at most about α per step whatever its gradient scale, so α is set far smaller than for SGD (0.001–0.1 here).',
+};
+// Learning-rate slider range per optimizer (Adam's α is a per-weight step size, so it lives lower).
+const LR_RANGE: Record<Optimizer, { min: number; max: number; step: number }> = {
+  sgd: { min: 0.01, max: 1, step: 0.01 },
+  momentum: { min: 0.01, max: 1, step: 0.01 },
+  adam: { min: 0.001, max: 0.1, step: 0.001 },
+};
+const clampLr = (o: Optimizer, v: number) => {
+  const r = LR_RANGE[o];
+  return Math.min(r.max, Math.max(r.min, +(Math.round(v / r.step) * r.step).toFixed(3)));
 };
 
 const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
@@ -52,6 +62,8 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
 
   const narration = useNarration();
   const netRef = useRef<MLP | null>(null);
+  // the weights the net was built with — embedded in the Python export so it retrains from the same start
+  const initRef = useRef<{ W: number[][][]; b: number[][] }>({ W: [], b: [] });
   const dataRef = useRef<{ X: number[][]; Y: number[]; pts: { x: number; y: number; cls: number }[] }>({ X: [], Y: [], pts: [] });
   const prevLossRef = useRef<number | null>(null);
   const milestoneRef = useRef(false);
@@ -59,7 +71,9 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const build = (k = kind, h = hidden, hl = hlayers, a = act) => {
     const pts = makeDataset(k, 220);
     dataRef.current = { pts, X: pts.map((p) => [p.x, p.y]), Y: pts.map((p) => p.cls) };
-    netRef.current = new MLP([2, ...Array(hl).fill(h), 1], a);
+    const net = new MLP([2, ...Array<number>(hl).fill(h), 1], a);
+    netRef.current = net;
+    initRef.current = { W: net.W.map((m) => m.map((r) => r.slice())), b: net.b.map((r) => r.slice()) };
     prevLossRef.current = null; milestoneRef.current = false;
     setEpoch(0); setLoss([]); setAcc(0); setLastLog(null); setVersion((v) => v + 1);
   };
@@ -137,10 +151,14 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         { label: 'EPOCH', value: epoch },
         { label: 'ARCH', value: sizes.join('-'), color: ACCENT },
         { label: 'OPT', value: optimizer, color: ACCENT },
-        { label: 'LOSS', value: loss.length ? loss[loss.length - 1].toFixed(3) : '—' },
+        { label: 'LOSS', value: loss[loss.length - 1]?.toFixed(3) ?? '—' },
         { label: 'ACC', value: `${(acc * 100).toFixed(0)}%`, color: GOOD },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, mlpPython(sizes, act, lr, kind, optimizer, l2))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, mlpPython({
+        sizes, act, lr, optimizer, l2, dataset: kind,
+        X: dataRef.current.X, Y: dataRef.current.Y,
+        W0: initRef.current.W, b0: initRef.current.b, epochsDone: epoch,
+      }))}
       grid={(
         <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
           <ScatterPlot width={400} height={400} domain={DOM} range={DOM} points={points} classify={classify} fieldKey={`${epoch}-${sizes.join()}-${act}-${optimizer}`} fieldResolution={32} xLabel="x₁" yLabel="x₂" />
@@ -165,7 +183,7 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       )}
       controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={() => rebuild(() => {}, {})} speed={sim.speed} onSpeed={sim.setSpeed} />}
       rewardLabel="LOSS"
-      rewardValue={loss.length ? loss[loss.length - 1].toFixed(3) : '—'}
+      rewardValue={loss[loss.length - 1]?.toFixed(3) ?? '—'}
       rewardSeries={loss}
       lastLog={lastLog}
       contextInsight={`A ${sizes.join('-')} network with ${act} + ${optimizer}${l2 > 0 ? ` and L2 λ=${l2}` : ''}. Hidden layers transform the input space so a final linear cut can separate non-linear classes (XOR, rings, spirals) — the edge colours on the right are the learned weights (teal +, red −).`}
@@ -184,7 +202,7 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             <MonoLabel style={{ marginBottom: 9 }}>Optimizer</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
               {(['sgd', 'momentum', 'adam'] as Optimizer[]).map((o) => (
-                <AlgoPill key={o} active={optimizer === o} accent={ACCENT} onClick={() => setOptimizer(o)}>{o}</AlgoPill>
+                <AlgoPill key={o} active={optimizer === o} accent={ACCENT} onClick={() => { setOptimizer(o); setLr((v) => clampLr(o, v)); }}>{o}</AlgoPill>
               ))}
             </div>
           </div>
@@ -197,7 +215,8 @@ const MlpLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
             </div>
           </div>
           <ParamSlider name="Units / layer" value={String(hidden)} min={2} max={10} step={1} current={hidden} onChange={(v) => rebuild(() => setHidden(v), { h: v })} hint="hidden-layer width" />
-          <ParamSlider name="α · learning rate" value={lr.toFixed(2)} min={0.01} max={1} step={0.01} current={lr} onChange={setLr} hint="gradient step size" />
+          <ParamSlider name="α · learning rate" value={lr < 0.1 ? lr.toFixed(3) : lr.toFixed(2)} min={LR_RANGE[optimizer].min} max={LR_RANGE[optimizer].max} step={LR_RANGE[optimizer].step} current={lr} onChange={setLr}
+            hint={optimizer === 'adam' ? 'Adam: ≈ max step per weight (0.001–0.1)' : 'gradient step size'} />
           <ParamSlider name="λ · L2 decay" value={l2.toFixed(3)} min={0} max={0.05} step={0.001} current={l2} onChange={setL2} hint="weight decay (0 = off)" />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={10} max={200} step={10} current={sim.speed} onChange={sim.setSpeed} hint="3 epochs / tick" />
         </ParamsWrap>

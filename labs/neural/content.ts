@@ -22,7 +22,7 @@ export const MLP_CONTENT: LabContent = {
     },
     {
       heading: 'Optimizers',
-      body: 'Plain SGD takes a fixed step along the raw gradient. Momentum accumulates a velocity v ← βv + g so consistent slopes accelerate and noisy ones cancel. Adam goes further: it tracks per-weight first and second moments of the gradient and divides the step by √(2nd moment), giving each weight its own adaptive learning rate — fast and forgiving of α.',
+      body: 'Plain SGD takes a fixed step along the raw gradient. Momentum accumulates a velocity v ← βv + g so consistent slopes accelerate and noisy ones cancel. Adam goes further: it tracks per-weight first and second moments of the gradient and divides the step by √(2nd moment), so each weight moves by at most about α per step whatever the scale of its gradient — fast on awkward losses, but α is then the step size itself, so it is set far smaller than for SGD (this lab offers 0.001–0.1 for Adam).',
       details: [
         { label: 'Momentum', text: 'v ← βv + g; W ← W − α·v. Rolls through small bumps and shallow ravines.' },
         { label: 'Adam', text: 'm̂, v̂ are bias-corrected moment estimates; W ← W − α·m̂/(√v̂+ε).' },
@@ -53,8 +53,8 @@ export const ACT_CONTENT: LabContent = {
       details: [
         { label: 'sigmoid / tanh', text: 'Smooth and bounded, but saturate — their gradient vanishes for large |x|.' },
         { label: 'ReLU', text: 'max(0,x): cheap, non-saturating for x>0; the deep-learning default.' },
-        { label: 'Leaky / ELU', text: 'Keep a slope (0.1x) or smooth tail (eˣ−1) for x<0 to avoid dead units.' },
-        { label: 'GELU / SiLU', text: 'Self-gated smooth curves (x·Φ(x), x·σ(x)) — Transformers / EfficientNet.' },
+        { label: 'Leaky / ELU', text: 'Keep a slope (0.1x in this lab) or smooth tail (eˣ−1) for x<0 to avoid dead units.' },
+        { label: 'GELU / SiLU', text: 'Self-gated smooth curves (x·Φ(x), drawn here with its tanh approximation, and x·σ(x)) — Transformers / EfficientNet.' },
       ],
     },
     {
@@ -92,11 +92,11 @@ export const PERCEPTRON_CONTENT: LabContent = {
     },
     {
       heading: 'Pocket & margin variants',
-      body: 'Two upgrades tackle the perceptron’s weaknesses. The pocket algorithm runs the same rule but keeps the best-accuracy weights it has ever seen — so even on noisy, non-separable data you walk away with a good line instead of whatever the wandering weights happen to hold. The margin perceptron updates whenever y(w·x+b) ≤ γ, pushing points a clear distance γ off the boundary — a first step toward the max-margin objective the SVM optimises directly.',
+      body: 'Two upgrades tackle the perceptron’s weaknesses. The pocket algorithm runs the same rule but keeps the best-accuracy weights it has ever seen — so even on noisy, non-separable data you walk away with a good line instead of whatever the wandering weights happen to hold. The margin perceptron updates whenever the FUNCTIONAL margin y(w·x+b) ≤ γ, i.e. also for correct points that sit inside the band w·x+b = ±γ. Because the score scales with ‖w‖, that band’s real (geometric) half-width is γ/‖w‖ and shrinks as the weights grow — so a fixed γ does not guarantee a fixed gap. The SVM turns this around: it fixes the functional margin at 1 and minimises ‖w‖, which maximises the geometric margin 1/‖w‖.',
       details: [
         { label: 'Pocket', text: 'Snapshot the highest-accuracy weights; robust to overlap/noise.' },
-        { label: 'Margin γ', text: 'Update inside a band, not just on the wrong side — fatter, safer boundary.' },
-        { label: 'Toward SVM', text: 'A fixed γ approximates what an SVM maximises end-to-end.' },
+        { label: 'Margin γ', text: 'Update inside the band y(w·x+b) ≤ γ, not just on the wrong side; the lab shows the band’s half-width γ/‖w‖ live.' },
+        { label: 'Toward SVM', text: 'An SVM fixes the functional margin at 1 and minimises ‖w‖ — maximising the geometric gap end-to-end.' },
       ],
     },
   ],
@@ -128,7 +128,7 @@ export const BACKPROP_CONTENT: LabContent = {
     },
     {
       heading: 'Weight gradients & the update',
-      body: 'Once every δ is known, each weight gradient is a product of two numbers you already have: ∂L/∂Wˡ = δˡ⁺¹ (aˡ)ᵀ and ∂L/∂bˡ = δˡ⁺¹. Gradient descent then steps every parameter downhill by W ← W − η·∂L/∂W. Recomputing the forward pass after the step shows the loss visibly drop.',
+      body: 'Once every δ is known, each weight gradient is a product of two numbers you already have: ∂L/∂Wˡ = δˡ⁺¹ (aˡ)ᵀ and ∂L/∂bˡ = δˡ⁺¹. Gradient descent then steps every parameter downhill by W ← W − η·∂L/∂W. Recomputing the forward pass after the step shows the new loss: lower when η is small enough, but a large step can overshoot and raise it — with ReLU on input A even η = 0.5 does.',
       details: [
         { label: '∂L/∂w = δ·a_in', text: 'The gradient of a weight is its downstream δ times the activation flowing into it.' },
         { label: 'Learning rate η', text: 'Step size. Too large overshoots; too small crawls — watch the loss after Apply.' },

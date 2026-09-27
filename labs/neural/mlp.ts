@@ -10,13 +10,24 @@ export type Optimizer = 'sgd' | 'momentum' | 'adam';
 // relu), and on the *pre*-activation `z` otherwise (leaky/gelu need the raw input
 // for their derivative). We therefore cache z per layer and pass it to the
 // derivative — see `dAct` below.
-const geluF = (x: number) => 0.5 * x * (1 + Math.tanh(Math.sqrt(2 / Math.PI) * (x + 0.044715 * x ** 3)));
+
+/** Leaky-ReLU negative slope used by the MLP and Activations labs (the Backprop lab uses 0.01). */
+export const LEAKY_ALPHA = 0.1;
+/** GELU, tanh approximation: ½x(1 + tanh(√(2/π)(x + 0.044715x³))) ≈ x·Φ(x). */
+export const GELU_C = 0.044715;
+const GELU_K = Math.sqrt(2 / Math.PI);
+export const gelu = (x: number) => 0.5 * x * (1 + Math.tanh(GELU_K * (x + GELU_C * x ** 3)));
+/** Exact derivative of the tanh-approximate GELU above (analytic, not a finite difference). */
+export const dGelu = (x: number) => {
+  const th = Math.tanh(GELU_K * (x + GELU_C * x ** 3));
+  return 0.5 * (1 + th) + 0.5 * x * (1 - th * th) * GELU_K * (1 + 3 * GELU_C * x * x);
+};
 const ACT: Record<Act, { f: (x: number) => number }> = {
   tanh: { f: (x: number) => Math.tanh(x) },
   relu: { f: (x: number) => Math.max(0, x) },
   sigmoid: { f: (x: number) => 1 / (1 + Math.exp(-x)) },
-  leaky: { f: (x: number) => (x > 0 ? x : 0.1 * x) },
-  gelu: { f: geluF },
+  leaky: { f: (x: number) => (x > 0 ? x : LEAKY_ALPHA * x) },
+  gelu: { f: gelu },
 };
 // derivative as a function of the pre-activation z (and the post-activation y)
 const dAct = (act: Act, z: number, y: number): number => {
@@ -24,10 +35,14 @@ const dAct = (act: Act, z: number, y: number): number => {
     case 'tanh': return 1 - y * y;
     case 'relu': return z > 0 ? 1 : 0;
     case 'sigmoid': return y * (1 - y);
-    case 'leaky': return z > 0 ? 1 : 0.1;
-    case 'gelu': return (geluF(z + 1e-3) - geluF(z - 1e-3)) / 2e-3;
+    case 'leaky': return z > 0 ? 1 : LEAKY_ALPHA;
+    case 'gelu': return dGelu(z);
   }
 };
+
+/** Initial weight scale per layer: He √(2/fan_in) for ReLU-like units, LeCun √(1/fan_in) for tanh/sigmoid. */
+export const initScale = (act: Act, fanIn: number) =>
+  (act === 'relu' || act === 'leaky' || act === 'gelu') ? Math.sqrt(2 / fanIn) : Math.sqrt(1 / fanIn);
 const sig = (x: number) => 1 / (1 + Math.exp(-x));
 
 export interface TrainOpts { lr: number; optimizer?: Optimizer; l2?: number; }
@@ -46,10 +61,9 @@ export class MLP {
 
   constructor(sizes: number[], act: Act) {
     this.sizes = sizes; this.act = act;
-    const reluLike = act === 'relu' || act === 'leaky' || act === 'gelu';
     for (let l = 0; l < sizes.length - 1; l++) {
-      const fan = sizes[l];
-      const scale = reluLike ? Math.sqrt(2 / fan) : Math.sqrt(1 / fan);
+      const fan = sizes[l] ?? 1;
+      const scale = initScale(act, fan);
       this.W.push(Array.from({ length: sizes[l + 1] }, () => Array.from({ length: sizes[l] }, () => randn() * scale)));
       this.b.push(Array.from({ length: sizes[l + 1] }, () => 0));
       this.vW.push(this.W[l].map((r) => r.map(() => 0)));
@@ -107,6 +121,11 @@ export class MLP {
       }
     }
     const m = X.length || 1;
+    if (l2 > 0) {
+      // penalised loss at the SAME (pre-update) weights the BCE term was measured at
+      let sq = 0; this.W.forEach((mm) => mm.forEach((r) => r.forEach((w) => { sq += w * w; })));
+      loss += 0.5 * l2 * sq * m;   // scaled back to per-sample by the final / m
+    }
     const b1 = 0.9, b2 = 0.999, eps = 1e-8;
     this.t += 1;
     for (let l = 0; l < L; l++) {
@@ -118,10 +137,6 @@ export class MLP {
         const gbi = gb[l][i] / m;
         this.b[l][i] -= this.optStep('b', l, i, 0, gbi, lr, optimizer, b1, b2, eps);
       }
-    }
-    if (l2 > 0) {
-      let sq = 0; this.W.forEach((mm) => mm.forEach((r) => r.forEach((w) => { sq += w * w; })));
-      loss += 0.5 * l2 * sq * m;   // report the penalised loss (scaled back per-sample below)
     }
     return loss / m;
   }
