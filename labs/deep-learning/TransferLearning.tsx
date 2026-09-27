@@ -1,222 +1,128 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import FunctionPlot, { PlotSeries, PlotMarker } from '../../components/labkit/viz/FunctionPlot';
-import { AlgoPill, ParamSlider, RunControls, MonoLabel, GOOD, BAD } from '../../components/stage/primitives';
+import { AlgoPill, ParamSlider, RunControls, MonoLabel, Legend, GOOD, BAD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { clamp01, randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { transferPython } from './python';
+import {
+  pretrain, createExperiment, evalSweepPoint, TL_SWEEP, TL_DEFAULTS, TL_H, TL_TAGS, TL_EPOCHS, TL_LR, TL_TRIALS,
+  TL_SOURCE_PER, TL_POOL_PER, TL_VAL_PER, FT_BACKBONE_LR_SCALE,
+} from './transferSim';
+import type { SweepPoint } from './transferSim';
 
 const ACCENT = '#f43f5e';
-
-// XOR-style 4 clusters — no straight cut separates them, so a raw [x,y] learner
-// (from scratch) struggles, while a rich pretrained feature map (transfer) does not.
-const CENTERS = [{ x: 0.3, y: 0.32 }, { x: 0.7, y: 0.32 }, { x: 0.3, y: 0.7 }, { x: 0.7, y: 0.7 }];
-const CLS = [0, 1, 1, 0];
-
-interface TPt { x: number; y: number; y01: number; }
-const makeData = (perCluster: number): TPt[] =>
-  CENTERS.flatMap((c, ci) => Array.from({ length: perCluster }, () => ({
-    x: clamp01(c.x + randn() * 0.09),
-    y: clamp01(c.y + randn() * 0.09),
-    y01: CLS[ci],
-  })));
-
-// ── "Pretrained backbone": a fixed bank of random ReLU features. Because it is
-// fit on the FULL distribution (its weights are fixed regardless of n), it already
-// encodes a representation that separates the four clusters — exactly the role a
-// backbone pretrained on a huge dataset plays. TRANSFER trains a logistic head on
-// just n labelled points using these features, so it generalises from very few.
-const H = 40; // backbone hidden width
-interface Backbone { W: number[][]; b: number[]; }
-const makeBackbone = (): Backbone => {
-  const W: number[][] = [];
-  const b: number[] = [];
-  for (let h = 0; h < H; h++) {
-    // Larger random projections of [x,y] → diverse ReLU half-planes.
-    W.push([randn() * 3.2, randn() * 3.2]);
-    b.push(randn() * 1.6);
-  }
-  return { W, b };
-};
-const features = (bb: Backbone, x: number, y: number): number[] => {
-  const f = new Array(H);
-  for (let h = 0; h < H; h++) f[h] = Math.max(0, bb.W[h][0] * x + bb.W[h][1] * y + bb.b[h]);
-  return f;
-};
-
-const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
-
-// Logistic-regression head trained by gradient descent on a feature matrix.
-const fitHead = (feats: number[][], ys: number[], dim: number, epochs: number, lr: number): number[] => {
-  const w = new Array(dim + 1).fill(0); // last entry = bias
-  const n = feats.length;
-  if (n === 0) return w;
-  for (let e = 0; e < epochs; e++) {
-    const g = new Array(dim + 1).fill(0);
-    for (let i = 0; i < n; i++) {
-      let z = w[dim];
-      for (let d = 0; d < dim; d++) z += w[d] * feats[i][d];
-      const err = sigmoid(z) - ys[i];
-      for (let d = 0; d < dim; d++) g[d] += err * feats[i][d];
-      g[dim] += err;
-    }
-    for (let d = 0; d <= dim; d++) w[d] -= (lr / n) * g[d];
-  }
-  return w;
-};
-const headPredict = (w: number[], feat: number[], dim: number): number => {
-  let z = w[dim];
-  for (let d = 0; d < dim; d++) z += w[d] * feat[d];
-  return sigmoid(z);
-};
-
-// Accuracy of a model on the validation set, given a feature extractor.
-const valAccuracy = (
-  w: number[], dim: number, extract: (p: TPt) => number[], val: TPt[],
-): number => {
-  if (!val.length) return 0;
-  let ok = 0;
-  for (const p of val) {
-    const pred = headPredict(w, extract(p), dim) >= 0.5 ? 1 : 0;
-    if (pred === p.y01) ok++;
-  }
-  return ok / val.length;
-};
-
-const SWEEP = [5, 10, 15, 20, 30, 40, 55, 70, 85, 100, 120];
-const TRIALS = 4; // average over a few random labelled subsets per n
-
-// Fit both learners at a given label budget n, averaged over random subsets.
-const evalAt = (pool: TPt[], val: TPt[], bb: Backbone, n: number, freeze: boolean): { scratch: number; transfer: number } => {
-  let sScratch = 0, sTransfer = 0;
-  const m = Math.min(n, pool.length);
-  for (let t = 0; t < TRIALS; t++) {
-    // Random labelled subset of size m from the pool.
-    const idx = pool.map((_, i) => i);
-    for (let i = idx.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [idx[i], idx[j]] = [idx[j], idx[i]]; }
-    const sub = idx.slice(0, m).map((i) => pool[i]);
-    const ys = sub.map((p) => p.y01);
-
-    // FROM SCRATCH: only raw [x,y] features (no pretrained representation) — low
-    // capacity on XOR, so it underfits and generalises poorly from few labels.
-    const rawExtract = (p: TPt) => [p.x, p.y];
-    const wScratch = fitHead(sub.map(rawExtract), ys, 2, 220, 0.6);
-    sScratch += valAccuracy(wScratch, 2, rawExtract, val);
-
-    // TRANSFER: rich pretrained backbone features + small head trained on m labels.
-    const bbExtract = (p: TPt) => features(bb, p.x, p.y);
-    const wTransfer = fitHead(sub.map(bbExtract), ys, H, 220, 0.4);
-    let acc = valAccuracy(wTransfer, H, bbExtract, val);
-    // Fine-tuning (freeze=false) buys a little extra once there are enough labels
-    // to safely adapt the backbone too — simulated as a small data-dependent bump.
-    if (!freeze) acc = clamp01(acc + 0.04 * Math.min(1, m / 60));
-    sTransfer += acc;
-  }
-  return { scratch: sScratch / TRIALS, transfer: sTransfer / TRIALS };
-};
+const FROZEN_COLOR = 'var(--acc)';
+type Mode = 'frozen' | 'finetune';
+const pct = (v: number) => `${(v * 100).toFixed(0)}%`;
+const N_MAX = TL_SWEEP[TL_SWEEP.length - 1]!;
 
 const TransferLearningLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
-  const [nLabeled, setNLabeled] = useState(20);
-  const [freeze, setFreeze] = useState(true);
-  const [focus, setFocus] = useState<'scratch' | 'transfer'>('transfer');
-  const [perCluster, setPerCluster] = useState(100);
-
-  // Fixed experiment: a large pool split into labelled-pool + validation set, and
-  // a backbone "pretrained" on the whole distribution. Regenerated on New map.
-  const [seed, setSeed] = useState(0);
-  const exp = useMemo(() => {
-    const all = makeData(perCluster);
-    // Shuffle, then split ~ half validation / half labelled-pool.
-    for (let i = all.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [all[i], all[j]] = [all[j], all[i]]; }
-    const cut = Math.floor(all.length * 0.5);
-    const val = all.slice(0, cut);
-    const pool = all.slice(cut);
-    return { pool, val, bb: makeBackbone() };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perCluster, seed]);
-
-  // Precompute both curves over the sweep (averaged trials). Recomputed when the
-  // experiment or freeze setting changes.
-  const curves = useMemo(() => SWEEP.map((n) => ({ n, ...evalAt(exp.pool, exp.val, exp.bb, n, freeze) })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [exp, freeze]);
-
-  // Animation reveals the curves left-to-right by raising a "revealed index".
-  const [revealed, setRevealed] = useState(SWEEP.length - 1);
+  const [seed, setSeed] = useState(TL_DEFAULTS.seed);
+  const [rotationDeg, setRotationDeg] = useState(TL_DEFAULTS.rotationDeg);
+  const [nIndex, setNIndex] = useState(TL_DEFAULTS.nIndex);
+  const [mode, setMode] = useState<Mode>('frozen');
+  const [points, setPoints] = useState<SweepPoint[]>([]);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
 
-  const nMax = SWEEP[SWEEP.length - 1];
-  // Find the curve point nearest the selected n (for the markers / stats).
-  const selIdx = useMemo(() => {
-    let bi = 0, bd = Infinity;
-    SWEEP.forEach((n, i) => { const d = Math.abs(n - nLabeled); if (d < bd) { bd = d; bi = i; } });
-    return bi;
-  }, [nLabeled]);
-  const at = curves[selIdx];
-  const gap = at.transfer - at.scratch;
-  const rewardSeries = curves.map((c) => c.transfer);
+  // Computed sweep points live in a ref (the source of truth) so a slow step can
+  // never be repeated by an overdue interval tick that still sees stale state.
+  const pointsRef = useRef<SweepPoint[]>([]);
 
-  const buildLog = (focusMode: 'scratch' | 'transfer', cur = at) => {
-    setLastLog({
-      algorithm: 'Transfer Learning',
-      stepDescription: `${cur.n} labelled examples · ${freeze ? 'frozen' : 'fine-tuned'} backbone · focus: ${focusMode}`,
-      formula: 'freeze backbone φ;  train head on n labels',
-      variables: {
-        n: cur.n,
-        'scratch acc': +cur.scratch.toFixed(3),
-        'transfer acc': +cur.transfer.toFixed(3),
-        gap: +(cur.transfer - cur.scratch).toFixed(3),
-      },
-      result: `transfer ${(cur.transfer * 100).toFixed(0)}% vs scratch ${(cur.scratch * 100).toFixed(0)}% @ n=${cur.n}`,
-      mathDetails: {
-        params: [
-          { label: 'feature reuse', info: `The pretrained backbone φ encodes general features learned from a huge dataset; the head ŷ = σ(wᵀφ(x)) only has to recombine them, so it learns from very few labels.` },
-          { label: freeze ? 'frozen backbone' : 'fine-tuning', info: freeze ? 'φ is held fixed — only the small head trains. Safe with tiny n: nothing to overfit in the backbone.' : 'φ also adapts to the task. Slightly better once labels are plentiful, but it can overfit when n is tiny.' },
-          { label: 'sample efficiency', info: `At n=${cur.n} transfer reaches ${(cur.transfer * 100).toFixed(0)}% while training from scratch reaches only ${(cur.scratch * 100).toFixed(0)}% — a ${((cur.transfer - cur.scratch) * 100).toFixed(0)}-point gap that is largest when labels are scarce.` },
-        ],
-        implication: gap > 0.12 ? 'Few labels: transfer wins decisively — reuse beats relearning.' : 'Many labels: scratch is catching up, but transfer still leads or ties.',
-      },
-    });
+  // Pretraining depends on the seed only; the target data on the seed and θ.
+  const pre = useMemo(() => pretrain(seed), [seed]);
+  const exp = useMemo(() => createExperiment({ seed, rotationDeg }, pre), [pre, seed, rotationDeg]);
+  useEffect(() => { pointsRef.current = []; setPoints([]); setLastLog(null); }, [exp]);
+
+  const at = points[nIndex] ?? null;
+  const n = TL_SWEEP[nIndex] ?? TL_SWEEP[0]!;
+  const done = points.length === TL_SWEEP.length;
+  const modeAcc = (p: SweepPoint) => (mode === 'frozen' ? p.frozen : p.finetune);
+  const modeName = mode === 'frozen' ? 'frozen φ' : 'fine-tuned φ';
+
+  const logFor = (p: SweepPoint): SimulationUpdate => ({
+    algorithm: 'Transfer Learning',
+    stepDescription: `n = ${p.n} labelled target points · ${TL_TRIALS} random subsets · ${TL_EPOCHS} full-batch Adam steps per learner`,
+    formula: 'φ(x) = σ(W₂·ReLU(W₁x + b₁) + b₂) (pretrained tagger);  ŷ = σ(wᵀφ(x) + c)',
+    variables: {
+      n: p.n,
+      'scratch acc': +p.scratch.toFixed(3),
+      'frozen acc': +p.frozen.toFixed(3),
+      'fine-tune acc': +p.finetune.toFixed(3),
+      θ: rotationDeg,
+    },
+    result: `n=${p.n}: scratch ${pct(p.scratch)} · frozen ${pct(p.frozen)} · fine-tune ${pct(p.finetune)}`,
+    mathDetails: {
+      params: [
+        { label: 'pretraining (source task)', info: `The backbone φ (2 → ${TL_H} ReLU → ${TL_TAGS} sigmoid tags) was trained with Adam on ${4 * TL_SOURCE_PER} labelled source points to answer "is it cluster k?" for each of the four clusters (${pct(exp.sourceAcc)} of source points get their own cluster's tag highest). Its four tag outputs are the features handed to the new task.` },
+        { label: 'target task', info: `A different labelling — XOR of the clusters — on a domain rotated by θ = ${rotationDeg}° about the centre. n labelled points are drawn at random from a ${4 * TL_POOL_PER}-point pool; accuracy is measured on ${4 * TL_VAL_PER} separate validation points.` },
+        { label: 'three learners', info: `Same architecture (2 → ${TL_H} → ${TL_TAGS} → 1) and the same ${TL_EPOCHS} Adam steps (η = ${TL_LR}): scratch = random He init, all layers train; frozen φ = pretrained backbone fixed, only the 5-parameter head trains; fine-tune = backbone trains at η × ${FT_BACKBONE_LR_SCALE}, head at η. Heads start at zero.` },
+        { label: 'sample efficiency', info: `At n = ${p.n}: frozen ${pct(p.frozen)}, fine-tune ${pct(p.finetune)}, scratch ${pct(p.scratch)} (mean of ${TL_TRIALS} subsets, the same subsets for every learner).` },
+      ],
+      implication: Math.max(p.frozen, p.finetune) - p.scratch > 0.05
+        ? `Transfer leads scratch by ${((Math.max(p.frozen, p.finetune) - p.scratch) * 100).toFixed(0)} points at n = ${p.n}.`
+        : p.scratch - Math.max(p.frozen, p.finetune) > 0.02
+          ? `At n = ${p.n} scratch is ahead — with enough labels (or a large domain shift) reuse stops paying off.`
+          : `At n = ${p.n} the learners are within 5 points of each other.`,
+    },
+  });
+
+  const summary = (pts: SweepPoint[]): string => {
+    const small = pts[TL_DEFAULTS.nIndex] ?? pts[0]!;
+    const big = pts[pts.length - 1]!;
+    const lead = Math.max(small.frozen, small.finetune) - small.scratch;
+    const s1 = lead > 0.05
+      ? `With ${small.n} labels, frozen transfer reaches ${pct(small.frozen)} and fine-tuning ${pct(small.finetune)}, while the same network trained from scratch reaches ${pct(small.scratch)}.`
+      : `With ${small.n} labels the three learners are close: frozen ${pct(small.frozen)}, fine-tune ${pct(small.finetune)}, scratch ${pct(small.scratch)}.`;
+    const s2 = big.scratch >= big.finetune - 0.03
+      ? ` With all ${big.n} labels, scratch reaches ${pct(big.scratch)} — it has caught up with fine-tuning (${pct(big.finetune)}).`
+      : ` Even with all ${big.n} labels scratch reaches only ${pct(big.scratch)} against fine-tuning's ${pct(big.finetune)}.`;
+    const s3 = big.finetune - big.frozen > 0.03
+      ? ` The frozen backbone plateaus at ${pct(big.frozen)}: the target domain is rotated ${rotationDeg}° away from the pretraining data, so fixed features fit it imperfectly, and only fine-tuning can adapt them.`
+      : ` Frozen and fine-tuned transfer end within a few points (${pct(big.frozen)} vs ${pct(big.finetune)}) — at a ${rotationDeg}° shift the pretrained features still fit.`;
+    return s1 + s2 + s3;
   };
 
   const step = () => {
-    setRevealed((r) => {
-      const next = r + 1;
-      if (next >= SWEEP.length) { sim.pause(); narration.narratePhase('done', `Both curves are complete. Transfer learning reached high validation accuracy from only a handful of labels, while training from scratch needed many more to catch up — and at the smallest label budgets it stayed near chance. Reusing a pretrained representation, instead of relearning everything, is what makes deep learning practical when labelled data is scarce.`); return SWEEP.length - 1; }
-      const cur = curves[next];
-      setNLabeled(cur.n);
-      buildLog(focus, cur);
-      narration.narratePhase(
-        `run:${freeze ? 'transfer' : 'scratch'}`,
-        `The challenge here: get high accuracy on a task where you only have a handful of labelled examples. A backbone pretrained on a huge dataset already encodes general features, so a small head learns to classify from very few labels; training from scratch must learn everything from those same few points and badly overfits or underfits, so its validation accuracy stays low and rises only slowly as you add more labels. Watch the teal transfer curve shoot up on the left while the red from-scratch curve crawls. Transfer learning from pretrained backbones — ResNet, BERT, CLIP — is how most real vision and language systems are built today.`,
-      );
-      return next;
-    });
+    const i = pointsRef.current.length;
+    if (i >= TL_SWEEP.length) { sim.pause(); return; }
+    if (i === 0) {
+      narration.narratePhase('run', `The challenge here: get high accuracy on a new task from only a handful of labelled examples. A backbone pretrained on six hundred labelled points of a related task — tagging which of four clusters a point came from — already produces useful features, so a tiny head can learn the new labelling from few examples. Training the same network from scratch has to learn everything from those few points. For each label budget, the lab trains all three learners on the same random subsets and plots their real validation accuracy.`);
+    }
+    const p = evalSweepPoint(exp, i);
+    const next = [...pointsRef.current, p];
+    pointsRef.current = next;
+    setPoints(next);
+    setNIndex(i);
+    setLastLog(logFor(p));
+    if (next.length >= TL_SWEEP.length) {
+      sim.pause();
+      narration.narratePhase(`done:${seed}:${rotationDeg}`, `All three curves are complete. ${summary(next)}`);
+    }
   };
 
   const sim = useSimLoop(step, { initialSpeed: 450 });
 
-  const reset = () => { sim.stop(); narration.cancel(); setRevealed(SWEEP.length - 1); setLastLog(null); };
-  const regen = () => { sim.stop(); narration.cancel(); setSeed((s) => s + 1); setRevealed(SWEEP.length - 1); setLastLog(null); };
-  const animate = () => { narration.cancel(); setRevealed(0); setLastLog(null); sim.play(); };
-  const pickFocus = (f: 'scratch' | 'transfer') => { setFocus(f); buildLog(f); };
+  const halt = () => { sim.stop(); narration.cancel(); };
+  const reset = () => { halt(); pointsRef.current = []; setPoints([]); setLastLog(null); };
+  const pickN = (idx: number) => { setNIndex(idx); const p = points[idx]; if (p) setLastLog(logFor(p)); };
 
-  // Map sweep n → [0,1] domain; the visible portion is limited by `revealed`.
-  const xOf = (n: number) => n / nMax;
-  const shown = curves.slice(0, revealed + 1);
-  const scratchSeries: PlotSeries = { points: shown.map((c) => ({ x: xOf(c.n), y: c.scratch })), color: BAD, width: 2.4 };
-  const transferSeries: PlotSeries = { points: shown.map((c) => ({ x: xOf(c.n), y: c.transfer })), color: GOOD, width: 2.4 };
-  const markers: PlotMarker[] = selIdx <= revealed ? [
-    { x: xOf(at.n), y: at.transfer, color: GOOD, label: `${(at.transfer * 100).toFixed(0)}%` },
-    { x: xOf(at.n), y: at.scratch, color: BAD, label: `${(at.scratch * 100).toFixed(0)}%` },
+  // ---- plot -------------------------------------------------------------
+  const line = (key: 'scratch' | 'frozen' | 'finetune') => points.map((p) => ({ x: p.n, y: p[key] }));
+  const series: PlotSeries[] = [
+    { points: line('scratch'), color: BAD, width: 2.4 },
+    { points: line('frozen'), color: FROZEN_COLOR, width: mode === 'frozen' ? 2.6 : 1.4, dash: mode !== 'frozen' },
+    { points: line('finetune'), color: GOOD, width: mode === 'finetune' ? 2.6 : 1.4, dash: mode !== 'finetune' },
+  ];
+  const markers: PlotMarker[] = at ? [
+    { x: at.n, y: modeAcc(at), color: mode === 'frozen' ? FROZEN_COLOR : GOOD, label: pct(modeAcc(at)) },
+    { x: at.n, y: at.scratch, color: BAD, label: pct(at.scratch) },
   ] : [];
-
-  const insight = `Two learners face the same XOR-style task with the same n labels: from-scratch (red) sees only raw [x,y] and must learn everything from few points, while transfer (teal) reuses a frozen pretrained backbone and only fits a small head. Transfer reaches high validation accuracy from very few labels; from-scratch needs many — that vertical gap on the left is the whole point of transfer learning.`;
 
   return (
     <LabStage
@@ -224,59 +130,54 @@ const TransferLearningLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
       running={sim.isPlaying}
       narration={narration}
       stats={[
-        { label: 'LABELS', value: at.n },
-        { label: 'SCRATCH ACC', value: `${(at.scratch * 100).toFixed(0)}%`, color: BAD },
-        { label: 'TRANSFER ACC', value: `${(at.transfer * 100).toFixed(0)}%`, color: GOOD },
+        { label: 'LABELS n', value: n },
+        { label: 'SCRATCH', value: at ? pct(at.scratch) : '—', color: BAD },
+        { label: 'FROZEN φ', value: at ? pct(at.frozen) : '—', color: FROZEN_COLOR },
+        { label: 'FINE-TUNE', value: at ? pct(at.finetune) : '—', color: GOOD },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, transferPython(nLabeled, freeze))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, transferPython({ seed, rotationDeg, n, mode }))}
       grid={(
         <FunctionPlot
           width={460}
           height={440}
-          domain={[0, 1]}
+          domain={[0, N_MAX]}
           range={[0.4, 1]}
-          series={[scratchSeries, transferSeries]}
+          series={series}
           markers={markers}
-          xLabel="labelled examples"
-          yLabel="val accuracy"
+          xLabel="labelled target examples n"
+          yLabel="validation accuracy"
         />
       )}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={() => (sim.isPlaying ? sim.pause() : animate())} onReset={reset} onNewMap={regen} speed={sim.speed} onSpeed={sim.setSpeed} />}
-      rewardLabel="TRANSFER VAL ACC"
-      rewardValue={at.transfer.toFixed(2)}
-      rewardSeries={rewardSeries}
+      legend={<Legend title="LEARNERS" items={[{ color: BAD, label: 'from scratch' }, { color: FROZEN_COLOR, label: 'frozen φ' }, { color: GOOD, label: 'fine-tune' }]} />}
+      controls={<RunControls isPlaying={sim.isPlaying} onPlay={() => { if (done) { reset(); } sim.toggle(); }} onReset={reset} onNewMap={() => { halt(); setSeed((s) => s + 1); }} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      rewardLabel={`${mode === 'frozen' ? 'FROZEN' : 'FINE-TUNE'} VAL ACC`}
+      rewardValue={at ? modeAcc(at).toFixed(2) : '—'}
+      rewardSeries={points.map(modeAcc)}
       lastLog={lastLog}
-      contextInsight={insight}
+      contextInsight={`Three learners with the same 2 → ${TL_H} → ${TL_TAGS} → 1 architecture face the same target task (XOR of four clusters, domain rotated ${rotationDeg}°) with the same n labels: from scratch (red) starts from random weights; frozen φ reuses a backbone pretrained on a related source task and trains only a 5-parameter head; fine-tune also updates the backbone at a tenth of the learning rate. Run trains all three at each n (${TL_TRIALS} random label subsets each) and plots real validation accuracy.${done ? ` ${summary(points)}` : ''}`}
       params={(
         <ParamsWrap>
-          <ParamsHead title="Transfer Learning" hint="Run animates both accuracy curves; the slider picks the label budget n." />
+          <ParamsHead title="Transfer Learning" hint="Run trains all three learners at each label budget, left to right." />
           <div>
-            <MonoLabel style={{ marginBottom: 9 }}>Focus model</MonoLabel>
+            <MonoLabel style={{ marginBottom: 9 }}>Highlighted transfer mode</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
-              <AlgoPill active={focus === 'scratch'} accent={BAD} onClick={() => pickFocus('scratch')}>From scratch</AlgoPill>
-              <AlgoPill active={focus === 'transfer'} accent={GOOD} onClick={() => pickFocus('transfer')}>Transfer</AlgoPill>
+              <AlgoPill active={mode === 'frozen'} accent={ACCENT} onClick={() => setMode('frozen')}>Frozen φ</AlgoPill>
+              <AlgoPill active={mode === 'finetune'} accent={ACCENT} onClick={() => setMode('finetune')}>Fine-tune</AlgoPill>
             </div>
             <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '8px 0 0', lineHeight: 1.5 }}>
-              Both curves are always shown. Focus only steers which model the stats and narration centre on.
+              {mode === 'frozen'
+                ? 'Frozen: the pretrained backbone is fixed; only the head (4 weights + bias) trains — little to overfit with few labels.'
+                : `Fine-tune: the backbone trains too, at ${FT_BACKBONE_LR_SCALE}× the head's learning rate, so it can adapt to the shifted target domain.`}
+              {' '}All three curves are always computed on the same label subsets; this only changes the highlight.
             </p>
           </div>
-          <div>
-            <MonoLabel style={{ marginBottom: 9 }}>Backbone</MonoLabel>
-            <div style={{ display: 'flex', gap: 7 }}>
-              <AlgoPill active={freeze} accent={ACCENT} onClick={() => { setFreeze(true); reset(); }}>Frozen φ</AlgoPill>
-              <AlgoPill active={!freeze} accent={ACCENT} onClick={() => { setFreeze(false); reset(); }}>Fine-tune</AlgoPill>
-            </div>
-            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '8px 0 0', lineHeight: 1.5 }}>
-              {freeze ? 'Frozen: only the head trains — robust with very few labels.' : 'Fine-tune: the backbone adapts too — a little better once labels are plentiful.'}
-            </p>
-          </div>
-          <ParamSlider name="Labelled examples n" value={String(at.n)} min={5} max={120} step={1} current={nLabeled} onChange={setNLabeled} hint="task labels available" />
-          <ParamSlider name="Pool / cluster" value={String(perCluster)} min={40} max={140} step={10} current={perCluster} onChange={(v) => { setPerCluster(v); }} hint="dataset size (val + pool)" />
-          <ParamSlider name="Speed" value={`${sim.speed}ms`} min={150} max={1000} step={50} current={sim.speed} onChange={sim.setSpeed} hint="reveal interval" />
+          <ParamSlider name="Labelled examples n" value={String(n)} min={0} max={TL_SWEEP.length - 1} step={1} current={nIndex} onChange={(v) => pickN(Math.round(v))} hint={`label budget (${TL_SWEEP.join(', ')})`} />
+          <ParamSlider name="Domain shift θ" value={`${rotationDeg}°`} min={0} max={45} step={5} current={rotationDeg} onChange={(v) => { halt(); setRotationDeg(v); }} hint="target clusters rotated from the pretraining data" />
+          <ParamSlider name="Speed" value={`${sim.speed}ms`} min={150} max={1000} step={50} current={sim.speed} onChange={sim.setSpeed} hint="interval per label budget" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'Transfer Learning', nLabeled: at.n, freeze, focus, scratchAcc: +at.scratch.toFixed(3), transferAcc: +at.transfer.toFixed(3), gap: +gap.toFixed(3) }}
+      currentParams={{ algorithm: 'Transfer Learning', seed, rotationDeg, labelledExamples: n, highlighted: modeName, scratchAcc: at ? +at.scratch.toFixed(3) : null, frozenAcc: at ? +at.frozen.toFixed(3) : null, finetuneAcc: at ? +at.finetune.toFixed(3) : null, sourceAcc: +exp.sourceAcc.toFixed(3) }}
       apiPanel={apiPanel}
     />
   );
