@@ -2,274 +2,221 @@ import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
-import ScatterPlot, { ScatterPoint } from '../../components/labkit/viz/ScatterPlot';
+import ScatterPlot, { CLASS_COLORS, ScatterLine, ScatterPoint } from '../../components/labkit/viz/ScatterPlot';
+import GraphCanvas, { GNode, GEdge } from '../../components/labkit/viz/GraphCanvas';
 import { AlgoPill, ParamSlider, RunControls, MonoLabel, GOOD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { clamp01, randn, ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import { gradientBoostingPython } from './python';
+import { useTheme } from '../../utils/theme';
+import { makeXorData, GBM_STD, TEST_SEED_OFFSET } from './supData';
+import {
+  Variant, CatMode, GPt, BNode, BoostCfg, BoostState, initBoost, boostRound, scoreAt, lossAcc, orderedScores, treeShape,
+} from './boostCore';
 
 const ACCENT = '#fbbf24';
-
-// XOR-style 4-cluster data: no single straight cut separates it, so boosting
-// must stack several shallow trees to carve the four quadrants.
-const CENTERS = [{ x: 0.28, y: 0.3 }, { x: 0.72, y: 0.3 }, { x: 0.28, y: 0.72 }, { x: 0.72, y: 0.72 }];
-const CLS = [0, 1, 1, 0];
-interface GPt { x: number; y: number; y01: number; }
-const makeData = (perCluster: number): GPt[] =>
-  CENTERS.flatMap((c, ci) => Array.from({ length: perCluster }, () => ({ x: clamp01(c.x + randn() * 0.085), y: clamp01(c.y + randn() * 0.085), y01: CLS[ci] })));
-
-type Variant = 'xgboost' | 'lightgbm' | 'catboost';
+const GBM_ROUNDS = 40;
+const BIN_STOPS = [4, 8, 16, 32, 64, 255];
 const VARIANT_LABEL: Record<Variant, string> = { xgboost: 'XGBoost', lightgbm: 'LightGBM', catboost: 'CatBoost' };
 
-// A boosted regression tree: predicts a Newton leaf weight at (x,y).
-type TNode =
-  | { leaf: true; val: number }
-  | { leaf: false; feat: 0 | 1; thr: number; left: TNode; right: TNode };
+interface Preset { id: string; name: string; variant: Variant; lr: number; maxDepth: number; numLeaves: number; maxBin: number; lambda: number; catMode: CatMode; noise: number; tip: string; }
+const PRESETS: Preset[] = [
+  { id: 'xgb', name: 'XGBoost · depth 3', variant: 'xgboost', lr: 0.3, maxDepth: 3, numLeaves: 8, maxBin: 255, lambda: 1, catMode: 'ordered', noise: 0.1,
+    tip: 'Level-wise: every node that still gains is split, down to depth 3 (≤ 8 leaves). With 10% flipped labels, 40 rounds typically reach ≈ 99% train but ≈ 90% test — the late trees fit noise.' },
+  { id: 'stumps', name: 'Stumps (depth 1)', variant: 'xgboost', lr: 0.3, maxDepth: 1, numLeaves: 2, maxBin: 255, lambda: 1, catMode: 'ordered', noise: 0,
+    tip: 'Depth-1 trees add up to f(x₁) + g(x₂). XOR needs F(BL) + F(TR) < 0 < F(BR) + F(TL), but an additive F makes both sums equal — so at most 3 of the 4 cluster centres can be right. Train creeps to ≈ 76% by memorising slices; test stays ≈ 54%.' },
+  { id: 'lgbm', name: 'LightGBM · 16 leaves', variant: 'lightgbm', lr: 0.3, maxDepth: 3, numLeaves: 16, maxBin: 255, lambda: 1, catMode: 'ordered', noise: 0.1,
+    tip: 'Leaf-wise: always split the single best leaf. Trees grow 6–10 levels deep and lopsided to chase the flipped labels — train 100%, test ≈ 88%.' },
+  { id: 'lgbm-bins', name: 'LightGBM · max_bin 4', variant: 'lightgbm', lr: 0.3, maxDepth: 3, numLeaves: 16, maxBin: 4, lambda: 1, catMode: 'ordered', noise: 0.1,
+    tip: 'Same 16 leaves, but each axis is pre-cut into 4 equal-frequency bins, so thresholds can only sit on the 3 dashed edges per axis. Trees can no longer isolate single noisy points: train ≈ 89%, test ≈ 97%.' },
+  { id: 'cat', name: 'CatBoost · ordered', variant: 'catboost', lr: 0.3, maxDepth: 3, numLeaves: 8, maxBin: 255, lambda: 1, catMode: 'ordered', noise: 0.1,
+    tip: 'Symmetric trees: one test per level, always 2³ = 8 leaves. Ordered boosting picks each tree from gradients that never saw the point’s own label (ORD LOSS is that honest loss, ≈ 0.35 vs ≈ 0.19 train): train ≈ 94%, test ≈ 93.5%.' },
+  { id: 'cat-plain', name: 'CatBoost · plain', variant: 'catboost', lr: 0.3, maxDepth: 3, numLeaves: 8, maxBin: 255, lambda: 1, catMode: 'plain', noise: 0.1,
+    tip: 'Plain gradients reuse every point’s own label, so the trees chase the flipped ones: train ≈ 96.5% vs ≈ 94% ordered, with test no better (≈ 92% vs ≈ 93.5% ordered).' },
+];
 
-const featVal = (p: GPt, f: 0 | 1) => (f === 0 ? p.x : p.y);
-const predict = (n: TNode, x: number, y: number): number =>
-  n.leaf ? n.val : predict((n.feat === 0 ? x : y) <= n.thr ? n.left : n.right, x, y);
-
-interface Grad { g: number; h: number; } // gradient & hessian of logistic loss
-// Newton leaf weight  w* = −ΣG / (ΣH + λ)
-const leafWeight = (idx: number[], gr: Grad[], lambda: number) => {
-  let G = 0, H = 0;
-  for (const i of idx) { G += gr[i].g; H += gr[i].h; }
-  return -G / (H + lambda);
-};
-// Split gain  ½[ G_L²/(H_L+λ) + G_R²/(H_R+λ) − G²/(H+λ) ] − γ
-const splitGain = (L: number[], R: number[], gr: Grad[], lambda: number, gamma: number) => {
-  let GL = 0, HL = 0, GR = 0, HR = 0;
-  for (const i of L) { GL += gr[i].g; HL += gr[i].h; }
-  for (const i of R) { GR += gr[i].g; HR += gr[i].h; }
-  const G = GL + GR, H = HL + HR;
-  return 0.5 * (GL * GL / (HL + lambda) + GR * GR / (HR + lambda) - G * G / (H + lambda)) - gamma;
-};
-
-interface Split { feat: 0 | 1; thr: number; L: number[]; R: number[]; gain: number; }
-const bestSplit = (pts: GPt[], idx: number[], gr: Grad[], lambda: number, gamma: number, minLeaf: number): Split | null => {
-  let best: Split | null = null;
-  for (const feat of [0, 1] as const) {
-    const vals = [...new Set(idx.map((i) => featVal(pts[i], feat)))].sort((a, b) => a - b);
-    for (let v = 0; v < vals.length - 1; v++) {
-      const thr = (vals[v] + vals[v + 1]) / 2;
-      const L: number[] = [], R: number[] = [];
-      for (const i of idx) (featVal(pts[i], feat) <= thr ? L : R).push(i);
-      if (L.length < minLeaf || R.length < minLeaf) continue;
-      const gain = splitGain(L, R, gr, lambda, gamma);
-      if (!best || gain > best.gain) best = { feat, thr, L, R, gain };
-    }
-  }
-  return best;
-};
-
-// XGBoost — level-wise (depth-first to a fixed max depth): split every node.
-const buildLevelWise = (pts: GPt[], idx: number[], gr: Grad[], depth: number, maxDepth: number, lambda: number, gamma: number, minLeaf: number): TNode => {
-  if (depth >= maxDepth || idx.length < 2 * minLeaf) return { leaf: true, val: leafWeight(idx, gr, lambda) };
-  const s = bestSplit(pts, idx, gr, lambda, gamma, minLeaf);
-  if (!s || s.gain <= 0) return { leaf: true, val: leafWeight(idx, gr, lambda) };
-  return { leaf: false, feat: s.feat, thr: s.thr, left: buildLevelWise(pts, s.L, gr, depth + 1, maxDepth, lambda, gamma, minLeaf), right: buildLevelWise(pts, s.R, gr, depth + 1, maxDepth, lambda, gamma, minLeaf) };
-};
-
-// LightGBM — leaf-wise (best-first): repeatedly split the leaf with the biggest
-// gain until num_leaves is reached. Grows deep, unbalanced trees.
-const buildLeafWise = (pts: GPt[], root: number[], gr: Grad[], numLeaves: number, lambda: number, gamma: number, minLeaf: number): TNode => {
-  interface Leaf { idx: number[]; node: { leaf: true; val: number }; split: Split | null; }
-  const makeLeaf = (idx: number[]): Leaf => ({ idx, node: { leaf: true, val: leafWeight(idx, gr, lambda) }, split: bestSplit(pts, idx, gr, lambda, gamma, minLeaf) });
-  // Mutable tree: we keep references so we can replace a leaf node in place.
-  let rootRef: TNode = { leaf: true, val: leafWeight(root, gr, lambda) };
-  const leaves: { leaf: Leaf; set: (n: TNode) => void }[] = [{ leaf: makeLeaf(root), set: (n) => { rootRef = n; } }];
-  for (let count = 1; count < numLeaves; count++) {
-    let bi = -1, bg = 0;
-    leaves.forEach((l, i) => { if (l.leaf.split && l.leaf.split.gain > bg) { bg = l.leaf.split.gain; bi = i; } });
-    if (bi < 0) break;
-    const { leaf, set } = leaves[bi];
-    const s = leaf.split!;
-    const lNode: { leaf: true; val: number } = { leaf: true, val: leafWeight(s.L, gr, lambda) };
-    const rNode: { leaf: true; val: number } = { leaf: true, val: leafWeight(s.R, gr, lambda) };
-    const branch: TNode = { leaf: false, feat: s.feat, thr: s.thr, left: lNode, right: rNode };
-    set(branch);
-    leaves.splice(bi, 1);
-    leaves.push({ leaf: makeLeaf(s.L), set: (n) => { branch.left = n; } });
-    leaves.push({ leaf: makeLeaf(s.R), set: (n) => { branch.right = n; } });
-  }
-  return rootRef;
-};
-
-// CatBoost — symmetric / oblivious: pick ONE (feature, threshold) per level and
-// apply the same test to every node on that level. Balanced, regularised trees.
-const buildSymmetric = (pts: GPt[], root: number[], gr: Grad[], maxDepth: number, lambda: number, gamma: number, minLeaf: number): TNode => {
-  let groups: number[][] = [root];
-  const tests: { feat: 0 | 1; thr: number }[] = [];
-  for (let d = 0; d < maxDepth; d++) {
-    // Choose the single split that maximises summed gain across all groups.
-    let best: { feat: 0 | 1; thr: number; gain: number } | null = null;
-    const cand = new Set<string>();
-    for (const feat of [0, 1] as const) {
-      const vals = [...new Set(root.map((i) => featVal(pts[i], feat)))].sort((a, b) => a - b);
-      for (let v = 0; v < vals.length - 1; v++) cand.add(`${feat}:${(vals[v] + vals[v + 1]) / 2}`);
-    }
-    cand.forEach((c) => {
-      const [fs, ts] = c.split(':'); const feat = +fs as 0 | 1; const thr = +ts;
-      let total = 0, ok = false;
-      for (const grp of groups) {
-        const L: number[] = [], R: number[] = [];
-        for (const i of grp) (featVal(pts[i], feat) <= thr ? L : R).push(i);
-        if (L.length >= minLeaf && R.length >= minLeaf) { total += splitGain(L, R, gr, lambda, gamma); ok = true; }
-      }
-      if (ok && (!best || total > best.gain)) best = { feat, thr, gain: total };
-    });
-    if (!best || best.gain <= 0) break;
-    tests.push({ feat: best.feat, thr: best.thr });
-    groups = groups.flatMap((grp) => {
-      const L: number[] = [], R: number[] = [];
-      for (const i of grp) (featVal(pts[i], best!.feat) <= best!.thr ? L : R).push(i);
-      return [L, R];
-    });
-  }
-  // Materialise the oblivious tree from the per-level tests.
-  const build = (idx: number[], level: number): TNode => {
-    if (level >= tests.length) return { leaf: true, val: leafWeight(idx, gr, lambda) };
-    const { feat, thr } = tests[level];
-    const L: number[] = [], R: number[] = [];
-    for (const i of idx) (featVal(pts[i], feat) <= thr ? L : R).push(i);
-    return { leaf: false, feat, thr, left: build(L, level + 1), right: build(R, level + 1) };
+function layoutBoostTree(root: BNode, isLight: boolean) {
+  const raw: { id: string; depth: number; node: BNode; x: number }[] = [];
+  const edges: GEdge[] = []; let leaf = 0, maxD = 0, idc = 0;
+  const rec = (node: BNode, depth: number, parent: string | null): { id: string; x: number } => {
+    const id = 'b' + (idc++); maxD = Math.max(maxD, depth);
+    let x: number;
+    if (node.leaf) { x = leaf++; } else { const l = rec(node.left, depth + 1, id), r = rec(node.right, depth + 1, id); x = (l.x + r.x) / 2; }
+    raw.push({ id, depth, node, x });
+    if (parent) edges.push({ from: parent, to: id });
+    return { id, x };
   };
-  return build(root, 0);
-};
-
-const buildTree = (variant: Variant, pts: GPt[], gr: Grad[], maxDepth: number, numLeaves: number, lambda: number, gamma: number, minLeaf: number): TNode => {
-  const idx = pts.map((_, i) => i);
-  if (variant === 'xgboost') return buildLevelWise(pts, idx, gr, 0, maxDepth, lambda, gamma, minLeaf);
-  if (variant === 'lightgbm') return buildLeafWise(pts, idx, gr, numLeaves, lambda, gamma, minLeaf);
-  return buildSymmetric(pts, idx, gr, maxDepth, lambda, gamma, minLeaf);
-};
-
-const sigmoid = (z: number) => 1 / (1 + Math.exp(-z));
-const MAX_ROUNDS = 40;
+  rec(root, 0, null);
+  const lc = Math.max(1, leaf);
+  const nodes: GNode[] = raw.map((m) => ({
+    id: m.id,
+    x: lc <= 1 ? 0.5 : m.x / (lc - 1),
+    y: maxD === 0 ? 0.5 : m.depth / maxD,
+    label: m.node.leaf ? (m.node.val >= 0 ? '+' : '−') + Math.abs(m.node.val).toFixed(1) : (m.node.feat === 0 ? 'x₁' : 'x₂') + '≤' + m.node.thr.toFixed(2),
+    sub: m.node.leaf ? `n=${m.node.n}` : undefined,
+    color: m.node.leaf ? CLASS_COLORS[m.node.val >= 0 ? 1 : 0] : (isLight ? '#e2e8f2' : '#2a3350'),
+  }));
+  return { nodes, edges };
+}
 
 const GradientBoostingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [perCluster, setPerCluster] = useState(24);
+  const [noise, setNoise] = useState(0.1);
+  const [seed, setSeed] = useState(1);
   const [variant, setVariant] = useState<Variant>('xgboost');
-  const [lr, setLr] = useState(0.3);           // shrinkage / learning rate
+  const [lr, setLr] = useState(0.3);
   const [maxDepth, setMaxDepth] = useState(3);
   const [numLeaves, setNumLeaves] = useState(8);
-  const [lambda, setLambda] = useState(1);     // L2 leaf regularisation
-  const [data, setData] = useState<GPt[]>(() => makeData(24));
-  const [trees, setTrees] = useState<TNode[]>([]);
+  const [maxBin, setMaxBin] = useState(255);
+  const [lambda, setLambda] = useState(1);
+  const [catMode, setCatMode] = useState<CatMode>('ordered');
+  const [activePreset, setActivePreset] = useState<string | null>('xgb');
   const [lossSeries, setLossSeries] = useState<number[]>([]);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
-  const [version, setVersion] = useState(0);
 
-  const gamma = 0; // min split gain — kept at 0 here; lambda is the visible knob
-  const minLeaf = 1;
+  const toPts = (d: ReturnType<typeof makeXorData>): GPt[] => d.map((p) => ({ x: p.x, y: p.y, y01: p.cls }));
+  const data = useMemo(() => toPts(makeXorData([perCluster, perCluster, perCluster, perCluster], GBM_STD, seed, noise)), [perCluster, seed, noise]);
+  const test = useMemo(() => toPts(makeXorData([perCluster, perCluster, perCluster, perCluster], GBM_STD, seed + TEST_SEED_OFFSET, 0)), [perCluster, seed]);
+  const cfg: BoostCfg = useMemo(() => ({ variant, lr, maxDepth, numLeaves, maxBin, lambda, gamma: 0, minLeaf: 1, catMode, permSeed: seed }), [variant, lr, maxDepth, numLeaves, maxBin, lambda, catMode, seed]);
+  const fresh = useMemo(() => initBoost(data, cfg), [data, cfg]);
+  const [boost, setBoost] = useState<{ st: BoostState; key: BoostState } | null>(null);
+  // The boosting state belongs to one (data, cfg) pair; anything else is stale.
+  const st = boost && boost.key === fresh ? boost.st : fresh;
 
-  // Ensemble raw score F(x,y) = lr · Σ_t treeₜ(x,y).
-  const scoreAt = (x: number, y: number) => lr * trees.reduce((s, t) => s + predict(t, x, y), 0);
-  const metrics = useMemo(() => {
-    if (!data.length) return { loss: 0.6931, acc: 0 };
-    let loss = 0, ok = 0;
-    for (const p of data) {
-      const F = lr * trees.reduce((s, t) => s + predict(t, p.x, p.y), 0);
-      const prob = sigmoid(F);
-      loss += -(p.y01 * Math.log(prob + 1e-9) + (1 - p.y01) * Math.log(1 - prob + 1e-9));
-      if ((prob >= 0.5 ? 1 : 0) === p.y01) ok++;
-    }
-    return { loss: loss / data.length, acc: ok / data.length };
-  }, [trees, data, lr]);
+  const train = useMemo(() => lossAcc(st.F, data), [st, data]);
+  const testM = useMemo(() => lossAcc(test.map((p) => scoreAt(st.trees, lr, p.x, p.y)), test), [st, test, lr]);
+  const ordM = useMemo(() => (st.perm ? lossAcc(orderedScores(st, data.length), data) : null), [st, data]);
+  const newest = st.trees[st.trees.length - 1];
+  const shape = newest ? treeShape(newest) : null;
+
+  const describeTree = (t: BNode): string => {
+    const tests: string[] = [];
+    const walk = (n: BNode, d: number) => { if (n.leaf) return; tests.push(`${'  '.repeat(d)}${n.feat === 0 ? 'x₁' : 'x₂'}≤${n.thr.toFixed(3)}`); walk(n.left, d + 1); walk(n.right, d + 1); };
+    walk(t, 0);
+    return tests.slice(0, 3).map((s) => s.trim()).join(', ') + (tests.length > 3 ? ', …' : '');
+  };
 
   const step = () => {
-    if (trees.length >= MAX_ROUNDS) { sim.pause(); return; }
-    // Newton boosting: gradient g = p − y, hessian h = p(1−p) of logistic loss.
-    const gr: Grad[] = data.map((p) => {
-      const prob = sigmoid(lr * trees.reduce((s, t) => s + predict(t, p.x, p.y), 0));
-      return { g: prob - p.y01, h: Math.max(1e-6, prob * (1 - prob)) };
-    });
-    const tree = buildTree(variant, data, gr, maxDepth, numLeaves, lambda, gamma, minLeaf);
-    const next = [...trees, tree];
-    setTrees(next);
-
-    let loss = 0, ok = 0;
-    for (const p of data) {
-      const F = lr * next.reduce((s, t) => s + predict(t, p.x, p.y), 0);
-      const prob = sigmoid(F);
-      loss += -(p.y01 * Math.log(prob + 1e-9) + (1 - p.y01) * Math.log(1 - prob + 1e-9));
-      if ((prob >= 0.5 ? 1 : 0) === p.y01) ok++;
-    }
-    loss /= data.length; const acc = ok / data.length;
-    setLossSeries((s) => [...s, loss].slice(-60));
+    if (st.trees.length >= GBM_ROUNDS) { sim.pause(); return; }
+    const next = boostRound(st, data, cfg);
+    setBoost({ st: next, key: fresh });
+    const tr = lossAcc(next.F, data);
+    const te = lossAcc(test.map((p) => scoreAt(next.trees, lr, p.x, p.y)), test);
+    const od = next.perm ? lossAcc(orderedScores(next, data.length), data) : null;
+    setLossSeries((s) => [...s, tr.loss].slice(-60));
+    if (next.trees.length >= GBM_ROUNDS) sim.pause();
+    const t = next.trees[next.trees.length - 1]!;
+    const sh = treeShape(t);
 
     const growth = variant === 'xgboost'
-      ? `level-wise, splitting every node down to depth ${maxDepth}`
+      ? `level-wise: every node that still gains is split, down to depth ${maxDepth}`
       : variant === 'lightgbm'
-        ? `leaf-wise, repeatedly splitting the single highest-gain leaf up to ${numLeaves} leaves`
-        : `symmetric, applying one shared split test per level down to depth ${maxDepth}`;
+        ? `leaf-wise: the single highest-gain leaf is split next, up to ${numLeaves} leaves, ${maxBin >= data.length ? `with exact thresholds (max_bin ${maxBin} ≥ the ${data.length} points)` : `with thresholds restricted to the edges of ≤ ${maxBin} histogram bins per feature`}`
+        : `symmetric: one shared test per level down to depth ${maxDepth}${catMode === 'ordered' ? ', with the tree structure chosen from ordered gradients' : ''}`;
     narration.narratePhase(
-      `run:${variant}`,
-      `The challenge here: classify these four XOR-style clusters, which no single tree can separate, by stacking many shallow trees. Gradient boosting solves it by fitting each new tree to the errors of the ones before it — using the gradient and curvature of the loss to compute Newton leaf weights, w star equals minus sum of gradients over sum of hessians plus lambda. ${VARIANT_LABEL[variant]} grows its trees ${growth}, then adds them shrunk by the learning rate. Watch the boundary sharpen tree by tree as the training loss falls. Gradient boosting like this wins most tabular machine-learning competitions and powers ranking, fraud detection, credit scoring and forecasting in industry.`
+      `run:${variant}:${catMode}`,
+      `The challenge here: classify four X O R clusters by adding many small trees, each one correcting the ones before it. Gradient boosting fits every new tree to the gradient and curvature of the logistic loss, g equals p minus y and h equals p times one minus p, and gives each leaf the Newton weight minus the sum of g over the sum of h plus lambda. ${VARIANT_LABEL[variant]} grows its trees ${growth}. A single deep tree could carve this X O R on its own; boosting instead builds the boundary out of shallow corrections, shrunk by the learning rate. Note the very first split: on balanced X O R the centre line has zero gain, so round one starts with an edge cut and later trees fix it. Gradient boosting dominates tabular problems like ranking, fraud detection and credit scoring.`,
     );
-    if (acc >= 0.99) {
+    if (variant === 'catboost' && catMode === 'ordered') {
       narration.narratePhase(
-        `done:${variant}`,
-        `${VARIANT_LABEL[variant]} now classifies every training point, with the loss driven low after ${next.length} trees. Each tree was weak on its own, but boosting their corrections together solved a pattern no single shallow tree could. A smaller learning rate with more trees usually generalises better than a few aggressive ones.`
+        'ordered:catboost',
+        `Ordered boosting: the points are shuffled once, and each point's gradient comes from a supporting model trained only on the points before it in that order, so its own label never leaks into the gradient used to choose the tree. The ordered loss shown is exactly that honest, out-of-sample loss, which is why it stays above the training loss.`,
+      );
+    }
+    if (next.trees.length >= GBM_ROUNDS) {
+      narration.narratePhase(
+        `done:${variant}:${catMode}`,
+        `${next.trees.length} trees built. Training accuracy is ${Math.round(tr.acc * 100)} percent and held-out test accuracy ${Math.round(te.acc * 100)} percent.${tr.acc - te.acc > 0.03 ? ' The gap means the later trees are fitting the flipped training labels, so a smaller learning rate, stronger lambda or smaller trees would generalise better.' : ''}`,
       );
     }
 
     setLastLog({
-      algorithm: `Gradient Boosting · ${VARIANT_LABEL[variant]}`,
-      stepDescription: `Round ${next.length}: fit a tree to the negative gradient, add it with shrinkage ${lr}`,
-      formula: 'w* = −Σg / (Σh + λ)   ·   F ← F + η·tree',
-      variables: { 'round': next.length, 'η': lr, 'λ': lambda, 'loss': +loss.toFixed(4), 'acc': acc },
-      result: `loss ${loss.toFixed(3)} · acc ${(acc * 100).toFixed(0)}%`,
+      algorithm: `Gradient Boosting · ${VARIANT_LABEL[variant]}${variant === 'catboost' ? ` (${catMode})` : ''}`,
+      stepDescription: `Round ${next.trees.length}: fit a ${sh.leaves}-leaf, depth-${sh.depth} tree to (g, h) and add η·tree`,
+      formula: 'g = p − y, h = p(1−p)  ·  w* = −ΣG/(ΣH+λ)  ·  gain = ½[G_L²/(H_L+λ) + G_R²/(H_R+λ) − G²/(H+λ)]  ·  F ← F + η·tree',
+      variables: {
+        'round': next.trees.length, 'η': lr, 'λ': lambda,
+        'tree depth': sh.depth, 'leaves': sh.leaves,
+        'splits': describeTree(t) || 'none (single leaf)',
+        'train loss': +tr.loss.toFixed(4), 'train acc': +tr.acc.toFixed(3), 'test acc': +te.acc.toFixed(3),
+        ...(od ? { 'ordered loss': +od.loss.toFixed(4) } : {}),
+      },
+      result: `loss ${tr.loss.toFixed(3)} · train ${(tr.acc * 100).toFixed(0)}% · test ${(te.acc * 100).toFixed(0)}%`,
       mathDetails: {
         params: [
           { label: VARIANT_LABEL[variant], info: growth + '.' },
-          { label: 'gradient/hessian', info: 'Logistic loss: g = p − y, h = p(1−p). Trees fit −g; leaves use the Newton step w* = −Σg/(Σh+λ).' },
-          { label: 'shrinkage η', info: `${lr}. Each tree is scaled by the learning rate before being added — smaller η needs more trees but generalises better.` },
-          { label: 'λ (L2)', info: `${lambda}. Regularises leaf weights, shrinking them toward zero and damping noisy splits.` },
+          { label: 'gradient / hessian', info: 'Logistic loss on the raw score F: g = p − y, h = p(1 − p) with p = σ(F). The ensemble starts at F = 0 (p = 0.5).' },
+          { label: 'shrinkage η', info: `${lr}. Each tree is scaled by η before being added; smaller η needs more trees but usually generalises better.` },
+          { label: 'λ (L2)', info: `${lambda}. Added to ΣH in every leaf weight and gain; shrinks leaf weights toward 0. An empty leaf gets weight 0.` },
+          ...(variant === 'lightgbm' ? [{ label: 'max_bin', info: `${maxBin}. Each feature is cut once into ≤ ${maxBin} equal-frequency bins; split thresholds can only be bin edges${st.bins ? ` (${st.bins[0].length} + ${st.bins[1].length} candidate cuts here)` : ''}.` }] : []),
+          ...(variant === 'catboost' ? [{ label: 'ordered boosting', info: catMode === 'ordered' ? 'A seeded permutation σ orders the points; point σ(k) gets its gradient from a supporting model trained only on σ(0..k−1). Those ordered gradients choose the tree structure; each supporting model is refit on its own prefix; the final leaf values use all points.' : 'Plain mode: the structure is chosen from ordinary gradients, which already contain each point’s own label (prediction shift).' }] : []),
         ],
-        implication: acc >= 0.99 ? 'Training data fully fit — lower η / fewer trees to avoid overfitting.' : 'Residual errors remain — the next tree will target the points still misclassified.',
+        implication: te.acc < tr.acc - 0.03 ? 'Train accuracy is above test accuracy — the ensemble is starting to fit label noise.' : 'Train and test agree — the trees are capturing the XOR structure.',
       },
     });
   };
 
   const sim = useSimLoop(step, { initialSpeed: 400 });
-  const regen = (n = perCluster) => { sim.stop(); narration.cancel(); setData(makeData(n)); setTrees([]); setLossSeries([]); setLastLog(null); setVersion((v) => v + 1); };
-  const reset = () => { sim.stop(); narration.cancel(); setTrees([]); setLossSeries([]); setLastLog(null); };
-  const pickVariant = (v: Variant) => { setVariant(v); reset(); };
+  const stopAll = () => { sim.stop(); narration.cancel(); };
+  const reset = () => { stopAll(); setBoost(null); setLossSeries([]); setLastLog(null); };
+  const custom = () => setActivePreset(null);
+  const change = (fn: () => void) => { stopAll(); fn(); custom(); setBoost(null); setLossSeries([]); setLastLog(null); };
+  const applyPreset = (p: Preset) => {
+    stopAll();
+    setVariant(p.variant); setLr(p.lr); setMaxDepth(p.maxDepth); setNumLeaves(p.numLeaves); setMaxBin(p.maxBin);
+    setLambda(p.lambda); setCatMode(p.catMode); setNoise(p.noise);
+    setActivePreset(p.id); setBoost(null); setLossSeries([]); setLastLog(null);
+  };
 
-  const fieldKey = `${variant}-${trees.length}-${lr}-${maxDepth}-${numLeaves}-${lambda}-${version}`;
+  const fieldKey = `${variant}-${st.trees.length}-${lr}-${maxDepth}-${numLeaves}-${maxBin}-${lambda}-${catMode}-${seed}-${perCluster}-${noise}`;
   const plotPoints: ScatterPoint[] = data.map((p) => ({ x: p.x, y: p.y, cls: p.y01 }));
+  // Bin edges are drawn for coarse histograms only (at 32+ bins they would fill the plot).
+  const binLines: ScatterLine[] = variant === 'lightgbm' && st.bins && maxBin <= 16
+    ? [...st.bins[0].map((e) => ({ x1: e, y1: 0, x2: e, y2: 1, dash: true, width: 1, color: isLight ? 'rgba(30,40,70,.45)' : 'rgba(230,236,255,.4)' })),
+      ...st.bins[1].map((e) => ({ x1: 0, y1: e, x2: 1, y2: e, dash: true, width: 1, color: isLight ? 'rgba(30,40,70,.45)' : 'rgba(230,236,255,.4)' }))]
+    : [];
+  const { nodes, edges } = useMemo(() => (newest ? layoutBoostTree(newest, isLight) : { nodes: [] as GNode[], edges: [] as GEdge[] }), [newest, isLight]);
+  const tip = PRESETS.find((p) => p.id === activePreset)?.tip;
+  const binIdx = Math.max(0, BIN_STOPS.indexOf(maxBin));
 
   return (
     <LabStage
       descriptor={descriptor}
       running={sim.isPlaying}
       stats={[
-        { label: 'TREES', value: trees.length },
-        { label: 'LOSS', value: metrics.loss.toFixed(3) },
-        { label: 'ACC', value: `${(metrics.acc * 100).toFixed(0)}%`, color: GOOD },
+        { label: 'TREES', value: `${st.trees.length}/${GBM_ROUNDS}` },
+        { label: 'LOSS', value: train.loss.toFixed(3) },
+        { label: 'TRAIN', value: `${(train.acc * 100).toFixed(0)}%`, color: GOOD },
+        { label: 'TEST', value: `${(testM.acc * 100).toFixed(0)}%`, color: GOOD },
+        ...(ordM ? [{ label: 'ORD LOSS', value: ordM.loss.toFixed(3), color: ACCENT }] : []),
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, gradientBoostingPython(variant, lr, maxDepth, numLeaves, lambda))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, gradientBoostingPython({ data, test, cfg, rounds: GBM_ROUNDS, noise, seed }))}
       grid={(
-        <ScatterPlot
-          width={440} height={440}
-          points={plotPoints}
-          classify={(x, y) => (scoreAt(x, y) >= 0 ? 1 : 0)}
-          fieldKey={fieldKey}
-          xLabel="x₁" yLabel="x₂"
-        />
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <ScatterPlot
+            width={420} height={420}
+            points={plotPoints}
+            classify={(x, y) => (st.trees.length ? (scoreAt(st.trees, lr, x, y) >= 0 ? 1 : 0) : -1)}
+            fieldKey={fieldKey} fieldResolution={64} lines={binLines}
+            xLabel="x₁" yLabel="x₂"
+          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <MonoLabel style={{ fontSize: 9 }}>{newest && shape ? `Newest tree #${st.trees.length} · depth ${shape.depth} · ${shape.leaves} leaves · leaf = Newton weight w*` : 'Newest tree appears here after the first round'}</MonoLabel>
+            <GraphCanvas width={420} height={330} radius={14} nodes={nodes} edges={edges} />
+          </div>
+        </div>
       )}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={() => regen()} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={() => change(() => setSeed((s) => s + 1))} speed={sim.speed} onSpeed={sim.setSpeed} />}
       narration={narration}
       rewardLabel="TRAINING LOSS"
-      rewardValue={metrics.loss.toFixed(3)}
+      rewardValue={train.loss.toFixed(3)}
       rewardSeries={lossSeries}
       lastLog={lastLog}
-      contextInsight={`${VARIANT_LABEL[variant]} gradient boosting. Each Run adds one shallow tree fit to the negative gradient of the logistic loss; the trees stack into the decision field on the left, and the boundary sharpens as the loss falls. The three variants share this engine but grow each tree differently — level-wise (XGBoost), leaf-wise (LightGBM) or symmetric (CatBoost).`}
+      contextInsight={`${VARIANT_LABEL[variant]} gradient boosting on a balanced XOR with ${Math.round(noise * 100)}% of training labels flipped. Each Run adds one tree fit to the logistic-loss gradients (up to ${GBM_ROUNDS}); the field on the left is the sign of F = η·Σ trees, and the newest tree is drawn on the right (splits at the nodes, Newton leaf weights at the leaves). TEST is accuracy on clean held-out points.${variant === 'catboost' && catMode === 'ordered' ? ' ORD LOSS is the loss of each point under the supporting model that never saw its label.' : ''}`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Gradient Boosting" hint="Run adds one boosted tree per step." />
@@ -277,26 +224,53 @@ const GradientBoostingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
             <MonoLabel style={{ marginBottom: 9 }}>Framework / tree growth</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
               {(['xgboost', 'lightgbm', 'catboost'] as Variant[]).map((v) => (
-                <AlgoPill key={v} active={variant === v} accent={ACCENT} onClick={() => pickVariant(v)}>{VARIANT_LABEL[v]}</AlgoPill>
+                <AlgoPill key={v} active={variant === v} accent={ACCENT} onClick={() => change(() => setVariant(v))}>{VARIANT_LABEL[v]}</AlgoPill>
               ))}
             </div>
             <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '8px 0 0', lineHeight: 1.5 }}>
-              {variant === 'xgboost' ? 'Level-wise: split every node down to max depth — balanced, regularised trees.'
-                : variant === 'lightgbm' ? 'Leaf-wise: always split the highest-gain leaf — deep, fast, accurate, can overfit.'
-                  : 'Symmetric (oblivious): one shared split per level — balanced, fast to score, robust.'}
+              {variant === 'xgboost' ? 'Level-wise: split every node that gains, down to max depth — balanced trees.'
+                : variant === 'lightgbm' ? 'Leaf-wise: always split the highest-gain leaf (deep, lopsided trees) + histogram bins that limit where cuts may go.'
+                  : 'Symmetric (oblivious): one shared test per level, 2^depth leaves; ordered boosting picks the structure from leak-free gradients.'}
             </p>
           </div>
-          <ParamSlider name="Learning rate η" value={lr.toFixed(2)} min={0.05} max={1} step={0.05} current={lr} onChange={(v) => { reset(); setLr(v); }} hint="shrinkage per tree" />
+          {variant === 'catboost' && (
+            <div>
+              <MonoLabel style={{ marginBottom: 9 }}>Boosting type</MonoLabel>
+              <div style={{ display: 'flex', gap: 7 }}>
+                <AlgoPill active={catMode === 'ordered'} accent={ACCENT} onClick={() => change(() => setCatMode('ordered'))}>Ordered</AlgoPill>
+                <AlgoPill active={catMode === 'plain'} accent={ACCENT} onClick={() => change(() => setCatMode('plain'))}>Plain</AlgoPill>
+              </div>
+            </div>
+          )}
+          <ParamSlider name="Learning rate η" value={lr.toFixed(2)} min={0.05} max={1} step={0.05} current={lr} onChange={(v) => change(() => setLr(v))} hint="shrinkage per tree" />
           {variant === 'lightgbm'
-            ? <ParamSlider name="Num leaves" value={String(numLeaves)} min={2} max={32} step={1} current={numLeaves} onChange={(v) => { reset(); setNumLeaves(v); }} hint="leaf-wise growth budget" />
-            : <ParamSlider name="Max depth" value={String(maxDepth)} min={1} max={6} step={1} current={maxDepth} onChange={(v) => { reset(); setMaxDepth(v); }} hint="per-tree depth" />}
-          <ParamSlider name="L2 reg λ" value={lambda.toFixed(1)} min={0} max={10} step={0.5} current={lambda} onChange={(v) => { reset(); setLambda(v); }} hint="leaf-weight regularisation" />
-          <ParamSlider name="Points / cluster" value={String(perCluster)} min={12} max={40} step={2} current={perCluster} onChange={(v) => { setPerCluster(v); regen(v); }} hint="dataset size" />
+            ? <ParamSlider name="Num leaves" value={String(numLeaves)} min={2} max={32} step={1} current={numLeaves} onChange={(v) => change(() => setNumLeaves(v))} hint="leaf-wise growth budget" />
+            : <ParamSlider name="Max depth" value={String(maxDepth)} min={1} max={6} step={1} current={maxDepth} onChange={(v) => change(() => setMaxDepth(v))} hint={variant === 'catboost' ? 'levels (2^depth leaves)' : 'per-tree depth'} />}
+          {variant === 'lightgbm' && (
+            <ParamSlider name="max_bin" value={String(maxBin)} min={0} max={BIN_STOPS.length - 1} step={1} current={binIdx} onChange={(v) => change(() => setMaxBin(BIN_STOPS[v] ?? 255))} hint={maxBin >= 255 ? '255 ≥ distinct values → exact thresholds' : `equal-frequency bins per feature${maxBin <= 16 ? ' (dashed edges)' : ''}`} />
+          )}
+          <ParamSlider name="L2 reg λ" value={lambda.toFixed(1)} min={0} max={10} step={0.5} current={lambda} onChange={(v) => change(() => setLambda(v))} hint="leaf-weight regularisation" />
+          <ParamSlider name="Label noise" value={`${Math.round(noise * 100)}%`} min={0} max={0.3} step={0.05} current={noise} onChange={(v) => change(() => setNoise(v))} hint="training labels flipped (test stays clean)" />
+          <ParamSlider name="Points / cluster" value={String(perCluster)} min={12} max={40} step={2} current={perCluster} onChange={(v) => change(() => setPerCluster(v))} hint="dataset size" />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={150} max={1000} step={50} current={sim.speed} onChange={sim.setSpeed} hint="boosting interval" />
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Presets · try this</MonoLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              {PRESETS.map((p) => (
+                <AlgoPill key={p.id} active={activePreset === p.id} accent={ACCENT} onClick={() => applyPreset(p)}>{p.name}</AlgoPill>
+              ))}
+            </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', margin: '8px 0 0', lineHeight: 1.5 }}>
+              {tip ?? 'Custom settings — press Run to add trees one round at a time.'}
+            </p>
+          </div>
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: `Gradient Boosting (${VARIANT_LABEL[variant]})`, learningRate: lr, maxDepth, numLeaves, lambda, trees: trees.length, trainLoss: +metrics.loss.toFixed(4), trainAcc: +metrics.acc.toFixed(3) }}
+      currentParams={{
+        algorithm: `Gradient Boosting (${VARIANT_LABEL[variant]}${variant === 'catboost' ? ', ' + catMode : ''})`, learningRate: lr, maxDepth, numLeaves, maxBin, lambda, labelNoise: noise,
+        trees: st.trees.length, trainLoss: +train.loss.toFixed(4), trainAcc: +train.acc.toFixed(3), testAcc: +testM.acc.toFixed(3), orderedLoss: ordM ? +ordM.loss.toFixed(4) : undefined,
+      }}
       apiPanel={apiPanel}
     />
   );

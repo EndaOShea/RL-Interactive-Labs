@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
@@ -9,128 +9,167 @@ import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
 import {
-  Algo, ALGO_LABEL, GridHeuristic, HEURISTIC_LABEL, SearchState, initSearch, stepSearch,
-  gridNeighbors, gridHeuristic, randomWalls,
-  BiSearchState, initBiSearch, stepBiSearch,
+  Algo, ALGO_LABEL, GridHeuristic, HEURISTIC_LABEL, SearchState, initSearch, stepSearch, runSearch,
+  gridNeighbors, gridHeuristic, heuristicQuality, BiSearchState, initBiSearch, stepBiSearch,
 } from './shared';
-import { PATH_PRESETS } from './presets';
+import {
+  PATH_PRESETS, MapSpec, buildMap, mapLabel, GRID_COLS as COLS, GRID_ROWS as ROWS, GRID_START as START, GRID_GOAL as GOAL,
+  DFS_ORDER_SEED, NEW_MAP_DENSITY,
+} from './presets';
 import { pathfindingPython } from './python';
 
-const COLS = 20, ROWS = 13;
-const START = 6 * COLS + 2;
-const GOAL = 6 * COLS + 17;
 const ACCENT = '#38bdf8';
+const BACK = '#a78bfa';
+const fmtCost = (c: number) => (Number.isInteger(c) ? String(c) : c.toFixed(2));
 
 const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const narration = useNarration();
-  const [algo, setAlgo] = useState<Algo>('astar');
-  const [heuristic, setHeuristic] = useState<GridHeuristic>('manhattan');
-  const [diagonal, setDiagonal] = useState(false);
+  const first = PATH_PRESETS[0]!;
+  const [algo, setAlgo] = useState<Algo>(first.algo);
+  const [heuristic, setHeuristic] = useState<GridHeuristic>(first.heuristic);
+  const [diagonal, setDiagonal] = useState(first.diagonal);
   const [weight, setWeight] = useState(1.5);
   const [showG, setShowG] = useState(false);
-  const [walls, setWalls] = useState<Set<number>>(() => randomWalls(COLS, ROWS, 0.22, [START, GOAL]));
+  const [mapSpec, setMapSpec] = useState<MapSpec>(first.map);
+  const [edited, setEdited] = useState(false);
+  const [walls, setWalls] = useState<Set<number>>(() => buildMap(first.map));
   const [search, setSearch] = useState<SearchState<number>>(() => initSearch(START));
   const [bi, setBi] = useState<BiSearchState<number>>(() => initBiSearch(START, GOAL));
   const [frontierSeries, setFrontierSeries] = useState<number[]>([]);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
-  const [activePreset, setActivePreset] = useState<string>('astar-classic');
+  const [activePreset, setActivePreset] = useState<string | null>(first.id);
 
   const isBi = algo === 'bidir';
-  const neighbors = (n: number) => gridNeighbors(n, COLS, ROWS, walls, diagonal);
-  const cfg = {
-    algo, goal: GOAL, weight,
-    neighbors,
-    heuristic: (n: number) => gridHeuristic(n, GOAL, COLS, heuristic),
+  const neighbors = (n: number) => gridNeighbors(n, COLS, ROWS, walls, diagonal, algo === 'dfs' ? DFS_ORDER_SEED : undefined);
+  const hFn = (n: number) => gridHeuristic(n, GOAL, COLS, heuristic);
+  const cfg = { algo, goal: GOAL, weight, neighbors, heuristic: hFn };
+  const hq = heuristicQuality(heuristic, diagonal);
+  const usesH = algo === 'greedy' || algo === 'astar' || algo === 'wastar';
+
+  // Ground truth on this map: the optimal cost and how many cells a plain Dijkstra settles.
+  const reference = useMemo(() => {
+    const d = runSearch(START, { algo: 'dijkstra', goal: GOAL, neighbors: (n: number) => gridNeighbors(n, COLS, ROWS, walls, diagonal), heuristic: () => 0 });
+    return { opt: d.status === 'done' ? (d.g.get(GOAL) ?? NaN) : NaN, dijkstra: d.expansions };
+  }, [walls, diagonal]);
+
+  const pathCost = (p: number[]) => {
+    let c = 0;
+    for (let k = 0; k + 1 < p.length; k++) c += (gridNeighbors(p[k]!, COLS, ROWS, walls, diagonal).find(([m]) => m === p[k + 1])?.[1] ?? NaN);
+    return c;
   };
 
-  const heuristicNote = (a: Algo) =>
-    a === 'bfs' || a === 'dfs' || a === 'dijkstra'
-      ? 'Unused by this algorithm (no goal heuristic).'
-      : `${HEURISTIC_LABEL[heuristic]} estimate of remaining distance to the goal.`;
+  const hText = hq.consistent
+    ? `${HEURISTIC_LABEL[heuristic]} is consistent for ${diagonal ? '8' : '4'}-dir moves (it never drops by more than a step costs), hence admissible`
+    : 'Manhattan counts a √2 diagonal step as 2, so with diagonals it overestimates (by up to √2×): inadmissible and inconsistent';
+  const guarantee = (a: Algo): string => {
+    switch (a) {
+      case 'astar': return hq.consistent ? 'Consistent h + a closed list: A* returns an optimal path.' : 'Inadmissible h: A* is no longer guaranteed to return the cheapest path.';
+      case 'wastar': return hq.consistent ? `Consistent h: the path costs at most ε = ${weight.toFixed(1)}× the optimum.` : 'Inadmissible, inconsistent h and no re-opening of closed cells: no cost bound is guaranteed.';
+      case 'greedy': return 'Greedy ignores the cost already paid: fast, but no optimality guarantee.';
+      case 'dijkstra': return 'Expands in order of g: with non-negative step costs the first time G is popped its cost is optimal.';
+      case 'bfs': return diagonal ? 'BFS minimises the number of moves; with √2 diagonals that is not always the cheapest path.' : 'With unit step costs, fewest moves = cheapest: BFS is optimal here.';
+      case 'dfs': return 'DFS returns the first path its dive finds — no optimality guarantee.';
+      default: return 'Stops once topF + topB ≥ μ, so the best meeting μ is the optimal cost.';
+    }
+  };
 
-  const buildLog = (s: SearchState<number>): SimulationUpdate => ({
-    algorithm: `${ALGO_LABEL[algo]} · Graph Search`,
-    stepDescription: s.status === 'done' ? 'Goal reached — path reconstructed' : s.status === 'nopath' ? 'Frontier empty — no path exists' : 'Expand the chosen frontier node',
-    formula: algo === 'astar' ? 'f(n) = g(n) + h(n)'
-      : algo === 'wastar' ? `f(n) = g(n) + ${weight.toFixed(1)}·h(n)`
-      : algo === 'dijkstra' ? 'expand min g(n)' : algo === 'greedy' ? 'expand min h(n)'
-      : algo === 'bfs' ? 'expand oldest (FIFO queue)' : 'expand newest (LIFO stack)',
-    variables: { 'g': s.lastG, 'h': s.lastH, 'f': algo === 'wastar' ? s.lastG + weight * s.lastH : s.lastF, 'expanded': s.expansions, 'frontier': s.open.length },
-    result: s.status === 'done' ? `cost ${(s.g.get(GOAL) ?? 0).toFixed(1)} · ${s.path.length - 1} steps` : s.status === 'nopath' ? 'no path' : `expanded ${s.expansions}`,
-    mathDetails: {
-      params: [
-        { label: 'g(n)', info: `${s.lastG.toFixed(2)}. Cost of the path from start to the current node.` },
-        { label: 'h(n)', info: algo === 'bfs' || algo === 'dfs' || algo === 'dijkstra' ? heuristicNote(algo) : `${s.lastH.toFixed(2)}. ${heuristicNote(algo)}` },
-        { label: algo === 'wastar' ? 'weight ε' : 'frontier', info: algo === 'wastar' ? `${weight.toFixed(1)}. h is inflated by this factor — fewer expansions, path ≤ ε× optimal cost.` : `${s.open.length}. Cells discovered but not yet expanded — the open set.` },
-      ],
-      implication: algo === 'astar' ? 'A* balances cost-so-far and estimate — optimal with an admissible h.'
-        : algo === 'wastar' ? 'Weighted A* over-trusts h, so it commits toward the goal early: far fewer expansions, bounded-suboptimal (≤ ε× optimal).'
-        : algo === 'greedy' ? 'Greedy rushes toward the goal by h alone — fast but not guaranteed shortest.'
-        : algo === 'dijkstra' ? 'Dijkstra ignores the goal direction — optimal but explores widely.'
-        : algo === 'bfs' ? 'BFS finds the fewest-step path on an unweighted grid.' : 'DFS dives deep first — low memory, rarely the shortest path.',
-    },
-  });
+  const buildLog = (s: SearchState<number>): SimulationUpdate => {
+    const c = s.status === 'done' ? pathCost(s.path) : NaN;
+    return {
+      algorithm: `${ALGO_LABEL[algo]} · Grid (${diagonal ? '8' : '4'}-dir)`,
+      stepDescription: s.status === 'done' ? 'Goal popped — path reconstructed from parent pointers' : s.status === 'nopath' ? 'Frontier empty — no path exists' : `Expand the ${algo === 'bfs' ? 'oldest' : algo === 'dfs' ? 'newest' : 'lowest-key'} frontier cell`,
+      formula: algo === 'astar' ? 'f(n) = g(n) + h(n)   (ties → larger g)'
+        : algo === 'wastar' ? `f(n) = g(n) + ${weight.toFixed(1)}·h(n)   (ties → larger g)`
+          : algo === 'dijkstra' ? 'expand min g(n)' : algo === 'greedy' ? 'expand min h(n)'
+            : algo === 'bfs' ? 'expand oldest (FIFO queue)' : 'expand newest (LIFO stack)',
+      variables: {
+        'g': +s.lastG.toFixed(3), 'h': usesH ? +s.lastH.toFixed(3) : '—',
+        'f': algo === 'wastar' ? +(s.lastG + weight * s.lastH).toFixed(3) : algo === 'astar' ? +s.lastF.toFixed(3) : '—',
+        'expanded': s.expansions, 'frontier': s.open.length,
+        ...(s.status === 'done' ? { 'path cost': +c.toFixed(3), 'optimum': Number.isFinite(reference.opt) ? +reference.opt.toFixed(3) : '—' } : {}),
+      },
+      result: s.status === 'done' ? `cost ${fmtCost(c)} (opt ${fmtCost(reference.opt)}) · ${s.path.length - 1} steps · ${s.expansions} expanded` : s.status === 'nopath' ? 'no path' : `expanded ${s.expansions}`,
+      mathDetails: {
+        params: [
+          { label: 'g(n)', info: `${s.lastG.toFixed(2)}. Cost of the discovered path from S to the current cell (1 per straight step, √2 per diagonal).` },
+          { label: 'h(n)', info: usesH ? `${s.lastH.toFixed(2)}. ${hText}.` : 'Unused by this algorithm (no goal heuristic).' },
+          algo === 'wastar'
+            ? { label: 'weight ε', info: `${weight.toFixed(1)}. h is inflated by ε so the search commits toward G sooner.` }
+            : { label: 'frontier', info: `${s.open.length}. Cells discovered but not yet expanded — the open set.` },
+          { label: 'moves', info: diagonal ? '8-dir: a diagonal step is allowed only when both orthogonal cells beside it are free (no corner cutting).' : '4-dir: up, down, left, right.' },
+        ],
+        implication: guarantee(algo),
+      },
+    };
+  };
 
   const buildBiLog = (s: BiSearchState<number>): SimulationUpdate => ({
-    algorithm: 'Bi-directional · Graph Search',
-    stepDescription: s.status === 'done' ? `Frontiers met at cell ${s.meet} — path stitched` : s.status === 'nopath' ? 'A frontier emptied — no path exists' : `Expand ${s.side === 'F' ? 'forward' : 'backward'} frontier`,
-    formula: 'grow F(start) & B(goal) until F ∩ B ≠ ∅',
-    variables: { 'g': s.lastG, 'side': s.side === 'F' ? 'fwd' : 'bwd', 'fwd|bwd': `${s.visF.size}|${s.visB.size}`, 'expanded': s.expansions, 'frontier': s.openF.length + s.openB.length },
-    result: s.status === 'done' ? `cost ${s.bestCost.toFixed(1)} · ${s.path.length - 1} steps` : s.status === 'nopath' ? 'no path' : `expanded ${s.expansions}`,
+    algorithm: 'Bi-directional Dijkstra · Grid',
+    stepDescription: s.status === 'done' ? `Stopped: topF + topB ≥ μ = ${fmtCost(s.mu)} — path stitched through ${s.meet ? `${s.meet[0]}→${s.meet[1]}` : '—'}` : s.status === 'nopath' ? 'A frontier emptied with no meeting — no path exists' : `Settled cell ${s.current} on the ${s.side === 'F' ? 'backward (from G)' : 'forward (from S)'} side; the sides alternate`,
+    formula: 'μ = min gF(u) + w(u,v) + gB(v)  ·  stop when topF + topB ≥ μ',
+    variables: {
+      'μ': Number.isFinite(s.mu) ? +s.mu.toFixed(3) : '∞', 'topF': Number.isFinite(s.topF) ? +s.topF.toFixed(3) : '∞', 'topB': Number.isFinite(s.topB) ? +s.topB.toFixed(3) : '∞',
+      'settled F|B': `${s.visF.size}|${s.visB.size}`, 'expanded': s.expansions, 'Dijkstra alone': reference.dijkstra,
+    },
+    result: s.status === 'done' ? `cost ${fmtCost(s.bestCost)} · ${s.path.length - 1} steps · ${s.expansions} settled vs Dijkstra ${reference.dijkstra}` : s.status === 'nopath' ? 'no path' : `expanded ${s.expansions}`,
     mathDetails: {
       params: [
-        { label: 'forward |F|', info: `${s.visF.size}. Cells settled growing out from the start.` },
-        { label: 'backward |B|', info: `${s.visB.size}. Cells settled growing back from the goal.` },
-        { label: 'meet', info: s.meet != null ? `Frontiers collided at cell ${s.meet}; the path is forward-half + reversed backward-half.` : 'Frontiers have not met yet — they alternate one expansion each.' },
+        { label: 'forward |F|', info: `${s.visF.size} cells settled from S (cyan).` },
+        { label: 'backward |B|', info: `${s.visB.size} cells settled from G (violet).` },
+        { label: 'μ', info: 'Cheapest complete route seen so far: whenever a side scans an edge whose far end already has a distance from the other side, gF + w + gB is a candidate.' },
+        { label: 'stopping rule', info: 'No route through still-open cells can cost less than topF + topB, so once that reaches μ, μ is optimal. (Stopping at the first cell settled by both sides is not optimal with weighted moves.)' },
       ],
-      implication: 'Two half-searches each only reach the midpoint, so the union of explored cells (≈2·b^(d/2)) is far smaller than one full search (b^d).',
+      implication: `Two discs of radius d/2 cover about half the area of one disc of radius d, so in open 2-D space the saving is ≈ 2×; on this 13-row band the discs are clipped (this map: ${s.expansions} vs ${reference.dijkstra} for one Dijkstra), and in corridors there is no saving.`,
     },
   });
 
-  // Conceptual INTRO narration: paraphrase this algorithm's Context + voice its live-math, said once per run/algorithm.
   const introNarration = (): string => {
     if (isBi) {
-      return 'The challenge here: find a route from the start to the goal across this wall-dotted grid while touching as few cells as possible. '
-        + 'Bi-directional search grows two frontiers at once, one outward from the start and one backward from the goal, and stops the moment they meet in the middle, so each half only has to reach the midpoint and together they settle far fewer cells than a single search would. Watch the two coloured waves spread toward each other. '
-        + 'This trick speeds up route-finding in GPS navigation and large game maps where searching the whole world would be too slow.';
+      return 'The challenge here: find the cheapest route from the start to the goal while settling as few cells as possible. '
+        + 'Bi-directional search runs two Dijkstra searches at once, a cyan one outward from the start and a violet one backward from the goal. Whenever one side reaches a cell the other side already knows, that joined route becomes a candidate, and the search stops once the two smallest frontier distances add up to at least the best candidate, which proves it optimal. '
+        + 'In wide open space this settles about half as many cells as a single search; on a narrow band like this one the saving is much smaller, and the stats compare it with one Dijkstra on the same map. Route planners for road networks use this idea.';
     }
     const hWords = HEURISTIC_LABEL[heuristic].toLowerCase();
     switch (algo) {
       case 'astar':
-        return `The challenge here: find the lowest-cost route from the start to the goal across this wall-dotted grid, without searching the whole map. `
-          + `A-star expands the frontier cell with the smallest f, where f equals g plus h: the real cost travelled from the start plus the ${hWords} estimate of the distance still to go, and because that estimate never overshoots it is guaranteed to find the shortest path while exploring far less than a blind flood. Watch the visited cells lean toward the goal. `
-          + 'This is the algorithm behind GPS routing, game-character navigation and robot motion planning.';
+        return `The challenge here: find the cheapest route from start to goal without searching the whole map. A-star expands the frontier cell with the smallest f, g plus h: the cost already travelled plus the ${hWords} estimate of the cost still to go, breaking ties toward the deeper cell. `
+          + (hq.consistent ? `On ${diagonal ? 'eight' : 'four'} direction moves this estimate never overestimates and never drops faster than a step costs, so the path A-star returns is guaranteed optimal while it explores far less than a blind flood. ` : 'But with diagonal moves, Manhattan distance counts a diagonal step as two when it only costs about one point four, so it can overestimate, and A-star loses its guarantee of the cheapest path. ')
+          + 'A-star is behind GPS routing, game-character navigation and robot motion planning.';
       case 'wastar':
-        return `The challenge here: reach the goal across this wall-dotted grid fast, even if the route is a touch longer than the very shortest. `
-          + `Weighted A-star expands by f equals g plus epsilon times h, inflating the ${hWords} estimate so the search commits toward the goal sooner: it expands far fewer cells, and the path it returns is provably at most epsilon times the optimal cost. Watch how few cells it touches compared with plain A-star. `
-          + 'Real-time games and robotics use this when a good-enough path right now beats a perfect path too late.';
+        return `The challenge here: reach the goal fast, accepting a route a little longer than the very cheapest. Weighted A-star expands by g plus epsilon times h, inflating the ${hWords} estimate so the search commits toward the goal sooner and expands fewer cells. `
+          + (hq.consistent ? 'Because the heuristic is consistent, the returned path costs at most epsilon times the optimum. ' : 'Here the heuristic already overestimates diagonal moves, so no cost bound is guaranteed. ')
+          + 'Games and robots use this when a good path now beats a perfect path later.';
       case 'greedy':
-        return `The challenge here: get from the start to the goal across this wall-dotted grid as quickly as you can. `
-          + `Greedy search expands whichever frontier cell has the smallest h, the ${hWords} estimate to the goal, ignoring the cost already paid, so it rushes straight at the target and is fast, but walls can fool it into a longer path. Watch it charge toward the goal and sometimes get trapped. `
-          + 'This goal-directed style appears in quick game-AI movement and as a fast first pass in larger planners.';
+        return `The challenge here: get from start to goal as quickly as possible. Greedy search always expands the cell with the smallest ${hWords} estimate to the goal and ignores the cost already paid, so it charges straight at the target: fast, but walls can lure it into long detours and its path is not guaranteed to be the cheapest. `
+          + 'This goal-directed style appears in quick game movement and as a fast first pass in bigger planners.';
       case 'dijkstra':
-        return 'The challenge here: find the genuinely cheapest route from the start to the goal across this grid, even though we have no hint about where the goal is. '
-          + 'Dijkstra always expands the cell with the smallest g, the cheapest cost found so far from the start, using no goal information at all, which guarantees the shortest path but makes the frontier flood outward in every direction. Watch it spread evenly like ripples on water. '
-          + 'It powers network routing, road-network shortest paths and any system needing guaranteed-cheapest routes.';
+        return 'The challenge here: find the genuinely cheapest route with no hint about where the goal is. Dijkstra always expands the cell with the smallest g, the cheapest cost found so far from the start, so the first time it pops the goal that cost is optimal, but its frontier floods outward evenly in every direction. '
+          + 'It underpins network routing and road-network shortest paths.';
       case 'bfs':
-        return 'The challenge here: find the path with the fewest steps from the start to the goal across this grid, where every move costs the same. '
-          + 'Breadth-first search expands the oldest cell on the frontier first, a simple first-in first-out queue, so it explores in rings of equal step-count and finds the fewest-step path on an unweighted grid. Watch the visited region grow as even rings around the start. '
-          + 'BFS underlies social-network degrees of separation, web crawling and puzzle solvers.';
+        return 'The challenge here: find the route with the fewest moves. Breadth-first search expands the oldest frontier cell first, a first-in first-out queue, so it explores in rings of equal move count. '
+          + (diagonal ? 'With diagonal moves costing about one point four, fewest moves is not always cheapest, so compare its cost with the optimum. ' : 'With every move costing one, fewest moves is also cheapest. ')
+          + 'B F S underlies degrees of separation in social networks, web crawling and puzzle solvers.';
       case 'dfs':
       default:
-        return 'The challenge here: reach the goal across this grid using as little memory as possible, even if the route is not the shortest. '
-          + 'Depth-first search expands the newest cell first, a last-in first-out stack, so it plunges deep down one branch before backing up, using very little memory but rarely returning the shortest path. Watch it snake far in one direction before turning back. '
-          + 'DFS drives maze generation, dependency resolution and cycle detection in real systems.';
+        return 'The challenge here: reach the goal using as little memory as possible, even if the route is long. Depth-first search expands the newest frontier cell first, a last-in first-out stack, plunging down one branch before backing up. Each cell pushes its neighbours in a fixed, seeded shuffled order, so the dive wanders rather than heading straight for the goal, and the path it returns is usually far from the cheapest. '
+          + 'D F S drives maze generation, dependency resolution and cycle detection.';
     }
   };
 
-  // Conceptual CONCLUSION narration: interpret the result, not a step count.
-  const doneNarration = (cost: number, steps: number): string => {
-    if (isBi) return `The two frontiers met and the path was stitched together at the meeting point, for a total cost of about ${cost.toFixed(0)} over ${steps} steps. Meeting in the middle saved exploring the whole map.`;
-    if (algo === 'greedy') return `Goal reached for a cost of about ${cost.toFixed(0)}. Greedy got there quickly, but because it ignored cost-so-far this path is not guaranteed to be the shortest.`;
-    if (algo === 'dfs') return `Goal reached for a cost of about ${cost.toFixed(0)}. Depth-first found a path, but as expected it is usually longer than the optimal one.`;
-    if (algo === 'wastar') return `Goal reached for a cost of about ${cost.toFixed(0)}, found with far fewer expansions. The inflated heuristic traded a little optimality for a lot of speed, staying within the epsilon bound.`;
-    return `Shortest path found, with a total cost of about ${cost.toFixed(0)} over ${steps} steps. Because the heuristic guided the search, it settled far fewer cells than an uninformed flood would.`;
+  const doneNarration = (c: number, steps: number, exp: number): string => {
+    const opt = reference.opt;
+    const optimal = Math.abs(c - opt) < 1e-9;
+    const vsOpt = optimal ? 'which is the optimal cost' : `against an optimum of ${fmtCost(opt)}`;
+    switch (algo) {
+      case 'astar': return hq.consistent
+        ? `Shortest path found: cost ${fmtCost(c)} over ${steps} steps after only ${exp} expansions, where a plain Dijkstra settles ${reference.dijkstra} cells on this map. The consistent heuristic kept it optimal while steering it toward the goal.`
+        : `A-star finished with cost ${fmtCost(c)}, ${vsOpt}. ${optimal ? 'It happened to be optimal this time, but' : 'Because'} Manhattan distance overestimates diagonal moves, it is not guaranteed; the octile heuristic would be.`;
+      case 'wastar': return `Goal reached with cost ${fmtCost(c)} after ${exp} expansions, ${vsOpt}. ${hq.consistent ? `The guarantee is at most ${weight.toFixed(1)} times the optimum.` : 'With an overestimating heuristic there is no guaranteed bound.'}`;
+      case 'greedy': return `Goal reached with cost ${fmtCost(c)} after ${exp} expansions, ${vsOpt}. Greedy only looked at the distance still to go, so ${optimal ? 'it was lucky here' : 'it paid for a detour'}.`;
+      case 'dijkstra': return `Cheapest path found: cost ${fmtCost(c)} over ${steps} steps, but only after settling ${exp} cells in every direction, because Dijkstra has no sense of where the goal lies.`;
+      case 'bfs': return `B F S found a path with the fewest moves, ${steps}, costing ${fmtCost(c)}, ${vsOpt}.${diagonal && !optimal ? ' With diagonals, fewest moves and lowest cost differ.' : ''}`;
+      case 'dfs': default: return `Depth-first search found a path of ${steps} steps costing ${fmtCost(c)}, ${vsOpt}. Its route is whatever the dive happened to reach first.`;
+    }
   };
 
   const step = () => {
@@ -138,19 +177,19 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       const next = stepBiSearch(bi, { start: START, goal: GOAL, neighbors });
       setBi(next);
       setFrontierSeries((s) => [...s, next.openF.length + next.openB.length].slice(-60));
-      if (next.current != null || next.status !== 'running') setLastLog(buildBiLog(next));
-      narration.narratePhase(`run:bidir`, introNarration());
-      if (next.status === 'done') narration.narratePhase(`done:bidir`, doneNarration(next.bestCost, next.path.length - 1));
-      else if (next.status === 'nopath') narration.narratePhase(`nopath:bidir`, 'A frontier emptied with nowhere left to expand, so no path exists between the start and goal on this map.');
+      setLastLog(buildBiLog(next));
+      narration.narratePhase('run:bidir', introNarration());
+      if (next.status === 'done') narration.narratePhase('done:bidir', `The stopping rule fired: the two smallest frontier distances add up to at least the best meeting cost, so the stitched path, cost ${fmtCost(next.bestCost)} over ${next.path.length - 1} steps, is optimal. The two searches settled ${next.expansions} cells; a single Dijkstra on this map settles ${reference.dijkstra}.`);
+      else if (next.status === 'nopath') narration.narratePhase('nopath:bidir', 'A frontier emptied without the two searches ever meeting, so no path exists between start and goal on this map.');
       if (next.status !== 'running') sim.pause();
       return;
     }
     const next = stepSearch(search, cfg);
     setSearch(next);
     setFrontierSeries((s) => [...s, next.open.length].slice(-60));
-    if (next.current != null || next.status !== 'running') setLastLog(buildLog(next));
+    setLastLog(buildLog(next));
     narration.narratePhase(`run:${algo}:${heuristic}:${diagonal ? 8 : 4}`, introNarration());
-    if (next.status === 'done') narration.narratePhase(`done:${algo}`, doneNarration(next.g.get(GOAL) ?? 0, next.path.length - 1));
+    if (next.status === 'done') narration.narratePhase(`done:${algo}`, doneNarration(pathCost(next.path), next.path.length - 1, next.expansions));
     else if (next.status === 'nopath') narration.narratePhase(`nopath:${algo}`, 'The frontier emptied with nowhere left to expand, so no path exists between the start and goal on this map.');
     if (next.status !== 'running') sim.pause();
   };
@@ -162,15 +201,23 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     setFrontierSeries([]); setLastLog(null); narration.cancel();
   };
   const reset = () => { sim.stop(); resetState(); };
-  const newMap = (density = 0.24) => { sim.stop(); setWalls(randomWalls(COLS, ROWS, density, [START, GOAL])); resetState(); };
-  const clearWalls = () => { sim.stop(); setWalls(new Set()); resetState(); };
+  const loadMap = (spec: MapSpec) => { setMapSpec(spec); setEdited(false); setWalls(buildMap(spec)); };
+  const newMap = () => {
+    sim.stop();
+    const seed = mapSpec.kind === 'random' ? mapSpec.seed + 1 : 1000;
+    loadMap({ kind: 'random', seed, density: NEW_MAP_DENSITY }); setActivePreset(null); resetState();
+  };
+  const clearWalls = () => { sim.stop(); loadMap({ kind: 'empty' }); setActivePreset(null); resetState(); };
   const paint = (idx: number, mode: 'add' | 'remove') => {
     if (idx === START || idx === GOAL) return;
     setWalls((w) => { const n = new Set(w); if (mode === 'add') n.add(idx); else n.delete(idx); return n; });
+    setEdited(true); setActivePreset(null);
     resetState();
   };
 
   const pathSet = new Set(isBi ? bi.path : search.path);
+  const openF = useMemo(() => new Set(bi.openF), [bi]);
+  const openB = useMemo(() => new Set(bi.openB), [bi]);
   const cellState = (i: number): CellState => {
     if (i === START) return 'start';
     if (i === GOAL) return 'goal';
@@ -178,8 +225,10 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     if (pathSet.has(i)) return 'path';
     if (isBi) {
       if (bi.current === i) return 'current';
-      if (bi.visF.has(i) || bi.visB.has(i)) return 'visited';
-      if (bi.openF.includes(i) || bi.openB.includes(i)) return 'frontier';
+      if (bi.visF.has(i)) return 'visited';
+      if (bi.visB.has(i)) return 'visitedB';
+      if (openF.has(i)) return 'frontier';
+      if (openB.has(i)) return 'frontierB';
       return 'empty';
     }
     if (search.current === i) return 'current';
@@ -188,30 +237,31 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     return 'empty';
   };
 
-  // Value overlay: show g-cost on settled cells (richer visual, area-local — uses GridBoard's label slot).
+  // g overlay on settled cells: the forward g (cyan cells) or, for the backward search, gB (violet cells).
   const cellLabel = (i: number): string | undefined => {
     if (!showG || i === START || i === GOAL || walls.has(i)) return undefined;
-    const gv = isBi ? (bi.gF.get(i) ?? bi.gB.get(i)) : search.g.get(i);
-    return gv != null && (isBi ? bi.visF.has(i) || bi.visB.has(i) : search.visited.has(i)) ? gv.toFixed(0) : undefined;
+    const gv = isBi ? (bi.visF.has(i) ? bi.gF.get(i) : bi.visB.has(i) ? bi.gB.get(i) : undefined) : (search.visited.has(i) ? search.g.get(i) : undefined);
+    return gv != null ? gv.toFixed(0) : undefined;
   };
 
   const done = isBi ? bi.status === 'done' : search.status === 'done';
   const noPath = isBi ? bi.status === 'nopath' : search.status === 'nopath';
   const expanded = isBi ? bi.expansions : search.expansions;
   const frontierN = isBi ? bi.openF.length + bi.openB.length : search.open.length;
-  const pathStat = done ? String((isBi ? bi.path : search.path).length - 1) : noPath ? '—' : '…';
+  const curPath = isBi ? bi.path : search.path;
+  const cost = done ? (isBi ? bi.bestCost : pathCost(search.path)) : NaN;
 
   const algoSet = (a: Algo) => { sim.stop(); setAlgo(a); resetState(); };
-
   const applyPreset = (id: string) => {
     const p = PATH_PRESETS.find((x) => x.id === id); if (!p) return;
     sim.stop();
     setActivePreset(id);
     setAlgo(p.algo); setHeuristic(p.heuristic); setDiagonal(p.diagonal); setWeight(p.weight);
-    setWalls(randomWalls(COLS, ROWS, p.density, [START, GOAL]));
+    loadMap(p.map);
     resetState();
   };
   const activeHint = PATH_PRESETS.find((x) => x.id === activePreset)?.hint;
+  const mapName = edited ? `${mapLabel(mapSpec)}, edited by hand` : mapLabel(mapSpec);
 
   const algoList: Algo[] = ['bfs', 'dfs', 'dijkstra', 'greedy', 'astar', 'wastar', 'bidir'];
 
@@ -222,11 +272,12 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       narration={narration}
       stats={[
         { label: 'ALGO', value: ALGO_LABEL[algo], color: ACCENT },
-        { label: 'EXPANDED', value: expanded },
-        { label: 'FRONTIER', value: frontierN },
-        { label: 'PATH', value: pathStat, color: '#fbbf24' },
+        { label: 'EXPANDED', value: isBi ? `${expanded} (${bi.visF.size}+${bi.visB.size})` : expanded },
+        ...(isBi ? [{ label: 'DIJKSTRA', value: reference.dijkstra }] : [{ label: 'FRONTIER', value: frontierN }]),
+        { label: 'PATH', value: done ? `${curPath.length - 1} st` : noPath ? '—' : '…', color: '#fbbf24' },
+        { label: 'COST', value: done ? `${fmtCost(cost)} / ${fmtCost(reference.opt)}` : Number.isFinite(reference.opt) ? `— / ${fmtCost(reference.opt)}` : '—', color: '#fbbf24' },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, pathfindingPython(algo, diagonal, heuristic, weight))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, pathfindingPython({ cols: COLS, rows: ROWS, start: START, goal: GOAL, walls: [...walls].sort((a, b) => a - b), algo, diagonal, heuristic, weight, dfsSeed: DFS_ORDER_SEED, mapName }))}
       grid={<GridBoard cols={COLS} rows={ROWS} cell={28} state={cellState} label={cellLabel} onPaint={paint} />}
       algoDock={(
         <>
@@ -239,13 +290,14 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
           <AlgoPill onClick={clearWalls}>⌫ Clear walls</AlgoPill>
         </>
       )}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={() => newMap()} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={newMap} speed={sim.speed} onSpeed={sim.setSpeed} />}
       legend={(
         <Legend title="CELLS" items={[
           { color: '#34d399', label: 'Start' },
           { color: '#f87171', label: 'Goal' },
-          { color: '#38bdf8', label: 'Frontier' },
-          { color: 'rgba(56,189,248,.5)', label: 'Visited' },
+          { color: '#38bdf8', label: isBi ? 'Frontier (from S)' : 'Frontier' },
+          { color: 'rgba(56,189,248,.5)', label: isBi ? 'Settled (from S)' : 'Visited' },
+          ...(isBi ? [{ color: BACK, label: 'Frontier (from G)' }, { color: 'rgba(167,139,250,.5)', label: 'Settled (from G)' }] : []),
           { color: '#fbbf24', label: 'Path' },
         ]} />
       )}
@@ -253,7 +305,7 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       rewardValue={frontierN}
       rewardSeries={frontierSeries}
       lastLog={lastLog}
-      contextInsight={`${ALGO_LABEL[algo]}. ${activeHint ? activeHint + ' ' : ''}Drag on the grid to draw or erase walls, then press Run. Compare how much each algorithm explores (EXPANDED) for the same map.`}
+      contextInsight={`${ALGO_LABEL[algo]} on ${mapName}. ${activeHint ? activeHint + ' ' : ''}${usesH ? hText + '. ' : ''}${guarantee(algo)} COST shows the path found / the optimum on this map. Drag on the grid to draw or erase walls.`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Search Parameters" hint="Drag on the grid to draw walls." />
@@ -264,38 +316,53 @@ const PathfindingLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
                 <AlgoPill key={p.id} active={activePreset === p.id} accent={ACCENT} onClick={() => applyPreset(p.id)}>{p.label}</AlgoPill>
               ))}
             </div>
-            {activeHint && <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: '9px 0 0' }}>{activeHint}</p>}
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: '9px 0 0' }}>
+              {activeHint ?? 'Custom map or settings — compare EXPANDED and COST across algorithms on the same map.'}
+            </p>
           </div>
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Heuristic (Greedy / A* / W-A*)</MonoLabel>
             <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
               {(['manhattan', 'euclidean', 'chebyshev', 'octile'] as GridHeuristic[]).map((h) => (
-                <AlgoPill key={h} active={heuristic === h} accent={ACCENT} onClick={() => { setHeuristic(h); reset(); }}>{HEURISTIC_LABEL[h]}</AlgoPill>
+                <AlgoPill key={h} active={heuristic === h} accent={ACCENT} onClick={() => { setHeuristic(h); setActivePreset(null); reset(); }}>{HEURISTIC_LABEL[h]}</AlgoPill>
               ))}
             </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: hq.consistent ? 'var(--t2)' : 'var(--bad)', lineHeight: 1.5, margin: '8px 0 0' }}>
+              {hq.consistent ? `${HEURISTIC_LABEL[heuristic]}: consistent (admissible) for ${diagonal ? '8' : '4'}-dir moves.` : 'Manhattan with diagonals: overestimates (inadmissible, inconsistent).'}
+            </p>
           </div>
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Movement</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
-              <AlgoPill active={!diagonal} accent={ACCENT} onClick={() => { setDiagonal(false); reset(); }}>4-dir</AlgoPill>
-              <AlgoPill active={diagonal} accent={ACCENT} onClick={() => { setDiagonal(true); reset(); }}>8-dir</AlgoPill>
+              <AlgoPill active={!diagonal} accent={ACCENT} onClick={() => { setDiagonal(false); setActivePreset(null); reset(); }}>4-dir</AlgoPill>
+              <AlgoPill active={diagonal} accent={ACCENT} onClick={() => { setDiagonal(true); setActivePreset(null); reset(); }}>8-dir</AlgoPill>
             </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: '8px 0 0' }}>
+              {diagonal ? 'Diagonals cost √2 and may not cut a corner: both orthogonal neighbours must be free.' : 'Up, down, left, right — each step costs 1.'}
+            </p>
           </div>
           {algo === 'wastar' && (
-            <ParamSlider name="Heuristic weight ε" value={`×${weight.toFixed(1)}`} min={1} max={4} step={0.1} current={weight} onChange={(v) => { setWeight(v); reset(); }} hint="g + ε·h — higher ε = faster, ≤ ε× optimal" />
+            <ParamSlider name="Heuristic weight ε" value={`×${weight.toFixed(1)}`} min={1} max={4} step={0.1} current={weight} onChange={(v) => { setWeight(Math.round(v * 10) / 10); setActivePreset(null); reset(); }} hint="g + ε·h — larger ε expands less; cost ≤ ε × optimum (consistent h)" />
           )}
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Overlay</MonoLabel>
             <div style={{ display: 'flex', gap: 7 }}>
               <AlgoPill active={!showG} accent={ACCENT} onClick={() => setShowG(false)}>Plain</AlgoPill>
-              <AlgoPill active={showG} accent={ACCENT} onClick={() => setShowG(true)}>g-cost field</AlgoPill>
+              <AlgoPill active={showG} accent={ACCENT} onClick={() => setShowG(true)}>{isBi ? 'g per side' : 'g-cost field'}</AlgoPill>
             </div>
           </div>
+          <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: 0 }}>
+            Ties: A* / W-A* prefer the larger g on equal f; the others take the oldest frontier entry. DFS pushes each cell’s neighbours in a seeded shuffled order.
+          </p>
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={5} max={200} step={5} current={sim.speed} onChange={sim.setSpeed} hint="expansion interval" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: ALGO_LABEL[algo], heuristic, diagonal, weight, expanded, status: isBi ? bi.status : search.status }}
+      currentParams={{
+        algorithm: ALGO_LABEL[algo], heuristic, diagonal, weight, map: mapName, heuristicAdmissible: hq.admissible, heuristicConsistent: hq.consistent,
+        expanded, status: isBi ? bi.status : search.status, pathCost: done ? +cost.toFixed(3) : null, optimalCost: Number.isFinite(reference.opt) ? +reference.opt.toFixed(3) : null,
+        dijkstraSettles: reference.dijkstra,
+      }}
       apiPanel={apiPanel}
     />
   );

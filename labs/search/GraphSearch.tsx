@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
@@ -8,134 +8,136 @@ import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
 import { ParamsWrap, ParamsHead } from '../classic-ml/shared';
+import { useTheme } from '../../utils/theme';
 import {
-  Algo, ALGO_LABEL, SearchState, initSearch, stepSearch,
-  BiSearchState, initBiSearch, stepBiSearch,
+  Algo, ALGO_LABEL, SearchState, initSearch, stepSearch, runSearch, BiSearchState, initBiSearch, stepBiSearch,
 } from './shared';
-import { GRAPH_PRESETS } from './presets';
+import {
+  GRAPH_PRESETS, GRAPHS, GraphId, GRAPH_POS as POS, GRAPH_K as K, GRAPH_START as START, GRAPH_GOAL as GOAL,
+  buildAdjacency, graphDist, edgeWeight,
+} from './presets';
 import { graphSearchPython } from './python';
 
-const K = 20;
 const ACCENT = '#38bdf8';
-const POS: Record<string, { x: number; y: number }> = {
-  S: { x: 0.06, y: 0.5 }, a: { x: 0.22, y: 0.22 }, b: { x: 0.22, y: 0.78 },
-  c: { x: 0.40, y: 0.5 }, d: { x: 0.40, y: 0.12 }, e: { x: 0.40, y: 0.88 },
-  f: { x: 0.60, y: 0.28 }, g: { x: 0.60, y: 0.72 }, h: { x: 0.78, y: 0.5 },
-  i: { x: 0.92, y: 0.24 }, G: { x: 0.92, y: 0.64 },
-};
-const EDGE_PAIRS: [string, string][] = [
-  ['S', 'a'], ['S', 'b'], ['S', 'c'], ['a', 'd'], ['a', 'c'], ['b', 'e'], ['b', 'c'],
-  ['c', 'f'], ['c', 'g'], ['d', 'f'], ['e', 'g'], ['f', 'h'], ['f', 'i'], ['g', 'h'],
-  ['g', 'G'], ['h', 'i'], ['h', 'G'], ['i', 'G'],
-];
-const START = 'S', GOAL = 'G';
-
-const dist = (p: string, q: string) => Math.hypot(POS[p].x - POS[q].x, POS[p].y - POS[q].y);
-const W = (p: string, q: string) => Math.ceil(dist(p, q) * K); // ceil keeps h admissible
-
-const ADJ: Record<string, [string, number][]> = {};
-Object.keys(POS).forEach((n) => { ADJ[n] = []; });
-EDGE_PAIRS.forEach(([u, v]) => { const w = W(u, v); ADJ[u].push([v, w]); ADJ[v].push([u, w]); });
+const BACK = '#a78bfa';
 
 const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
+  const isLight = useTheme() === 'light';
   const narration = useNarration();
   const [algo, setAlgo] = useState<Algo>('astar');
   const [weight, setWeight] = useState(1.6);
+  const [graphId, setGraphId] = useState<GraphId>('toll');
   const [search, setSearch] = useState<SearchState<string>>(() => initSearch(START));
   const [bi, setBi] = useState<BiSearchState<string>>(() => initBiSearch(START, GOAL));
   const [frontierSeries, setFrontierSeries] = useState<number[]>([]);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
-  const [activePreset, setActivePreset] = useState<string>('astar');
+  const [activePreset, setActivePreset] = useState<string | null>('astar');
 
+  const ADJ = useMemo(() => buildAdjacency(graphId), [graphId]);
   const isBi = algo === 'bidir';
-  const neighbors = (n: string) => ADJ[n] as [string, number][];
-  const cfg = {
-    algo, goal: GOAL, weight,
-    neighbors,
-    heuristic: (n: string) => dist(n, GOAL) * K,
+  const neighbors = (n: string) => ADJ[n] ?? [];
+  const hFn = (n: string) => graphDist(n, GOAL) * K;
+  const cfg = { algo, goal: GOAL, weight, neighbors, heuristic: hFn };
+  const usesH = algo === 'greedy' || algo === 'astar' || algo === 'wastar';
+  const reference = useMemo(() => {
+    const d = runSearch(START, { algo: 'dijkstra', goal: GOAL, neighbors: (n: string) => ADJ[n] ?? [], heuristic: () => 0 });
+    return { opt: d.g.get(GOAL) ?? NaN, path: d.path, dijkstra: d.expansions };
+  }, [ADJ]);
+  const costOf = (p: string[]) => { let c = 0; for (let k = 0; k + 1 < p.length; k++) c += (neighbors(p[k]!).find(([m]) => m === p[k + 1])?.[1] ?? NaN); return c; };
+
+  const guarantee = (a: Algo): string => {
+    switch (a) {
+      case 'bfs': return 'BFS minimises the number of hops — which can cost more total weight than the optimum.';
+      case 'dfs': return 'DFS takes whatever route its dive reaches first; it depends on adjacency order, not on cost.';
+      case 'dijkstra': return 'Minimises total weight: the first time G is popped, its cost is optimal.';
+      case 'astar': return 'Every edge weighs at least K × its straight length, so h = K·dist(n, G) is consistent: A* returns the optimal path, usually expanding fewer nodes than Dijkstra.';
+      case 'wastar': return `Consistent h: the path costs at most ε = ${weight.toFixed(1)}× the optimum, usually after fewer expansions.`;
+      case 'greedy': return 'Chases the goal by h alone — fast, but not guaranteed cheapest.';
+      default: return 'Stops once topF + topB ≥ μ, so the best meeting cost μ is optimal.';
+    }
   };
 
-  const buildLog = (s: SearchState<string>): SimulationUpdate => ({
-    algorithm: `${ALGO_LABEL[algo]} · Weighted Graph`,
-    stepDescription: s.status === 'done' ? `Goal reached via ${s.path.join('→')}` : s.status === 'nopath' ? 'Frontier empty — unreachable' : `Expand node ${s.current}`,
-    formula: algo === 'astar' ? 'f(n) = g(n) + h(n)'
-      : algo === 'wastar' ? `f(n) = g(n) + ${weight.toFixed(1)}·h(n)`
-      : algo === 'dijkstra' ? 'expand min g(n)' : algo === 'greedy' ? 'expand min h(n)'
-      : algo === 'bfs' ? 'expand oldest (FIFO)' : 'expand newest (LIFO)',
-    variables: { 'node': s.current ?? '—', 'g': s.lastG, 'h': s.lastH, 'f': algo === 'wastar' ? s.lastG + weight * s.lastH : s.lastF, 'expanded': s.expansions },
-    result: s.status === 'done' ? `cost ${(s.g.get(GOAL) ?? 0).toFixed(0)} · ${s.path.length - 1} hops` : s.status === 'nopath' ? 'no path' : `frontier ${s.open.length}`,
-    mathDetails: {
-      params: [
-        { label: 'g(n)', info: `${s.lastG.toFixed(1)}. Total edge weight from S to ${s.current ?? 'n'}.` },
-        { label: 'h(n)', info: algo === 'bfs' || algo === 'dfs' || algo === 'dijkstra' ? 'Unused (no heuristic).' : `${s.lastH.toFixed(1)}. Straight-line estimate to the goal (admissible).` },
-        { label: algo === 'wastar' ? 'weight ε' : 'edges', info: algo === 'wastar' ? `${weight.toFixed(1)}. h inflated by ε — fewer expansions, cost ≤ ε× optimal.` : 'Numbers on edges are weights; BFS counts hops, Dijkstra/A* minimise total weight.' },
-      ],
-      implication: algo === 'bfs' ? 'BFS finds fewest hops — which may cost more than the weighted optimum.'
-        : algo === 'wastar' ? 'Weighted A* inflates h, committing toward G sooner: fewer expansions, bounded-suboptimal cost.'
-        : algo === 'dijkstra' || algo === 'astar' ? 'Minimises total weight — the true cheapest path.'
-        : algo === 'greedy' ? 'Chases the goal by h alone — fast, not always cheapest.' : 'DFS plunges depth-first — order depends on adjacency.',
-    },
-  });
+  const buildLog = (s: SearchState<string>): SimulationUpdate => {
+    const c = s.status === 'done' ? costOf(s.path) : NaN;
+    return {
+      algorithm: `${ALGO_LABEL[algo]} · ${GRAPHS[graphId].label} graph`,
+      stepDescription: s.status === 'done' ? `Goal reached via ${s.path.join('→')}` : s.status === 'nopath' ? 'Frontier empty — unreachable' : `Expand node ${s.current}`,
+      formula: algo === 'astar' ? 'f(n) = g(n) + h(n)   (ties → larger g)'
+        : algo === 'wastar' ? `f(n) = g(n) + ${weight.toFixed(1)}·h(n)   (ties → larger g)`
+          : algo === 'dijkstra' ? 'expand min g(n)' : algo === 'greedy' ? 'expand min h(n)'
+            : algo === 'bfs' ? 'expand oldest (FIFO)' : 'expand newest (LIFO)',
+      variables: {
+        'node': s.current ?? '—', 'g': +s.lastG.toFixed(2), 'h': usesH ? +s.lastH.toFixed(2) : '—',
+        'f': algo === 'wastar' ? +(s.lastG + weight * s.lastH).toFixed(2) : algo === 'astar' ? +s.lastF.toFixed(2) : '—', 'expanded': s.expansions,
+        ...(s.status === 'done' ? { 'path cost': c, 'optimum': reference.opt, 'hops': s.path.length - 1 } : {}),
+      },
+      result: s.status === 'done' ? `cost ${c} (opt ${reference.opt}) · ${s.path.length - 1} hops · ${s.expansions} expanded` : s.status === 'nopath' ? 'no path' : `frontier ${s.open.length}`,
+      mathDetails: {
+        params: [
+          { label: 'g(n)', info: `${s.lastG.toFixed(1)}. Total edge weight of the discovered route from S to ${s.current ?? 'n'}.` },
+          { label: 'h(n)', info: usesH ? `${s.lastH.toFixed(1)} = ${K} × straight-line distance to G. Every edge weighs ≥ ${K} × its length (weight = ceil(${K}·length) × toll multiplier), so h is consistent.` : 'Unused (no heuristic).' },
+          algo === 'wastar'
+            ? { label: 'weight ε', info: `${weight.toFixed(1)}. h inflated by ε — fewer expansions, cost ≤ ε × optimal.` }
+            : { label: 'edges', info: 'Numbers on edges are weights. Each node lists its neighbours in a fixed order (the order its edges were defined); BFS/DFS push them in that order.' },
+        ],
+        implication: guarantee(algo),
+      },
+    };
+  };
 
   const buildBiLog = (s: BiSearchState<string>): SimulationUpdate => ({
-    algorithm: 'Bi-directional · Weighted Graph',
-    stepDescription: s.status === 'done' ? `Frontiers met at ${s.meet} — ${s.path.join('→')}` : s.status === 'nopath' ? 'A frontier emptied — unreachable' : `Expand ${s.side === 'F' ? 'forward' : 'backward'} node ${s.current}`,
-    formula: 'grow F(S) & B(G) until F ∩ B ≠ ∅',
-    variables: { 'node': s.current ?? '—', 'g': s.lastG, 'side': s.side === 'F' ? 'fwd' : 'bwd', 'fwd|bwd': `${s.visF.size}|${s.visB.size}`, 'expanded': s.expansions },
-    result: s.status === 'done' ? `cost ${s.bestCost.toFixed(0)} · ${s.path.length - 1} hops` : s.status === 'nopath' ? 'no path' : `frontier ${s.openF.length + s.openB.length}`,
+    algorithm: `Bi-directional Dijkstra · ${GRAPHS[graphId].label} graph`,
+    stepDescription: s.status === 'done' ? `Stopped: topF + topB ≥ μ = ${s.mu} — ${s.path.join('→')}` : s.status === 'nopath' ? 'A frontier emptied — unreachable' : `Settled ${s.current} on the ${s.side === 'F' ? 'backward (from G)' : 'forward (from S)'} side`,
+    formula: 'μ = min gF(u) + w(u,v) + gB(v)  ·  stop when topF + topB ≥ μ',
+    variables: {
+      'node': s.current ?? '—', 'μ': Number.isFinite(s.mu) ? s.mu : '∞', 'topF': Number.isFinite(s.topF) ? +s.topF.toFixed(1) : '∞', 'topB': Number.isFinite(s.topB) ? +s.topB.toFixed(1) : '∞',
+      'settled F|B': `${s.visF.size}|${s.visB.size}`, 'Dijkstra alone': reference.dijkstra,
+    },
+    result: s.status === 'done' ? `cost ${s.bestCost} · ${s.path.length - 1} hops · ${s.expansions} settled vs Dijkstra ${reference.dijkstra}` : s.status === 'nopath' ? 'no path' : `frontier ${s.openF.length + s.openB.length}`,
     mathDetails: {
       params: [
-        { label: 'forward |F|', info: `${s.visF.size}. Nodes settled from S.` },
-        { label: 'backward |B|', info: `${s.visB.size}. Nodes settled from G.` },
-        { label: 'meet', info: s.meet != null ? `Frontiers collided at ${s.meet}; path = S→${s.meet} + ${s.meet}→G.` : 'Not met yet — the two Dijkstra fronts alternate.' },
+        { label: 'forward |F|', info: `${s.visF.size}. Nodes settled from S (cyan).` },
+        { label: 'backward |B|', info: `${s.visB.size}. Nodes settled from G (violet).` },
+        { label: 'meet', info: s.meet ? `Best route so far goes through edge ${s.meet[0]}–${s.meet[1]}: gF(${s.meet[0]}) + w + gB(${s.meet[1]}) = ${s.mu}.` : 'No complete route seen yet.' },
       ],
-      implication: 'Each side only reaches the midpoint, so two small searches settle far fewer nodes than one full Dijkstra.',
+      implication: `Stopping at the first node settled by both sides can return a costlier route; the μ rule is always optimal. On an 11-node graph the saving is small (${s.expansions} settled vs ${reference.dijkstra} for one Dijkstra).`,
     },
   });
 
-  // Conceptual INTRO narration: paraphrase this algorithm's Context + voice its live-math on a weighted graph.
   const introNarration = (): string => {
     if (isBi) {
-      return 'The challenge here: find the cheapest route from S to G across this weighted graph while settling as few nodes as possible. '
-        + 'Bi-directional search grows two cost-driven frontiers at once, one outward from the start and one backward from the goal, and stops the instant they collide; when a node is reached by both sides the candidate path is its forward cost plus its backward cost, and the two halves are stitched together, so each side only reaches the midpoint and far fewer nodes are settled than one full Dijkstra. '
-        + 'This powers fast route planning in road networks and large communication graphs.';
+      return 'The challenge here: find the cheapest route from S to G while settling as few nodes as possible. Bi-directional search runs two Dijkstra searches, one outward from S and one backward from G. Whenever one side scans an edge into a node the other side has already reached, that joined route is a candidate, and the search stops as soon as the two smallest frontier distances add up to at least the best candidate, which proves it is optimal. On a graph this small it saves very little; the idea pays off on large road networks.';
     }
     switch (algo) {
       case 'astar':
-        return 'The challenge here: find the lowest-total-weight route from S to G across this weighted graph, without examining every node. '
-          + 'A-star expands the node with the smallest f, where f equals g plus h: the total edge weight paid from the start plus the straight-line estimate to the goal, so it returns the same cheapest path as Dijkstra but, guided by the heuristic, usually touches far fewer nodes. Watch the frontier lean toward the goal. '
-          + 'It is the workhorse of GPS routing, game AI and robot path planning.';
+        return 'The challenge here: find the lowest-weight route from S to G without examining every node. A-star expands the node with the smallest f, g plus h: the weight already paid plus twenty times the straight-line distance still to go. Every edge here weighs at least twenty times its length, so that estimate never overshoots, and A-star returns the same optimal route as Dijkstra while expanding fewer nodes. It is the workhorse of GPS routing and game AI.';
       case 'wastar':
-        return 'The challenge here: get a near-cheapest route from S to G across this weighted graph fast, trading a little optimality for speed. '
-          + 'Weighted A-star expands by f equals g plus epsilon times h, inflating the straight-line estimate so the search commits toward the goal sooner: it expands a fraction of the nodes, and the cost it returns stays within epsilon times the optimum. Watch how directly it heads for the goal. '
-          + 'Large-scale routing engines and real-time planners use this when latency matters more than the last few percent of cost.';
+        return 'The challenge here: get a near-cheapest route fast. Weighted A-star expands by g plus epsilon times h, trusting the straight-line estimate more, so it commits toward G sooner and expands fewer nodes, and the cost it returns is at most epsilon times the optimum. Real-time planners use this when latency matters more than the last few percent of cost.';
       case 'greedy':
-        return 'The challenge here: reach G from S across this weighted graph as quickly as possible. '
-          + 'Greedy search expands whichever node has the smallest h, the straight-line estimate to the goal, ignoring the edge weight already spent, so it is fast and goal-directed but can be fooled and its path is not always the cheapest. Watch it chase the goal by direction alone. '
-          + 'This appears in quick game-AI navigation and as a fast heuristic stage inside bigger search systems.';
+        return 'The challenge here: reach G from S as quickly as possible. Greedy search expands whichever node looks closest to G in a straight line and ignores the weight already spent, so it can be lured onto an expensive edge and its route is not guaranteed to be the cheapest. It appears in quick game navigation and as a fast first pass in bigger systems.';
       case 'dijkstra':
-        return 'The challenge here: find the genuinely cheapest route from S to G across this weighted graph, with no hint about where G lies. '
-          + 'Dijkstra always expands the node with the smallest g, the cheapest total edge weight found so far from the start, using no goal information, so it returns the true minimum-weight path but explores blindly in every direction. Watch it settle nodes evenly outward. '
-          + 'It is the backbone of internet routing protocols and road-network shortest-path engines.';
+        return 'The challenge here: find the genuinely cheapest route from S to G with no hint about where G lies. Dijkstra always expands the node with the smallest total weight from S, so it returns the true optimum, but it settles nodes in every direction. It is the backbone of internet routing protocols and road-network engines.';
       case 'bfs':
-        return 'The challenge here: find the route from S to G that uses the fewest hops, even though the edges here carry different weights. '
-          + 'Breadth-first search expands the oldest node first, a first-in first-out queue, so it finds the path with the fewest hops, but hops are not weight, so that direct-looking path can cost more total weight than the optimum. Compare its cost against Dijkstra. '
-          + 'BFS underlies social-network connection-distance, peer-to-peer discovery and web crawling.';
+        return 'The challenge here: find the route from S to G with the fewest hops. Breadth-first search expands the oldest node first, so it finds the fewest-hop route, but hops are not weight: on this graph the most direct-looking route runs over an expensive toll edge. Compare its cost with the optimum. B F S underlies social-network distances and web crawling.';
       case 'dfs':
       default:
-        return 'The challenge here: reach G from S across this graph using minimal memory, following one branch as far as it goes. '
-          + 'Depth-first search expands the newest node first, a last-in first-out stack, plunging deep along one branch before backtracking, so its route depends on the adjacency order and is rarely the cheapest. Watch it dive down one chain of nodes first. '
-          + 'DFS drives topological sorting, dependency resolution and cycle detection in real software.';
+        return 'The challenge here: reach G from S using minimal memory. Depth-first search expands the newest node first, diving along one branch before backtracking, so its route is simply the first one its dive reaches, decided by the order each node lists its neighbours, not by cost. D F S drives topological sorting, dependency resolution and cycle detection.';
     }
   };
 
-  // Conceptual CONCLUSION narration: interpret the result on the weighted graph.
-  const doneNarration = (totalCost: number): string => {
-    if (isBi) return `The two frontiers met in the middle of the graph and the cheapest path was stitched together, for a total cost of about ${totalCost.toFixed(0)}. Meeting at the midpoint settled far fewer nodes than one full search.`;
-    if (algo === 'bfs') return `A path with the fewest hops was found, costing about ${totalCost.toFixed(0)} in total weight. Notice that fewest hops does not mean cheapest, so this can exceed the weighted optimum.`;
-    if (algo === 'greedy') return `Goal reached for a total cost of about ${totalCost.toFixed(0)}. Greedy got there quickly by chasing the heuristic, but this is not guaranteed to be the cheapest route.`;
-    if (algo === 'wastar') return `Goal reached for a total cost of about ${totalCost.toFixed(0)}, with far fewer expansions. The inflated heuristic traded a little optimality for speed, staying within the epsilon bound.`;
-    return `The cheapest path was found, with a total weight of about ${totalCost.toFixed(0)}. A-star and Dijkstra both reach this true optimum; the heuristic just let A-star get there expanding fewer nodes.`;
+  const doneNarration = (c: number, hops: number, exp: number): string => {
+    const opt = reference.opt;
+    const optimal = c === opt;
+    const vs = optimal ? 'which is the optimum' : `while the optimum is ${opt}`;
+    if (isBi) return `The stopping rule fired and the stitched route costs ${c}, the optimum. Together the two searches settled ${exp} nodes, against ${reference.dijkstra} for a single Dijkstra, so on a graph this small the saving is minor.`;
+    switch (algo) {
+      case 'bfs': return `B F S found a route with ${hops} hops costing ${c}, ${vs}. Fewest hops is not the same as least weight.`;
+      case 'dfs': return `Depth-first search reached G along a ${hops}-hop route costing ${c}, ${vs}. That route came from its dive order, not from comparing costs.`;
+      case 'greedy': return `Greedy reached G after ${exp} expansions with cost ${c}, ${vs}.${optimal ? '' : ' Following the straight-line estimate alone led it onto a costly edge.'}`;
+      case 'wastar': return `Weighted A-star reached G after ${exp} expansions with cost ${c}, ${vs}, within the guaranteed ${weight.toFixed(1)} times the optimum.`;
+      case 'dijkstra': return `The cheapest route costs ${c}. Dijkstra settled ${exp} nodes to prove it.`;
+      default: return `The cheapest route costs ${c}. A-star found it after ${exp} expansions, where Dijkstra needs ${reference.dijkstra}, because the heuristic steered it toward G.`;
+    }
   };
 
   const step = () => {
@@ -143,19 +145,19 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       const next = stepBiSearch(bi, { start: START, goal: GOAL, neighbors });
       setBi(next);
       setFrontierSeries((s) => [...s, next.openF.length + next.openB.length].slice(-60));
-      if (next.current != null || next.status !== 'running') setLastLog(buildBiLog(next));
-      narration.narratePhase(`run:bidir`, introNarration());
-      if (next.status === 'done') narration.narratePhase(`done:bidir`, doneNarration(next.bestCost));
-      else if (next.status === 'nopath') narration.narratePhase(`nopath:bidir`, 'A frontier emptied with no nodes left to expand, so the goal is unreachable from the start.');
+      setLastLog(buildBiLog(next));
+      narration.narratePhase('run:bidir', introNarration());
+      if (next.status === 'done') narration.narratePhase('done:bidir', doneNarration(next.bestCost, next.path.length - 1, next.expansions));
+      else if (next.status === 'nopath') narration.narratePhase('nopath:bidir', 'A frontier emptied with no nodes left to expand, so the goal is unreachable from the start.');
       if (next.status !== 'running') sim.pause();
       return;
     }
     const next = stepSearch(search, cfg);
     setSearch(next);
     setFrontierSeries((s) => [...s, next.open.length].slice(-60));
-    if (next.current != null || next.status !== 'running') setLastLog(buildLog(next));
+    setLastLog(buildLog(next));
     narration.narratePhase(`run:${algo}`, introNarration());
-    if (next.status === 'done') narration.narratePhase(`done:${algo}`, doneNarration(next.g.get(GOAL) ?? 0));
+    if (next.status === 'done') narration.narratePhase(`done:${algo}:${graphId}`, doneNarration(costOf(next.path), next.path.length - 1, next.expansions));
     else if (next.status === 'nopath') narration.narratePhase(`nopath:${algo}`, 'The frontier emptied with no nodes left to expand, so the goal is unreachable from the start.');
     if (next.status !== 'running') sim.pause();
   };
@@ -164,10 +166,10 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
   const resetState = () => { setSearch(initSearch(START)); setBi(initBiSearch(START, GOAL)); setFrontierSeries([]); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); resetState(); };
   const algoSet = (a: Algo) => { sim.stop(); setAlgo(a); resetState(); };
-
+  const graphSet = (g: GraphId) => { sim.stop(); setGraphId(g); setActivePreset(null); resetState(); };
   const applyPreset = (id: string) => {
     const p = GRAPH_PRESETS.find((x) => x.id === id); if (!p) return;
-    sim.stop(); setActivePreset(id); setAlgo(p.algo); setWeight(p.weight); resetState();
+    sim.stop(); setActivePreset(id); setAlgo(p.algo); setWeight(p.weight); setGraphId(p.graph); resetState();
   };
   const activeHint = GRAPH_PRESETS.find((x) => x.id === activePreset)?.hint;
 
@@ -191,17 +193,31 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
     if (search.inOpen.has(id)) return 'frontier';
     return 'idle';
   };
-
-  const gOf = (id: string) => isBi ? (bi.gF.get(id) ?? bi.gB.get(id)) : search.g.get(id);
-  const nodes: GNode[] = Object.keys(POS).map((id) => {
-    const gv = gOf(id);
-    return { id, x: POS[id].x, y: POS[id].y, state: nodeState(id), sub: gv != null && id !== START && id !== GOAL ? `g${gv.toFixed(0)}` : undefined };
-  });
-  const edges: GEdge[] = EDGE_PAIRS.map(([u, v]) => ({ from: u, to: v, weight: W(u, v), state: pathEdges.has(`${u}|${v}`) ? 'path' : 'idle' }));
+  // Backward-side nodes get the violet palette (GraphCanvas colour override).
+  const backColor = (id: string): string | undefined => {
+    if (!isBi || id === START || id === GOAL || pathSet.has(id) || bi.current === id || bi.visF.has(id)) return undefined;
+    if (bi.visB.has(id)) return isLight ? '#ddd3fb' : '#3b2f63';
+    if (bi.openB.includes(id) && !bi.openF.includes(id)) return BACK;
+    return undefined;
+  };
+  const subOf = (id: string): string | undefined => {
+    if (id === START || id === GOAL) return undefined;
+    if (isBi) {
+      const f = bi.gF.get(id), b = bi.gB.get(id);
+      if (f != null && b != null) return `F${f} B${b}`;
+      if (f != null) return `F${f}`;
+      if (b != null) return `B${b}`;
+      return undefined;
+    }
+    const gv = search.g.get(id);
+    return gv != null ? `g${gv}` : undefined;
+  };
+  const nodes: GNode[] = Object.keys(POS).map((id) => ({ id, x: POS[id]!.x, y: POS[id]!.y, state: nodeState(id), sub: subOf(id), color: backColor(id) }));
+  const edges: GEdge[] = GRAPHS[graphId].edges.map(([u, v, m]) => ({ from: u, to: v, weight: edgeWeight(u, v, m), state: pathEdges.has(`${u}|${v}`) ? 'path' : 'idle' }));
 
   const expanded = isBi ? bi.expansions : search.expansions;
   const status = isBi ? bi.status : search.status;
-  const cost = isBi ? (bi.status === 'done' ? bi.bestCost : undefined) : (search.status === 'done' ? search.g.get(GOAL) : undefined);
+  const cost = isBi ? (bi.status === 'done' ? bi.bestCost : undefined) : (search.status === 'done' ? costOf(search.path) : undefined);
   const frontierN = isBi ? bi.openF.length + bi.openB.length : search.open.length;
   const algoList: Algo[] = ['bfs', 'dfs', 'dijkstra', 'greedy', 'astar', 'wastar', 'bidir'];
 
@@ -212,10 +228,11 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       narration={narration}
       stats={[
         { label: 'ALGO', value: ALGO_LABEL[algo], color: ACCENT },
-        { label: 'EXPANDED', value: expanded },
-        { label: 'COST', value: cost != null ? cost.toFixed(0) : '—', color: '#fbbf24' },
+        { label: 'EXPANDED', value: isBi ? `${expanded} (${bi.visF.size}+${bi.visB.size})` : expanded },
+        { label: 'COST', value: `${cost != null ? cost : '—'} / ${reference.opt}`, color: '#fbbf24' },
+        { label: 'HOPS', value: status === 'done' ? path.length - 1 : '—' },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, graphSearchPython(algo, weight))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, graphSearchPython({ algo, weight, graph: graphId }))}
       grid={<GraphCanvas nodes={nodes} edges={edges} />}
       algoDock={(
         <>
@@ -232,8 +249,9 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
         <Legend title="NODES" items={[
           { color: '#34d399', label: 'Start' },
           { color: '#f87171', label: 'Goal' },
-          { color: '#38bdf8', label: 'Frontier' },
-          { color: '#1e3a52', label: 'Visited' },
+          { color: '#38bdf8', label: isBi ? 'Frontier (from S)' : 'Frontier' },
+          { color: isLight ? '#cfe0f5' : '#1e3a52', label: isBi ? 'Settled (from S)' : 'Visited' },
+          ...(isBi ? [{ color: BACK, label: 'Frontier (from G)' }, { color: isLight ? '#ddd3fb' : '#3b2f63', label: 'Settled (from G)' }] : []),
           { color: '#fbbf24', label: 'Path' },
         ]} />
       )}
@@ -241,10 +259,21 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
       rewardValue={frontierN}
       rewardSeries={frontierSeries}
       lastLog={lastLog}
-      contextInsight={`${ALGO_LABEL[algo]} on a weighted graph. ${activeHint ? activeHint + ' ' : ''}Run each algorithm and compare COST (total weight) vs hops — BFS minimises hops, Dijkstra/A* minimise weight, A* expands fewest nodes.`}
+      contextInsight={`${ALGO_LABEL[algo]} on the ${GRAPHS[graphId].label} graph: ${GRAPHS[graphId].note} ${activeHint ? activeHint + ' ' : ''}${guarantee(algo)} COST shows the route found / the optimum (${reference.path.join('→')}).`}
       params={(
         <ParamsWrap>
           <ParamsHead title="Graph Search" hint="Edge numbers are weights; S → G." />
+          <div>
+            <MonoLabel style={{ marginBottom: 9 }}>Graph</MonoLabel>
+            <div style={{ display: 'flex', gap: 7 }}>
+              {(Object.keys(GRAPHS) as GraphId[]).map((g) => (
+                <AlgoPill key={g} active={graphId === g} accent={ACCENT} onClick={() => graphSet(g)}>{GRAPHS[g].label}</AlgoPill>
+              ))}
+            </div>
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: '8px 0 0' }}>
+              {GRAPHS[graphId].note} Weights = ceil({K} × length) × toll, so h = {K} × straight-line distance is consistent.
+            </p>
+          </div>
           <div>
             <MonoLabel style={{ marginBottom: 9 }}>Presets · Try this</MonoLabel>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
@@ -252,16 +281,18 @@ const GraphSearchLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) 
                 <AlgoPill key={p.id} active={activePreset === p.id} accent={ACCENT} onClick={() => applyPreset(p.id)}>{p.label}</AlgoPill>
               ))}
             </div>
-            {activeHint && <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: '9px 0 0' }}>{activeHint}</p>}
+            <p style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--t2)', lineHeight: 1.5, margin: '9px 0 0' }}>
+              {activeHint ?? 'Custom settings — compare COST (route found / optimum) and EXPANDED across algorithms.'}
+            </p>
           </div>
           {algo === 'wastar' && (
-            <ParamSlider name="Heuristic weight ε" value={`×${weight.toFixed(1)}`} min={1} max={4} step={0.1} current={weight} onChange={(v) => { setWeight(v); reset(); }} hint="g + ε·h — higher ε = faster, ≤ ε× optimal" />
+            <ParamSlider name="Heuristic weight ε" value={`×${weight.toFixed(1)}`} min={1} max={4} step={0.1} current={weight} onChange={(v) => { setWeight(Math.round(v * 10) / 10); setActivePreset(null); reset(); }} hint="g + ε·h — larger ε expands less; cost ≤ ε × optimum" />
           )}
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={60} max={700} step={20} current={sim.speed} onChange={sim.setSpeed} hint="expansion interval" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: ALGO_LABEL[algo], weight, expanded, status, cost }}
+      currentParams={{ algorithm: ALGO_LABEL[algo], graph: graphId, weight, expanded, status, cost, optimalCost: reference.opt, dijkstraSettles: reference.dijkstra }}
       apiPanel={apiPanel}
     />
   );
