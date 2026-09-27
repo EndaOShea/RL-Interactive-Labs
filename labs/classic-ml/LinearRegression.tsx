@@ -3,130 +3,147 @@ import { LabKitProps } from '../../catalog/types';
 import { SimulationUpdate } from '../../types';
 import LabStage from '../../components/labkit/LabStage';
 import FunctionPlot from '../../components/labkit/viz/FunctionPlot';
-import { ParamSlider, AlgoPill, RunControls, Legend, MonoLabel, GOOD } from '../../components/stage/primitives';
+import { ParamSlider, AlgoPill, RunControls, Legend, MonoLabel, GOOD, BAD } from '../../components/stage/primitives';
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { clamp01, randn, ParamsWrap, ParamsHead } from './shared';
+import { ParamsWrap, ParamsHead } from './shared';
+import { mulberry32 } from './rng';
+import { makeRegData, gdStep, closedForm, objective, halfMse, hessianEigs, truthGap, truth, predict } from './linregCore';
+import type { Model } from './linregCore';
 import { linregPython } from './python';
 import { PresetChips, Preset } from './presets';
 import { useTheme } from '../../utils/theme';
 
 const ACCENT = '#34d399';
 const RESID = 'rgba(248,113,113,.5)';
+const N_TEST = 60;
+const DIVERGED = 1e6;
 
-// Curved ground truth so polynomial degree actually matters.
-const truth = (x: number) => 0.18 + 0.95 * x - 0.55 * x * x + 0.42 * Math.pow(x - 0.5, 3) * 4;
-const makeData = (n: number, noise: number) =>
-  Array.from({ length: n }, () => { const x = Math.random(); return { x, y: clamp01(truth(x) + randn() * noise) }; });
+type Status = 'run' | 'converged' | 'diverged';
+const zeroModel = (d: number): Model => ({ w: new Array(d).fill(0), b: 0 });
 
-const features = (x: number, degree: number) => Array.from({ length: degree }, (_, d) => Math.pow(x, d + 1));
-
-interface Cfg { degree: number; ridge: number; alpha: number; }
+interface Cfg { degree: number; ridge: number; alpha: number; n: number; noise: number; perTick: number; }
+// Every preset uses data seed 1; the numbers in the hints were measured on it and on 80 other seeds.
 const PRESETS: Preset<Cfg>[] = [
-  { id: 'line', label: 'Straight line', hint: 'Degree 1 underfits the curved truth — residuals stay large (high bias).', values: { degree: 1, ridge: 0, alpha: 0.4 } },
-  { id: 'cubic', label: 'Cubic fit', hint: 'Degree 3 captures the bend — the loss floor drops to the noise level.', values: { degree: 3, ridge: 0, alpha: 0.3 } },
-  { id: 'overfit', label: 'Overfit (deg 6)', hint: 'High degree wiggles through noise. Add ridge to tame it.', values: { degree: 6, ridge: 0, alpha: 0.25 } },
-  { id: 'ridge', label: 'Ridge-tamed', hint: 'λ shrinks the high-degree weights — a smoother curve that generalises.', values: { degree: 6, ridge: 0.05, alpha: 0.25 } },
+  { id: 'line', label: 'Straight line', hint: 'Degree 1 cannot bend: J settles far above the noise floor ½σ², and most of it is bias.', values: { degree: 1, ridge: 0, alpha: 0.5, n: 45, noise: 0.1, perTick: 1 } },
+  { id: 'cubic', label: 'Cubic fit', hint: 'Degree 3 matches the true curve: GD converges in ~30 epochs to a curve within ≈0.001 of the truth, and held-out test J lands on the noise floor ½σ².', values: { degree: 3, ridge: 0, alpha: 1.0, n: 45, noise: 0.1, perTick: 1 } },
+  { id: 'overfit', label: 'Overfit (deg 12)', hint: '15 points, degree 12: train J drops below the noise floor while test J keeps rising — the curve is fitting the noise.', values: { degree: 12, ridge: 0, alpha: 1.5, n: 15, noise: 0.1, perTick: 20 } },
+  { id: 'ridge', label: 'Ridge-tamed', hint: 'Same 15 points and degree 12 with λ = 0.01: the penalty keeps the curve smooth and test J near 2× the floor.', values: { degree: 12, ridge: 0.01, alpha: 1.5, n: 15, noise: 0.1, perTick: 20 } },
+  { id: 'diverge', label: 'α too large', hint: 'α = 2.4 is above this data\'s stability limit 2/λmax (≤ 2 here): every step overshoots and the loss explodes.', values: { degree: 3, ridge: 0, alpha: 2.4, n: 45, noise: 0.1, perTick: 1 } },
 ];
 
 const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const isLight = useTheme() === 'light';
   const [n, setN] = useState(45);
-  const [noise, setNoise] = useState(0.05);
-  const [alpha, setAlpha] = useState(0.3);
+  const [noise, setNoise] = useState(0.1);
+  const [seed, setSeed] = useState(1);
+  const [alpha, setAlpha] = useState(0.5);
   const [degree, setDegree] = useState(1);
   const [ridge, setRidge] = useState(0);
-  const [data, setData] = useState(() => makeData(45, 0.05));
-  const [w, setW] = useState<number[]>([0]);
-  const [b, setB] = useState(0);
+  const [perTick, setPerTick] = useState(1);
+  const [model, setModel] = useState<Model>(() => zeroModel(1));
   const [epoch, setEpoch] = useState(0);
   const [loss, setLoss] = useState<number[]>([]);
+  const [status, setStatus] = useState<Status>('run');
   const [presetId, setPresetId] = useState<string | undefined>();
-  const [converged, setConverged] = useState(false);
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const narration = useNarration();
 
-  const predict = (x: number, ww: number[], bb: number) => features(x, ww.length).reduce((s, f, i) => s + ww[i] * f, bb);
+  const data = useMemo(() => makeRegData(mulberry32(seed), n, N_TEST, noise), [seed, n, noise]);
+  const { train, test } = data;
+  const cf = useMemo(() => closedForm(train, degree, ridge), [train, degree, ridge]);
+  const objStar = useMemo(() => objective(train, cf, ridge), [train, cf, ridge]);
+  const eig = useMemo(() => hessianEigs(train, degree, ridge), [train, degree, ridge]);
+  const bound = 2 / eig.max;
+  const floor = 0.5 * noise * noise;
+  const trainJ = halfMse(train, model);
+  const testJ = halfMse(test, model);
+  const finite = Number.isFinite(trainJ) && trainJ < DIVERGED;
 
-  const curJ = useMemo(() => {
-    if (!data.length) return 0;
-    let s = 0; data.forEach((p) => { const e = predict(p.x, w, b) - p.y; s += e * e; });
-    return 0.5 * s / data.length;
-  }, [w, b, data]);
+  const describeFit = (m: Model) => {
+    const tJ = halfMse(train, m), vJ = halfMse(test, m), gap = truthGap(m);
+    if (tJ < 0.8 * floor && vJ > 1.5 * floor) {
+      return `Train J is ${tJ.toFixed(4)}, BELOW the noise floor one half sigma squared of ${floor.toFixed(4)}: the curve is fitting the noise. Held-out test J is ${vJ.toFixed(4)}, which is the real verdict — this is overfitting.`;
+    }
+    if (gap > Math.max(floor, 1e-5)) {
+      return `Train J is ${tJ.toFixed(4)}. Noise alone would give about ${floor.toFixed(4)}; the fitted curve is on average ${gap.toFixed(4)} away from the true curve, in the same half-mean-square units. That gap is bias: degree ${degree} cannot bend enough. Test J is ${vJ.toFixed(4)}.`;
+    }
+    return `Train J is ${tJ.toFixed(4)} and test J ${vJ.toFixed(4)}, both close to the noise floor of ${floor.toFixed(4)}; the curve is only ${gap.toFixed(4)} from the true one. The model has captured the signal and what remains is irreducible noise.`;
+  };
 
   const step = () => {
-    const m = data.length;
-    if (!m) return;
-    const dw = new Array(degree).fill(0);
-    let db = 0, J = 0;
-    data.forEach((p) => {
-      const e = predict(p.x, w, b) - p.y;
-      const f = features(p.x, degree);
-      for (let i = 0; i < degree; i++) dw[i] += e * f[i];
-      db += e; J += e * e;
-    });
-    for (let i = 0; i < degree; i++) dw[i] = dw[i] / m + ridge * w[i]; // ridge weight decay
-    db /= m; J = 0.5 * J / m;
-    const nw = w.map((wi, i) => wi - alpha * dw[i]);
-    const nb = b - alpha * db;
-    const prev = loss[loss.length - 1] ?? Infinity;
-    setW(nw); setB(nb); setEpoch((e) => e + 1);
-    setLoss((L) => [...L, J].slice(-60));
-
-    const settled = Math.abs(prev - J) < 1e-6 && epoch > 8;
+    if (status !== 'run' || !train.length) { sim.pause(); return; }
+    let m = model;
+    let e = epoch;
+    let st: ReturnType<typeof gdStep> | null = null;
+    const Js: number[] = [];
+    let nextStatus: Status = 'run';
+    for (let t = 0; t < Math.max(1, perTick); t++) {
+      st = gdStep(train, m, alpha, ridge);
+      m = st.next; e += 1; Js.push(st.J);
+      const obj = objective(train, m, ridge);
+      if (!Number.isFinite(obj) || obj > DIVERGED) { nextStatus = 'diverged'; break; }
+      if (obj - objStar < 1e-6) { nextStatus = 'converged'; break; }
+    }
+    setModel(m); setEpoch(e);
+    setLoss((L) => [...L, ...Js].slice(-120));
+    setStatus(nextStatus);
     const modelWord = degree === 1 ? 'a straight line' : `a degree ${degree} polynomial`;
     const intro = ridge > 0
-      ? `The challenge here: fit ${modelWord} to the scattered points without letting a flexible, high-degree curve chase the noise. This uses gradient descent with ridge regularisation — the loss is the mean squared error plus lambda times the squared weights, so each step both follows the data gradient and shrinks every weight a little toward zero, gentle weight decay. That trades a touch of bias for much less variance. Watch the green curve and the red residual sticks, and the loss curve settling toward the noise floor. Regularised regression like this underpins forecasting, pricing models, and genomics where there are far more features than samples.`
-      : `The challenge here: find the curve that best predicts y from x across these scattered points. We fit ${modelWord} by gradient descent, minimising the mean squared error — the average squared vertical gap between the curve and the points. Each epoch nudges the weights downhill, theta moves a small step alpha against the gradient of the loss. Watch the green fit bend toward the data, the red sticks shrink as residuals fall, and the loss curve decay toward the noise floor. Regression like this is the workhorse of forecasting, econometrics, and trend estimation across science and industry.`;
+      ? `The challenge here: fit ${modelWord} to the points without letting a flexible curve chase the noise. Gradient descent minimises half the mean squared error plus half lambda times the squared weights, so each step follows the data gradient and also shrinks every weight toward zero — weight decay. The features are Legendre polynomials on minus one to one, which keeps the loss surface well conditioned; a high-degree Legendre term costs more weight per unit of wiggle, so the penalty prefers smooth curves. Watch the train and held-out test losses in the header. Regularised regression like this underpins forecasting, pricing models and genomics.`
+      : `The challenge here: find the curve that best predicts y from x. We fit ${modelWord} by gradient descent on half the mean squared error: every epoch moves the weights a step alpha against the gradient. The features are Legendre polynomials on minus one to one, which keeps the loss surface well conditioned, and the dashed curve is the exact least-squares answer gradient descent is heading for. Watch the red residuals shrink, and compare the training loss with the held-out test loss. Regression like this is the workhorse of forecasting and trend estimation.`;
     narration.narratePhase(`run:${degree}:${ridge > 0}`, intro);
-    if (J > prev * 1.05) {
-      narration.narratePhase('diverge', `The loss is climbing instead of falling, which means alpha is too large: each step overshoots the minimum and bounces up the far wall of the loss surface. Lower the learning rate to make gradient descent stable.`);
-    } else if (settled && !converged) {
-      setConverged(true);
-      narration.narratePhase(`done:${degree}:${ridge > 0}`, `The fit has converged — the loss has flattened near ${J.toFixed(4)}. That floor reflects the irreducible noise in the data, not a poor model${ridge > 0 ? ', and ridge has kept the weights small and the curve smooth' : ''}. Compare the curve against the truth: that is the bias-variance balance you chose with the degree.`);
+    if (nextStatus === 'diverged') {
+      sim.pause();
+      narration.narratePhase(`diverge:${alpha}`, `The loss is exploding. For this data gradient descent is only stable when alpha is below two over the largest eigenvalue of the loss curvature, which is ${bound.toFixed(3)}; alpha is ${alpha}, so every step overshoots the minimum and lands higher on the far wall. Lower alpha below ${bound.toFixed(2)}.`);
+    } else if (nextStatus === 'converged') {
+      sim.pause();
+      narration.narratePhase(`done:${degree}:${ridge}:${seed}`, `Gradient descent has reached the closed-form optimum after ${e} epochs. ${describeFit(m)}`);
     }
-
+    const J = Js[Js.length - 1] ?? 0;
+    const dw1 = st?.dw[0] ?? 0;
     setLastLog({
       algorithm: `${degree > 1 ? `Polynomial (deg ${degree})` : 'Linear'} Regression · GD${ridge > 0 ? ' · Ridge' : ''}`,
-      stepDescription: `Epoch ${epoch + 1} — step weights downhill`,
-      formula: ridge > 0 ? 'w ← w − α(∇J + λw),   ŷ = Σ wⱼ xʲ + b' : 'θ ← θ − α ∇J,   J = ½·mean((ŷ − y)²)',
-      variables: { 'w₁': nw[0], 'b': nb, '∂J/∂w₁': dw[0], 'J': J, 'λ': ridge },
-      result: `J = ${J.toFixed(4)}`,
+      stepDescription: `Epoch${Js.length > 1 ? `s ${epoch + 1}–${e}` : ` ${e}`} — step the weights downhill`,
+      formula: ridge > 0 ? 'w ← w − α(∇J + λw),  b ← b − α·∂J/∂b,  ŷ = b + Σⱼ wⱼPⱼ(x)' : 'θ ← θ − α∇J,  J = ½·mean((ŷ − y)²),  ŷ = b + Σⱼ wⱼPⱼ(x)',
+      variables: { 'J (train)': +J.toFixed(5), 'w₁': +(m.w[0] ?? 0).toFixed(4), 'b': +m.b.toFixed(4), '∂J/∂w₁': +dw1.toFixed(4), 'λ': ridge, 'α': alpha },
+      result: nextStatus === 'diverged' ? `diverged — α > 2/λmax = ${bound.toFixed(3)}` : `J = ${J.toFixed(5)}${nextStatus === 'converged' ? ' · converged' : ''}`,
       mathDetails: {
         params: [
-          { label: 'α', info: `${alpha}. Step size. Too small = slow; too large = the loss oscillates or diverges.` },
-          { label: 'degree', info: `${degree}. Polynomial order — degree 1 is a line; higher degrees bend to fit curvature (and can overfit).` },
-          { label: 'λ', info: ridge > 0 ? `${ridge}. Ridge penalty shrinks the weights toward 0, trading a little bias for much less variance.` : 'No regularisation — weights are unconstrained.' },
-          { label: 'J', info: `${J.toFixed(4)}. Mean squared error — should fall toward a floor set by the noise.` },
+          { label: 'α', info: `${alpha}. Step size. Stable only when α < 2/λmax = ${bound.toFixed(3)} for this data (λmax = largest eigenvalue of the loss curvature).` },
+          { label: 'degree', info: `${degree}. Legendre polynomials P₁..P_${degree} on x ∈ [−1, 1] — the same curves as x, x², …, but orthogonal, so GD converges fast.` },
+          { label: 'λ', info: ridge > 0 ? `${ridge}. Ridge penalty ½λ‖w‖² (bias not penalised): its gradient λw shrinks every weight toward 0 each step.` : 'No regularisation — weights are unconstrained.' },
+          { label: 'J', info: `${J.toFixed(5)} = ½·mean((ŷ−y)²) on the ${train.length} training points; noise floor ½σ² = ${floor.toFixed(5)}; closed-form optimum ${halfMse(train, cf).toFixed(5)}.` },
         ],
-        implication: J > prev ? 'Loss rose — α is too large for this surface.' : 'Loss is decreasing — the fit is improving.',
+        implication: nextStatus === 'diverged' ? 'α is past the stability limit — the loss grows every step.' : nextStatus === 'converged' ? 'At the optimum — further steps change nothing.' : 'Loss is decreasing toward the closed-form optimum.',
       },
     });
   };
 
   const sim = useSimLoop(step, { initialSpeed: 150 });
 
-  const resetWeights = (deg: number) => { setW(new Array(deg).fill(0)); setB(0); setEpoch(0); setLoss([]); setConverged(false); setLastLog(null); narration.cancel(); };
-  const regen = (count = n, ns = noise) => { setData(makeData(count, ns)); resetWeights(degree); };
+  const resetWeights = (deg: number) => { setModel(zeroModel(deg)); setEpoch(0); setLoss([]); setStatus('run'); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); resetWeights(degree); };
-  const changeDegree = (d: number) => { setDegree(d); resetWeights(d); setPresetId(undefined); };
+  const regen = () => { sim.stop(); setSeed((s) => s + 1); resetWeights(degree); };
+  const changeDegree = (d: number) => { sim.stop(); setDegree(d); resetWeights(d); setPresetId(undefined); };
   const applyPreset = (p: Preset<Cfg>) => {
-    setDegree(p.values.degree); setRidge(p.values.ridge); setAlpha(p.values.alpha);
-    resetWeights(p.values.degree); setPresetId(p.id);
+    sim.stop();
+    const v = p.values;
+    setDegree(v.degree); setRidge(v.ridge); setAlpha(v.alpha); setN(v.n); setNoise(v.noise); setPerTick(v.perTick); setSeed(1);
+    resetWeights(v.degree); setPresetId(p.id);
     narration.narratePhase(`preset:${p.id}`, p.hint);
   };
 
-  // Richer visuals: sampled curve for the (possibly polynomial) fit + residual sticks.
-  const curve = Array.from({ length: 60 }, (_, i) => { const x = i / 59; return { x, y: predict(x, w, b) }; });
-  const residuals = data.map((p) => ({ points: [{ x: p.x, y: p.y }, { x: p.x, y: predict(p.x, w, b) }], color: RESID, width: 1 }));
+  const grid = Array.from({ length: 121 }, (_, i) => -1 + (2 * i) / 120);
+  const fitCurve = grid.map((x) => ({ x, y: finite ? predict(x, model) : NaN }));
+  const cfCurve = grid.map((x) => ({ x, y: predict(x, cf) }));
+  const truthCurve = grid.map((x) => ({ x, y: truth(x) }));
+  const residuals = finite ? train.map((p) => ({ points: [{ x: p.x, y: p.y }, { x: p.x, y: predict(p.x, model) }], color: RESID, width: 1 })) : [];
 
-  const insight = `α = ${alpha}, degree ${degree}${ridge > 0 ? `, ridge λ=${ridge}` : ''}. ` +
-    (degree === 1 ? 'A straight line cannot follow the curved truth — expect a high loss floor (bias). '
-      : ridge > 0 ? 'Ridge keeps the high-degree weights small, so the curve stays smooth. '
-        : degree >= 5 ? 'A high-degree polynomial can chase noise — watch for wiggles between points. '
-          : 'The polynomial bends to follow the data; the loss floor drops toward the noise. ') +
-    'Red sticks show each residual (gap between fit and point).';
+  const insight = `α = ${alpha} (stable below 2/λmax = ${bound.toFixed(3)}), degree ${degree}${ridge > 0 ? `, ridge λ = ${ridge}` : ''}, ${train.length} training / ${test.length} held-out points, noise σ = ${noise} → floor ½σ² = ${floor.toFixed(4)}. ` +
+    (finite ? `Now: train J ${trainJ.toFixed(4)}, test J ${testJ.toFixed(4)}, closed-form train J ${halfMse(train, cf).toFixed(4)} / test J ${halfMse(test, cf).toFixed(4)}. ` : 'The run diverged. ') +
+    'Dashed: the closed-form optimum GD is heading for; faint: the true curve; red sticks: residuals.';
 
   return (
     <LabStage
@@ -135,17 +152,26 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
       narration={narration}
       stats={[
         { label: 'EPOCH', value: epoch },
-        { label: 'LOSS', value: curJ.toFixed(4), color: GOOD },
-        { label: 'DEG', value: degree },
-        { label: 'λ', value: ridge.toFixed(2) },
+        { label: 'TRAIN J', value: finite ? trainJ.toFixed(4) : '∞', color: GOOD },
+        { label: 'TEST J', value: finite ? testJ.toFixed(4) : '∞', color: finite && testJ > 1.5 * floor ? BAD : undefined },
+        { label: '½σ²', value: floor.toFixed(4) },
+        { label: '2/λmax', value: bound.toFixed(2), color: alpha >= bound ? BAD : undefined },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, linregPython(alpha, degree, ridge))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, linregPython({ train, test, degree, alpha, ridge, noise, labEpochs: epoch }))}
       grid={(
         <FunctionPlot
-          domain={[0, 1]}
-          range={[0, 1]}
-          scatter={data.map((p) => ({ x: p.x, y: p.y, color: 'var(--t1)' }))}
-          series={[...residuals, { points: curve, color: isLight ? 'var(--good)' : ACCENT, width: 2.6 }]}
+          domain={[-1, 1]}
+          range={[-2, 1.5]}
+          scatter={[
+            ...test.map((p) => ({ x: p.x, y: p.y, color: 'var(--t2)', r: 2.2 })),
+            ...train.map((p) => ({ x: p.x, y: p.y, color: 'var(--t1)' })),
+          ]}
+          series={[
+            { points: truthCurve, color: 'var(--t2)', width: 1.2 },
+            ...residuals,
+            { points: cfCurve, color: isLight ? 'var(--good)' : ACCENT, width: 1.4, dash: true },
+            { points: fitCurve, color: isLight ? 'var(--good)' : ACCENT, width: 2.6 },
+          ]}
           xLabel="x"
           yLabel="y"
         />
@@ -154,22 +180,24 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
         <>
           <MonoLabel style={{ marginBottom: 11 }}>Model</MonoLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
-            <AlgoPill active={degree === 1} onClick={() => changeDegree(1)}>Linear · deg 1</AlgoPill>
+            <AlgoPill active={degree === 1} onClick={() => { setRidge(0); changeDegree(1); }}>Linear · deg 1</AlgoPill>
             <AlgoPill active={degree > 1 && ridge === 0} onClick={() => { setRidge(0); changeDegree(degree > 1 ? degree : 3); }}>Polynomial</AlgoPill>
-            <AlgoPill active={ridge > 0} onClick={() => { if (degree < 2) changeDegree(6); setRidge(ridge > 0 ? ridge : 0.05); setPresetId(undefined); }}>Ridge (L2)</AlgoPill>
+            <AlgoPill active={ridge > 0} onClick={() => { if (degree < 2) changeDegree(12); setRidge(ridge > 0 ? ridge : 0.01); setPresetId(undefined); }}>Ridge (L2)</AlgoPill>
           </div>
         </>
       )}
-      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={() => regen()} speed={sim.speed} onSpeed={sim.setSpeed} />}
+      controls={<RunControls isPlaying={sim.isPlaying} onPlay={sim.toggle} onReset={reset} onNewMap={regen} speed={sim.speed} onSpeed={sim.setSpeed} />}
       legend={(
         <Legend title="FIT" items={[
-          { color: 'var(--t1)', label: 'Data' },
-          { color: ACCENT, label: 'ŷ = Σ wⱼxʲ + b' },
+          { color: 'var(--t1)', label: 'Train' },
+          { color: 'var(--t2)', label: 'Held-out test' },
+          { color: ACCENT, label: 'GD fit ŷ = b + Σ wⱼPⱼ(x)' },
+          { node: <span style={{ width: 12, height: 0, borderTop: `2px dashed ${ACCENT}`, display: 'inline-block' }} />, label: 'Closed-form optimum' },
           { color: '#f87171', label: 'Residual' },
         ]} />
       )}
-      rewardLabel="LOSS (MSE)"
-      rewardValue={curJ.toFixed(4)}
+      rewardLabel="TRAIN LOSS J = ½·MSE"
+      rewardValue={finite ? trainJ.toFixed(4) : '∞'}
       rewardSeries={loss}
       lastLog={lastLog}
       contextInsight={insight}
@@ -177,16 +205,17 @@ const LinearRegressionLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPane
         <ParamsWrap>
           <ParamsHead title="Regression Parameters" hint="Tune α, degree and ridge; press Run to descend." />
           <PresetChips presets={PRESETS} activeId={presetId} onApply={applyPreset} />
-          <ParamSlider name="α · learning rate" value={alpha.toFixed(2)} min={0.01} max={1} step={0.01} current={alpha} onChange={(v) => { setAlpha(v); setPresetId(undefined); }} hint="gradient-descent step size" />
-          <ParamSlider name="Polynomial degree" value={String(degree)} min={1} max={8} step={1} current={degree} onChange={changeDegree} hint="model flexibility (1 = line)" />
-          <ParamSlider name="Ridge λ" value={ridge.toFixed(3)} min={0} max={0.2} step={0.005} current={ridge} onChange={(v) => { setRidge(v); setPresetId(undefined); }} hint="L2 weight-shrinkage penalty" />
-          <ParamSlider name="Noise" value={noise.toFixed(3)} min={0} max={0.15} step={0.005} current={noise} onChange={(v) => { setNoise(v); regen(n, v); }} hint="scatter around the true curve" />
-          <ParamSlider name="Points" value={String(n)} min={10} max={80} step={5} current={n} onChange={(v) => { setN(v); regen(v, noise); }} hint="dataset size" />
-          <ParamSlider name="Speed" value={`${sim.speed}ms`} min={20} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint="epoch interval" />
+          <ParamSlider name="α · learning rate" value={alpha.toFixed(2)} min={0.01} max={2.5} step={0.01} current={alpha} onChange={(v) => { setAlpha(v); setPresetId(undefined); if (status === 'diverged') resetWeights(degree); }} hint={`step size · stable below 2/λmax = ${bound.toFixed(2)}`} />
+          <ParamSlider name="Polynomial degree" value={String(degree)} min={1} max={12} step={1} current={degree} onChange={changeDegree} hint="Legendre P₁…P_d (1 = line)" />
+          <ParamSlider name="Ridge λ" value={ridge.toFixed(3)} min={0} max={0.2} step={0.001} current={ridge} onChange={(v) => { setRidge(v); setPresetId(undefined); if (status !== 'run') resetWeights(degree); }} hint="penalty ½λ‖w‖²" />
+          <ParamSlider name="Noise σ" value={noise.toFixed(2)} min={0} max={0.3} step={0.01} current={noise} onChange={(v) => { sim.stop(); setNoise(v); resetWeights(degree); setPresetId(undefined); }} hint="scatter around the true curve" />
+          <ParamSlider name="Training points" value={String(n)} min={10} max={80} step={5} current={n} onChange={(v) => { sim.stop(); setN(v); resetWeights(degree); setPresetId(undefined); }} hint={`+ ${N_TEST} held-out test points`} />
+          <ParamSlider name="Epochs per tick" value={String(perTick)} min={1} max={50} step={1} current={perTick} onChange={setPerTick} hint="fast-forward gradient descent" />
+          <ParamSlider name="Speed" value={`${sim.speed}ms`} min={20} max={300} step={10} current={sim.speed} onChange={sim.setSpeed} hint="tick interval" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'Polynomial/Ridge Regression (GD)', alpha, degree, ridge, b: +b.toFixed(3), epoch }}
+      currentParams={{ algorithm: 'Polynomial/Ridge Regression (GD, Legendre basis)', alpha, stableAlphaBelow: +bound.toFixed(3), degree, ridge, noise, trainPoints: n, epoch, trainJ: finite ? +trainJ.toFixed(5) : 'diverged', testJ: finite ? +testJ.toFixed(5) : 'diverged' }}
       apiPanel={apiPanel}
     />
   );

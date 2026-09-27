@@ -7,33 +7,39 @@ import { ParamSlider, AlgoPill, RunControls, Legend, MonoLabel } from '../../com
 import { useSimLoop } from '../../hooks/useSimLoop';
 import { useNarration } from '../../hooks/useNarration';
 import { downloadCode } from '../../utils/downloadCode';
-import { Pt, makeBlobs, clamp01, ParamsWrap, ParamsHead } from './shared';
+import { clamp01, ParamsWrap, ParamsHead } from './shared';
+import { mulberry32, q4 } from './rng';
+import { seededBlobs } from './datasets';
+import { classify, kEff } from './knnCore';
+import type { Metric, LP } from './knnCore';
 import { knnPython } from './python';
 import { PresetChips, Preset } from './presets';
 import { useTheme } from '../../utils/theme';
 
 const CENTERS = [{ x: 0.25, y: 0.30 }, { x: 0.72, y: 0.35 }, { x: 0.50, y: 0.75 }];
 const SPREAD = 0.1;
+const FIELD_RES = 90;
 
-type Metric = 'l1' | 'l2' | 'cheb';
 const METRIC_LABEL: Record<Metric, string> = { l2: 'EUCLIDEAN', l1: 'MANHATTAN', cheb: 'CHEBYSHEV' };
+const makePoints = (seed: number, perClass: number): LP[] => seededBlobs(mulberry32(seed), CENTERS, SPREAD, perClass);
 
 interface KnnCfg { k: number; metric: Metric; weighted: boolean; }
 const PRESETS: Preset<KnnCfg>[] = [
-  { id: 'overfit', label: 'Overfit (k=1)', hint: 'k=1 memorises every point — jagged islands of noise. Watch the boundary cling to single dots.', values: { k: 1, metric: 'l2', weighted: false } },
-  { id: 'smooth', label: 'Smooth (k=19)', hint: 'Large k averages a wide neighbourhood — a smooth boundary that can outvote small classes.', values: { k: 19, metric: 'l2', weighted: false } },
-  { id: 'manhattan', label: 'Manhattan grid', hint: 'L1 metric draws diamond neighbourhoods — boundaries become axis-aligned and blocky.', values: { k: 7, metric: 'l1', weighted: false } },
-  { id: 'weighted', label: 'Distance-weighted', hint: 'Closer neighbours count more (1/d). Even large k stays responsive near the query.', values: { k: 13, metric: 'l2', weighted: true } },
+  { id: 'overfit', label: 'Overfit (k=1)', hint: 'k=1 memorises every point — each training point owns the cells nearest to it, so single stray dots carve islands.', values: { k: 1, metric: 'l2', weighted: false } },
+  { id: 'smooth', label: 'Smooth (k=19)', hint: 'Large k averages a wide neighbourhood — a smooth boundary that can outvote a small class near its edge.', values: { k: 19, metric: 'l2', weighted: false } },
+  { id: 'manhattan', label: 'Manhattan', hint: 'L1 measures |Δx| + |Δy| (diamond neighbourhoods): the boundary between two points is built from horizontal, vertical and 45° pieces, so the regions look angular.', values: { k: 7, metric: 'l1', weighted: false } },
+  { id: 'weighted', label: 'Distance-weighted', hint: 'Each neighbour votes with weight 1/d — ring size shows its actual weight — so even k=13 stays responsive near the query.', values: { k: 13, metric: 'l2', weighted: true } },
 ];
 
 const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const isLight = useTheme() === 'light';
   const [perClass, setPerClass] = useState(14);
+  const [seed, setSeed] = useState(1);
   const [k, setK] = useState(5);
   const [metric, setMetric] = useState<Metric>('l2');
   const [weighted, setWeighted] = useState(false);
   const [paintClass, setPaintClass] = useState(0);
-  const [points, setPoints] = useState<Pt[]>(() => makeBlobs(CENTERS, SPREAD, 14));
+  const [points, setPoints] = useState<LP[]>(() => makePoints(1, 14));
   const [version, setVersion] = useState(0);
   const [query, setQuery] = useState({ x: 0.5, y: 0.5 });
   const [conf, setConf] = useState<number[]>([]);
@@ -41,51 +47,36 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
   const [lastLog, setLastLog] = useState<SimulationUpdate | null>(null);
   const narration = useNarration();
 
-  const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => {
-    if (metric === 'l1') return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
-    if (metric === 'cheb') return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
-
-  const predictAt = (x: number, y: number) => {
-    const kk = Math.min(k, points.length);
-    const ds = points.map((p) => ({ p, d: dist({ x, y }, p) })).sort((a, b) => a.d - b.d).slice(0, kk);
-    const votes: Record<number, number> = {};
-    let totalW = 0;
-    ds.forEach((n) => { const w = weighted ? 1 / (n.d + 1e-9) : 1; votes[n.p.cls] = (votes[n.p.cls] || 0) + w; totalW += w; });
-    let best = 0, bestW = -1;
-    Object.entries(votes).forEach(([c, v]) => { if (v > bestW) { bestW = v; best = +c; } });
-    return { cls: best, conf: totalW ? bestW / totalW : 0, neighbors: ds.map((n) => ({ ...n.p, d: n.d })) };
-  };
-
-  const current = useMemo(() => predictAt(query.x, query.y), [query, k, metric, weighted, points]); // eslint-disable-line react-hooks/exhaustive-deps
-  const classify = (x: number, y: number) => predictAt(x, y).cls;
-  const fieldKey = `${k}-${metric}-${weighted}-${points.length}-${version}`;
+  const n = points.length;
+  const kk = kEff(k, n);
+  const current = useMemo(() => classify(points, query.x, query.y, k, metric, weighted), [points, query, k, metric, weighted]);
+  const classifyAt = (x: number, y: number) => classify(points, x, y, k, metric, weighted).cls;
+  const fieldKey = `${kk}-${metric}-${weighted}-${n}-${version}`;
 
   const step = () => {
     const nx = clamp01(query.x + (Math.random() - 0.5) * 0.12);
     const ny = clamp01(query.y + (Math.random() - 0.5) * 0.12);
-    const res = predictAt(nx, ny);
-    const kk = Math.min(k, points.length);
+    const res = classify(points, nx, ny, k, metric, weighted);
     setQuery({ x: nx, y: ny });
     setConf((c) => [...c, res.conf].slice(-50));
     const pct = Math.round(res.conf * 100);
     const metricWord = metric === 'l1' ? 'Manhattan' : metric === 'cheb' ? 'Chebyshev' : 'Euclidean';
     const intro = weighted
-      ? `The challenge here: label the white query point as one of three classes using only the labelled examples scattered around it. Nearest-neighbours answers with a distance-weighted vote — each of its ${kk} closest points votes with weight one over its distance, measured by the ${metricWord} distance, so nearer neighbours count for more. There is no training; the data itself is the model. Watch the shaded regions, the predicted class everywhere, and see the boundary smooth as you raise k. This same idea powers recommendation systems, image and handwriting recognition, and anomaly detection.`
-      : `The challenge here: label the white query point as one of three classes using only the labelled examples scattered around it. Nearest-neighbours answers with a plain majority vote of its ${kk} closest neighbours, with closeness measured by the ${metricWord} distance. There is no training phase — the stored data is the model. Watch the shaded regions, which show the predicted class everywhere: a small k hugs individual points while a large k smooths the boundary. This same idea powers recommendation systems, image and handwriting recognition, and anomaly detection.`;
-    narration.narratePhase(`run:${k}:${metric}:${weighted}`, intro);
+      ? `The challenge here: label the white query point as one of three classes using only the labelled examples around it. Nearest neighbours answers with a distance-weighted vote: each of its ${res.k} closest points, by ${metricWord} distance, votes with weight one over its distance, so nearer neighbours count for more; the ring around each neighbour is drawn in proportion to that weight. There is no training — the stored data is the model. The shaded regions are the predicted class everywhere. This idea powers recommendation systems, handwriting recognition and anomaly detection.`
+      : `The challenge here: label the white query point as one of three classes using only the labelled examples around it. Nearest neighbours answers with a plain majority vote of its ${res.k} closest points by ${metricWord} distance; if two classes tie, the class of the nearest tied neighbour wins. There is no training — the stored data is the model. The shaded regions are the predicted class everywhere: a small k hugs individual points while a large k smooths the boundary. This idea powers recommendation systems, handwriting recognition and anomaly detection.`;
+    narration.narratePhase(`run:${kk}:${metric}:${weighted}`, intro);
+    const voteText = [...res.votes.entries()].sort((a, b) => a[0] - b[0]).map(([c, v]) => `class ${c}: ${weighted ? v.toFixed(1) : v}`).join(' · ');
     setLastLog({
-      algorithm: `k-NN · k=${k} · ${METRIC_LABEL[metric]}${weighted ? ' · weighted' : ''}`,
-      stepDescription: weighted ? 'Classify by distance-weighted vote of nearest neighbours' : 'Classify query by majority vote of nearest neighbours',
-      formula: weighted ? 'ŷ = argmax_c Σ_{i∈N_k} 1/d(x,xᵢ)·1{yᵢ=c}' : 'ŷ = mode{ yᵢ : xᵢ ∈ N_k(x) }',
-      variables: { 'x': nx, 'y': ny, 'k': k, 'vote': res.conf, 'ŷ': res.cls },
-      result: `class ${res.cls} · ${pct}% of ${kk}`,
+      algorithm: `k-NN · k=${res.k} · ${METRIC_LABEL[metric]}${weighted ? ' · weighted' : ''}`,
+      stepDescription: weighted ? 'Classify the query by a 1/d-weighted vote of its nearest neighbours' : 'Classify the query by a majority vote of its nearest neighbours',
+      formula: weighted ? 'ŷ = argmax_c Σ_{i∈N_k} 1/(d(x,xᵢ)+10⁻⁹)·1{yᵢ=c}' : 'ŷ = mode{ yᵢ : xᵢ ∈ N_k(x) }',
+      variables: { 'x': +nx.toFixed(3), 'y': +ny.toFixed(3), 'k': res.k, 'vote share': +res.conf.toFixed(3), 'ŷ': res.cls },
+      result: `class ${res.cls} · ${pct}% of the ${weighted ? 'vote weight' : `${res.k} votes`}${res.tie ? ' · tie → nearest' : ''}`,
       mathDetails: {
         params: [
-          { label: 'k', info: `${k}. Neighbours polled — small k = jagged boundary, large k = smoother.` },
-          { label: 'metric', info: metric === 'l2' ? 'Euclidean (L2) — circular neighbourhoods.' : metric === 'l1' ? 'Manhattan (L1) — diamond neighbourhoods.' : 'Chebyshev (L∞) — square neighbourhoods; only the largest coordinate gap counts.' },
-          { label: 'vote', info: weighted ? `${pct}% weighted share — each neighbour contributes 1/distance, so nearer points dominate.` : `${pct}% of the ${kk} neighbours agree — the prediction's confidence.` },
+          { label: 'k', info: `${res.k}${k > n ? ` (capped at the ${n} points)` : ''}. Neighbours polled — small k = jagged boundary, large k = smoother.` },
+          { label: 'metric', info: metric === 'l2' ? 'Euclidean (L2) — circular neighbourhoods.' : metric === 'l1' ? 'Manhattan (L1) — |Δx| + |Δy|, diamond neighbourhoods.' : 'Chebyshev (L∞) — max(|Δx|, |Δy|), square neighbourhoods.' },
+          { label: 'votes', info: `${voteText}.${res.tie ? ' Tied — the class of the nearest tied neighbour wins.' : ''}` },
         ],
         implication: res.conf >= 0.7 ? 'Confident region — neighbours strongly agree.' : 'Near a class boundary — neighbours are split.',
       },
@@ -94,25 +85,28 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
 
   const sim = useSimLoop(step, { initialSpeed: 150 });
 
-  const regen = (n = perClass) => { setPoints(makeBlobs(CENTERS, SPREAD, n)); setVersion((v) => v + 1); setConf([]); setLastLog(null); narration.cancel(); };
+  const regen = (pc = perClass) => { const s = seed + 1; setSeed(s); setPoints(makePoints(s, pc)); setVersion((v) => v + 1); setConf([]); setLastLog(null); narration.cancel(); };
   const reset = () => { sim.stop(); setQuery({ x: 0.5, y: 0.5 }); setConf([]); setLastLog(null); narration.cancel(); };
-  const addPoint = (x: number, y: number) => { setPoints((p) => [...p, { x: clamp01(x), y: clamp01(y), cls: paintClass }]); setVersion((v) => v + 1); };
+  const addPoint = (x: number, y: number) => { setPoints((p) => [...p, { x: q4(clamp01(x)), y: q4(clamp01(y)), cls: paintClass }]); setVersion((v) => v + 1); };
   const applyPreset = (p: Preset<KnnCfg>) => { setK(p.values.k); setMetric(p.values.metric); setWeighted(p.values.weighted); setPresetId(p.id); setVersion((v) => v + 1); setConf([]); narration.cancel(); narration.narratePhase(`preset:${p.id}`, p.hint); };
 
-  // Richer visuals: ring radius scales with each neighbour's vote weight (closer = bigger when weighted).
-  const maxD = current.neighbors.reduce((m, n) => Math.max(m, n.d), 1e-6);
+  // Neighbour rings: radius and link opacity ∝ each neighbour's actual vote weight (1/d, or 1).
+  const wMax = current.neighbours.reduce((m, nb) => Math.max(m, nb.w), 1e-12);
   const markers: ScatterMarker[] = [
-    ...current.neighbors.map((n) => ({ x: n.x, y: n.y, cls: n.cls, ring: true, r: weighted ? 6 + 7 * (1 - n.d / maxD) : 9 })),
+    ...current.neighbours.map((nb) => ({ x: points[nb.i]!.x, y: points[nb.i]!.y, cls: nb.cls, ring: true, r: weighted ? 5 + 9 * (nb.w / wMax) : 9 })),
     { x: query.x, y: query.y, color: isLight ? 'var(--t0)' : '#fff', r: 6 },
   ];
-  const lines: ScatterLine[] = current.neighbors.map((n) => ({ x1: query.x, y1: query.y, x2: n.x, y2: n.y, color: weighted ? (isLight ? `rgba(18,23,42,${0.1 + 0.3 * (1 - n.d / maxD)})` : `rgba(238,241,250,${0.1 + 0.3 * (1 - n.d / maxD)})`) : (isLight ? 'rgba(18,23,42,.22)' : 'rgba(238,241,250,.22)'), width: 1 }));
+  const lines: ScatterLine[] = current.neighbours.map((nb) => {
+    const a = weighted ? 0.08 + 0.42 * (nb.w / wMax) : 0.22;
+    return { x1: query.x, y1: query.y, x2: points[nb.i]!.x, y2: points[nb.i]!.y, color: isLight ? `rgba(18,23,42,${a})` : `rgba(238,241,250,${a})`, width: 1 };
+  });
 
-  const insight = `k=${k}, ${METRIC_LABEL[metric]}${weighted ? ', distance-weighted' : ''}. ` +
-    (weighted ? 'Closer neighbours pull harder (1/d weighting), so a large k stays sharp near the query. '
-      : k <= 2 ? 'Very local — the boundary hugs individual points and is noise-sensitive. '
-        : k >= 14 ? 'Large k heavily smooths the boundary; tiny classes can be outvoted. '
+  const insight = `k=${kk}${k > n ? ` (capped at n=${n})` : ''}, ${METRIC_LABEL[metric]}${weighted ? ', distance-weighted (1/d)' : ''}. ` +
+    (weighted ? 'Closer neighbours pull harder, so a large k stays sharp near the query. '
+      : kk <= 2 ? 'Very local — the boundary hugs individual points and is noise-sensitive. '
+        : kk >= 14 ? 'Large k heavily smooths the boundary; a small class can be outvoted near its edge. '
           : 'A moderate k balances detail against noise. ') +
-    'Click the grid to add points and watch the regions shift.';
+    `Ties between classes go to the nearest tied neighbour. The shaded field is evaluated on a ${FIELD_RES}×${FIELD_RES} grid. Click the plot to add points.`;
 
   return (
     <LabStage
@@ -120,17 +114,18 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
       running={sim.isPlaying}
       narration={narration}
       stats={[
-        { label: 'k', value: k },
+        { label: 'k', value: kk },
         { label: 'METRIC', value: metric === 'cheb' ? 'L∞' : metric.toUpperCase() },
         { label: 'PRED', value: current.cls, color: CLASS_COLORS[current.cls] },
-        { label: 'N', value: points.length },
+        { label: 'N', value: n },
       ]}
-      onDownloadCode={() => downloadCode(descriptor.codeFile, knnPython(k, metric, perClass, weighted))}
+      onDownloadCode={() => downloadCode(descriptor.codeFile, knnPython({ points, k: kk, metric, weighted, query }))}
       grid={(
         <ScatterPlot
           points={points}
-          classify={classify}
+          classify={classifyAt}
           fieldKey={fieldKey}
+          fieldResolution={FIELD_RES}
           markers={markers}
           lines={lines}
           onAddPoint={addPoint}
@@ -142,14 +137,14 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         <>
           <MonoLabel style={{ marginBottom: 11 }}>Distance</MonoLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
-            <AlgoPill active={metric === 'l2'} onClick={() => { setMetric('l2'); setVersion((v) => v + 1); }}>L2 · Euclidean</AlgoPill>
-            <AlgoPill active={metric === 'l1'} onClick={() => { setMetric('l1'); setVersion((v) => v + 1); }}>L1 · Manhattan</AlgoPill>
-            <AlgoPill active={metric === 'cheb'} onClick={() => { setMetric('cheb'); setVersion((v) => v + 1); }}>L∞ · Chebyshev</AlgoPill>
+            <AlgoPill active={metric === 'l2'} onClick={() => { setMetric('l2'); setVersion((v) => v + 1); setPresetId(undefined); }}>L2 · Euclidean</AlgoPill>
+            <AlgoPill active={metric === 'l1'} onClick={() => { setMetric('l1'); setVersion((v) => v + 1); setPresetId(undefined); }}>L1 · Manhattan</AlgoPill>
+            <AlgoPill active={metric === 'cheb'} onClick={() => { setMetric('cheb'); setVersion((v) => v + 1); setPresetId(undefined); }}>L∞ · Chebyshev</AlgoPill>
           </div>
           <MonoLabel style={{ marginBottom: 11 }}>Vote</MonoLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 14 }}>
-            <AlgoPill active={!weighted} onClick={() => { setWeighted(false); setVersion((v) => v + 1); }}>Majority</AlgoPill>
-            <AlgoPill active={weighted} onClick={() => { setWeighted(true); setVersion((v) => v + 1); }}>Distance-weighted</AlgoPill>
+            <AlgoPill active={!weighted} onClick={() => { setWeighted(false); setVersion((v) => v + 1); setPresetId(undefined); }}>Majority</AlgoPill>
+            <AlgoPill active={weighted} onClick={() => { setWeighted(true); setVersion((v) => v + 1); setPresetId(undefined); }}>Distance-weighted</AlgoPill>
           </div>
           <MonoLabel style={{ marginBottom: 11 }}>Paint class · click grid</MonoLabel>
           <div style={{ display: 'flex', gap: 7 }}>
@@ -165,10 +160,11 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
           { color: CLASS_COLORS[0], label: 'Class 0' },
           { color: CLASS_COLORS[1], label: 'Class 1' },
           { color: CLASS_COLORS[2], label: 'Class 2' },
-          { node: <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />, label: 'Query' },
+          { node: <span style={{ width: 10, height: 10, borderRadius: '50%', background: isLight ? 'var(--t0)' : '#fff', display: 'inline-block' }} />, label: 'Query' },
+          { node: <span style={{ width: 11, height: 11, borderRadius: '50%', border: '1.5px solid var(--t1)', display: 'inline-block' }} />, label: weighted ? 'neighbour (size ∝ 1/d)' : 'neighbour' },
         ]} />
       )}
-      rewardLabel="VOTE CONFIDENCE"
+      rewardLabel="VOTE SHARE"
       rewardValue={current.conf.toFixed(2)}
       rewardSeries={conf}
       lastLog={lastLog}
@@ -177,13 +173,13 @@ const KnnLab: React.FC<LabKitProps> = ({ descriptor, tutor, apiPanel }) => {
         <ParamsWrap>
           <ParamsHead title="k-NN Parameters" hint="Tune k and the metric; click the grid to add points." />
           <PresetChips presets={PRESETS} activeId={presetId} onApply={applyPreset} />
-          <ParamSlider name="k · neighbours" value={String(k)} min={1} max={25} step={1} current={k} onChange={(v) => { setK(v); setPresetId(undefined); }} hint="votes polled per query" />
+          <ParamSlider name="k · neighbours" value={String(kk)} min={1} max={Math.min(25, n)} step={1} current={kk} onChange={(v) => { setK(v); setPresetId(undefined); }} hint={`votes polled per query (≤ ${Math.min(25, n)} points)`} />
           <ParamSlider name="Points per class" value={String(perClass)} min={5} max={30} step={1} current={perClass} onChange={(v) => { setPerClass(v); regen(v); }} hint="regenerates the dataset" />
           <ParamSlider name="Speed" value={`${sim.speed}ms`} min={20} max={400} step={10} current={sim.speed} onChange={sim.setSpeed} hint="query-walk interval" />
         </ParamsWrap>
       )}
       tutor={tutor}
-      currentParams={{ algorithm: 'k-NN', k, metric, weighted, perClass, classes: 3 }}
+      currentParams={{ algorithm: 'k-NN', k: kk, metric, weighted, points: n, classes: 3, tieRule: 'nearest tied neighbour' }}
       apiPanel={apiPanel}
     />
   );
